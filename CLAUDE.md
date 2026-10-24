@@ -14,11 +14,10 @@
 - Deploy target: Vercel
 
 ## Commands
-<!-- Fill in once stack is chosen -->
-- `[dev command]` to start dev server
-- `[build command]` to build
-- `[test command]` to run tests
-- `[lint command]` to lint
+- `npm run dev` to start dev server (http://localhost:3000; use `127.0.0.1:3000` for any ElevenLabs allowlist)
+- `npm run build` to build
+- `npm run lint` to lint
+- No test runner yet — use small `npx tsx scripts/<name>.ts` scripts for sim/ingest checks
 - Put the same commands in `.claude/auto-check.json` (`static`, `dynamic`, `tester.testCommand`).
 
 ## Automatic checks (auto-check plugin)
@@ -34,10 +33,6 @@ The first failure is handed back to you once; after that it is only reported. Gi
 - Bug fixes: reproduce the bug with a test first (see `/fix`).
 - The tester's rules (what to test, what to skip, no fake tests) live in `plugins/auto-check/prompts/tester.md`.
 - Before calling a demo feature done, make one real ElevenLabs call by hand and listen to it. No automated check can hear audio.
-- `npm run dev` to start dev server (http://localhost:3000; use `127.0.0.1:3000` for any ElevenLabs allowlist)
-- `npm run build` to build
-- `npm run lint` to lint
-- No test runner yet — use small `npx tsx scripts/<name>.ts` scripts for sim/ingest checks
 
 ## Architecture
 - Entry point: `app/page.tsx` (decision input) → `app/court/page.tsx` (courtroom) 

@@ -1,7 +1,7 @@
 {
-  "static": [],
+  "static": [["lint", "npm run lint"], ["build", "npm run build"]],
   "dynamic": [],
-  "setup": [],
+  "setup": ["npm ci"],
   "testGlobs": ["tests/**", "test/**", "**/__tests__/**", "**/*.test.*", "**/*.spec.*", "**/test_*.py", "**/*_test.py"],
   "tester": {
     "enabled": true,
