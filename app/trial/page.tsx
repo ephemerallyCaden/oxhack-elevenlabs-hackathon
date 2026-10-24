@@ -12,6 +12,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import type { Line, Scene, Speaker, SttResponse } from '@/types';
 import { TrialOrchestrator } from '@/lib/debate/orchestrator';
+import { sessionVoiceId } from '@/components/onboarding/VoiceStep';
+import { sessionProfile, takeSessionQuestion } from '@/lib/onboarding/session';
 import { useTrialState } from '@/lib/debate/useTrial';
 import { footnotes } from '@/lib/debate/transcript';
 import * as engine from '@/lib/audio/engine';
@@ -77,7 +79,8 @@ function useRecorder() {
 
 // -- Main trial page --
 export default function TrialPage() {
-  const orch = useMemo(() => new TrialOrchestrator(), []);
+  // Onboarding (/) leaves the user's cloned voice + profile in sessionStorage; none → presenter voice.
+  const orch = useMemo(() => new TrialOrchestrator({ voiceId: sessionVoiceId(), profile: sessionProfile() }), []);
   const s = useTrialState(orch);
   const recorder = useRecorder();
   const [holding, setHolding] = useState(false);
@@ -96,6 +99,20 @@ export default function TrialPage() {
     await engine.unlock();
     setAudioUnlocked(true);
   }, [audioUnlocked]);
+
+  // -- 0. Arrived from onboarding: start straight away with the confirmed question --
+  // (the "Take it to court" click on / counts as the user gesture for audio)
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStarted.current) return;
+    autoStarted.current = true;
+    const q = takeSessionQuestion();
+    if (!q) return;
+    void engine.unlock().then(() => {
+      setAudioUnlocked(true);
+      orch.start(q);
+    });
+  }, [orch]);
 
   // -- 1. Scene-based BGM: change music when scene changes --
   useEffect(() => {
