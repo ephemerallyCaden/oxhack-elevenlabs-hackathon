@@ -1,425 +1,392 @@
-// D4: the courtroom state machine. Runs in the browser; talks to our API routes and drives C4's player.
+// The trial state machine (browser side). Design: docs/design-core-loop.md
 //
-//   input → parsing → simulating → scripting → voicing → debate (round 1, window, 2, window, 3) → verdict → done
+//   ask → preparing (cut-scene: agenda + quick research) → opening
+//     → OUTER LOOP per topic: intro → INNER LOOP (≤ 3 cycles of YES → NO) → Judge scores → spectrum
+//     → verdict → done (transcript)
 //
-// Every phase has a cached fallback, so the flow always reaches the verdict.
-// Usage (C wires this up):
-//   const orch = useMemo(() => new DebateOrchestrator(player, { demo }), []);
-//   useDebatePlayer({ onEventStart: orch.onEventStart, onQueueEnd: orch.onQueueEnd });
-//   const state = useOrchestratorState(orch);
+// The UI renders `state.scene` + `state.current`, plays the line (audioUrl, or durationMs as a timer)
+// and calls `lineEnded(id)` when it finishes. Interrupts: `beginInterrupt()` on hold, `endInterrupt(audio|text)` on release.
 import type {
-  DebateEvent,
-  DebatePhase,
-  DebatePlayerCallbacks,
-  DebatePlayerControls,
-  IngestResponse,
-  InterruptResponse,
-  ParsedDecision,
-  ParseResponse,
-  ScriptResponse,
-  SimInput,
-  SimulateResponse,
+  AgendaResponse,
+  ArgueRequest,
+  ArgueResponse,
+  EvidenceCard,
+  JudgeInterruptResponse,
+  LedgerEntry,
+  Line,
+  ResearchResponse,
+  Scene,
+  ScoreArgumentResponse,
+  ScoreTopicResponse,
+  Side,
+  Speaker,
+  Spectrum,
   SttResponse,
+  Topic,
+  Transcript,
+  TtsResponse,
+  Verdict,
   VerdictResponse,
-  VoiceDebateResponse,
 } from '@/types';
-import demoSim from './fixtures/demo-sim.json';
-import mockEvents from './mock-events.json';
-import mockElaborations from './mock-elaborations.json';
-import { type DemoRun, loadDemoRun } from './demoRun';
-import { FALLBACK_CHALLENGE, FALLBACK_INTERRUPT_REPLY, FIXED_LINES, postJson, withFallback } from './fallback';
+import { SPEAKER_SCENE } from '@/types';
+import { estimateMs, postJson, uid, withFallback } from './fallback';
+import { mockAgenda, mockArgue, mockCards, mockJudgeInterrupt, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
+import { addTopic, computeSpectrum, removeTopic } from './spectrum';
+import { buildTranscript } from './transcript';
 
-export const INTERRUPT_TOKENS = 3;
-export const INTERRUPT_WINDOW_MS = 10000;
+export const MAX_CYCLES = 3;
 
-export interface OrchestratorState {
-  phase: DebatePhase;
-  /** 1-3 during the debate, 4 = verdict. */
-  round: number;
-  tokens: number;
-  transcript?: string;
-  decision?: ParsedDecision;
-  /** For the loading screen (C5) and verdict charts (C7). */
-  sim?: SimulateResponse;
-  current?: DebateEvent;
-  /** Epoch ms when the post-round interrupt window closes (for a countdown). */
-  windowEndsAt?: number;
-  /** What the user said in their last INTERRUPT. */
-  lastChallenge?: string;
-  /** Can HOLD IT be pressed right now? */
-  canHoldIt: boolean;
-  /** Stages that used cached data instead of a live call (show in a dev overlay, not to judges). */
+export type TrialPhase = 'ask' | 'preparing' | 'speaking' | 'listening' | 'thinking' | 'done';
+
+export interface TrialState {
+  phase: TrialPhase;
+  scene: Scene;
+  question: string;
+  agenda: Topic[];
+  activeTopicId?: string;
+  /** Inner-loop cycle of the active topic (1-3). */
+  cycle: number;
+  /** The line on screen right now. */
+  current?: Line;
+  /** Who the user is interrupting (while phase = listening). */
+  interruptTarget?: Speaker;
+  /** Can INTERRUPT be pressed right now? */
+  canInterrupt: boolean;
+  /** Short status for loading moments ("The court deliberates…"). */
+  status?: string;
+  spectrum: Spectrum;
+  verdict?: Verdict;
+  transcript: Line[];
+  cards: EvidenceCard[];
+  ledger: LedgerEntry[];
+  /** Built when the trial ends. */
+  result?: Transcript;
+  /** Which calls used mock data (dev overlay only). */
   fallbacks: string[];
 }
 
-const FIXTURE_SIM = { result: demoSim.result, findings: demoSim.findings, sensitivity: demoSim.sensitivity, fallback: true } as SimulateResponse;
-const MOCK_SCRIPT = {
-  events: mockEvents as DebateEvent[],
-  elaborations: { ...(mockElaborations as Record<string, DebateEvent[]>), ...FIXED_LINES },
-};
+type SayResult = 'done' | 'interrupted';
 
-const splash = (interrupt_type: DebateEvent['interrupt_type'], interrupt_flavor: string): DebateEvent => ({
-  id: `u-${interrupt_type}-${Date.now().toString(36)}`,
-  timestamp: 0,
-  type: 'interrupt',
-  speaker: 'user',
-  interrupt_type,
-  interrupt_flavor,
-  effect: 'flash_white',
-  // flash + 1s of silence before the next line (research/09 §8)
-  durationMs: 1300,
-});
-
-/** Fill the sim's inputs from what the user said; everything else from the demo defaults (A2 refines). */
-function buildSimInput(d: ParsedDecision): SimInput {
-  const base = demoSim.result.input as SimInput;
-  return {
-    ...base,
-    options: d.options,
-    time_horizon_years: d.time_horizon_years,
-    risk_tolerance: d.risk_tolerance,
-    happiness_params: d.happiness_params,
-    current_salary: d.stated?.current_salary ?? base.current_salary,
-    starting_savings: d.stated?.starting_savings ?? base.starting_savings,
-  };
-}
-
-/** Which part of the debate an event belongs to: 1-3 = rounds, 4 = verdict. */
-/** Unrounded events take the round before them (intro → 1); after round 3 they are the verdict. */
-function chunkIndex(events: DebateEvent[]): number[] {
-  let current = 1;
-  return events.map((e) => {
-    if (e.round) return (current = e.round);
-    return current === 3 ? 4 : current;
-  });
-}
-
-export class DebateOrchestrator implements DebatePlayerCallbacks {
-  private state: OrchestratorState = { phase: 'input', round: 1, tokens: INTERRUPT_TOKENS, canHoldIt: false, fallbacks: [] };
+export class TrialOrchestrator {
+  private state: TrialState = this.initial();
   private listeners = new Set<() => void>();
 
-  private events: DebateEvent[] = [];
-  private chunks: number[] = [];
-  private elaborations: Record<string, DebateEvent[]> = {};
-  private usedElaborations = new Set<string>();
-  /** Voiced copies of fixed/fallback lines by id, so text-only events from the server get audio. */
-  private voicedById = new Map<string, DebateEvent>();
-  /** Index in `events` of the next main event to play. */
-  private resumeAt = 0;
-  private playingChunk = 1;
-  private windowTimer?: ReturnType<typeof setTimeout>;
-  private userChallenges: string[] = [];
-  private pendingVerdict?: Promise<DebateEvent[] | null>;
-  private demoRun: Promise<DemoRun | null>;
+  private intros: Record<string, Line> = {};
+  private quickResearch = new Map<string, Promise<void>>();
+  private ledgerPending: Promise<void>[] = [];
+  /** Resolves the line currently being said. */
+  private sayResolve?: (r: SayResult) => void;
+  private inputResolve?: (input: Blob | string | null) => void;
+  private inputPromise?: Promise<Blob | string | null>;
+  /** Bumped on every interrupt so stale prefetched lines are thrown away. */
+  private epoch = 0;
 
-  constructor(
-    private player: DebatePlayerControls,
-    private opts: { demo?: boolean; voiceId?: string } = {},
-  ) {
-    // Load the cached run up front: demo mode plays it; live mode uses its audio when a stage falls back.
-    this.demoRun = typeof window === 'undefined' ? Promise.resolve(null) : loadDemoRun();
-  }
+  constructor(private opts: { voiceId?: string } = {}) {}
 
-  // ── store (for useSyncExternalStore) ──────────────────────────────────────
+  // ── store ─────────────────────────────────────────────────────────────────
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   };
   getState = () => this.state;
-  private set(patch: Partial<OrchestratorState>) {
+  private set(patch: Partial<TrialState>) {
     this.state = { ...this.state, ...patch };
     this.listeners.forEach((fn) => fn());
   }
-  private fellBack(stage: string) {
-    this.set({ fallbacks: [...this.state.fallbacks, stage] });
+  private initial(): TrialState {
+    return { phase: 'ask', scene: 'witness', question: '', agenda: [], cycle: 0, canInterrupt: false, spectrum: { value: 0, label: 'Toss-up' }, transcript: [], cards: [], ledger: [], fallbacks: [] };
+  }
+  private topic(id?: string) {
+    return this.state.agenda.find((t) => t.id === id);
+  }
+  private patchTopic(id: string, patch: Partial<Topic>) {
+    this.set({ agenda: this.state.agenda.map((t) => (t.id === id ? { ...t, ...patch } : t)) });
   }
 
-  // ── pre-debate pipeline ───────────────────────────────────────────────────
-  /** Run the whole pipeline on what the user said (from B6's hold-to-talk). */
-  async start(transcript: string) {
-    if (this.opts.demo) return this.startDemo(transcript);
-    const demo = await this.demoRun;
+  /** POST with timeout + mock fallback; records which calls fell back. */
+  private async call<T extends { fallback?: boolean }>(url: string, body: unknown, fallback: () => T, ms: number): Promise<T> {
+    const r = await withFallback((signal) => postJson<T>(url, body, signal), fallback, ms, url);
+    if (r.fallback || r.value.fallback) this.set({ fallbacks: [...this.state.fallbacks, url.replace('/api/', '')] });
+    return r.value;
+  }
 
-    this.set({ phase: 'parsing', transcript });
-    const parsed = await withFallback(
-      (signal) => postJson<ParseResponse>('/api/debate/parse', { transcript }, signal),
-      { decision: demo?.decision ?? (demoSim.decision as ParsedDecision), fallback: true },
-      6000,
-      'parse',
-    );
-    if (parsed.fallback || parsed.value.fallback) this.fellBack('parse');
-    const decision = parsed.value.decision;
-    this.set({ phase: 'simulating', decision });
-
-    const ingest = await withFallback(
-      (signal) => postJson<IngestResponse>('/api/ingest', { decision }, signal),
-      { dataPoints: [], fallback: true },
-      10000,
-      'ingest',
-    );
-    if (ingest.fallback || ingest.value.fallback) this.fellBack('ingest');
-    const sim = await withFallback(
-      (signal) => postJson<SimulateResponse>('/api/simulate', { input: buildSimInput(decision), dataPoints: ingest.value.dataPoints }, signal),
-      demo?.sim ?? FIXTURE_SIM,
-      5000,
-      'simulate',
-    );
-    if (sim.fallback || sim.value.fallback) this.fellBack('simulate');
-    this.set({ phase: 'scripting', sim: sim.value });
-
-    const script = await withFallback(
-      (signal) =>
-        postJson<ScriptResponse>(
-          '/api/debate/script',
-          { decision, result: sim.value.result, findings: sim.value.findings, sensitivity: sim.value.sensitivity },
-          signal,
-        ),
-      { ...(demo ?? MOCK_SCRIPT), fallback: true },
-      30000,
-      'script',
-    );
-    if (script.fallback || script.value.fallback) this.fellBack('script');
-
-    // If the script is the cached one and we have its cached audio, skip voicing entirely.
-    let voiced: Pick<VoiceDebateResponse, 'events' | 'elaborations'>;
-    if ((script.fallback || script.value.fallback) && demo) {
-      voiced = demo;
-    } else {
-      this.set({ phase: 'voicing' });
-      const v = await withFallback(
-        (signal) =>
-          postJson<VoiceDebateResponse>(
-            '/api/voice/debate',
-            { events: script.value.events, elaborations: script.value.elaborations, voiceId: this.opts.voiceId },
-            signal,
-          ),
-        { events: script.value.events, elaborations: script.value.elaborations, fallback: true },
-        25000,
-        'voice',
-      );
-      if (v.fallback || v.value.fallback) this.fellBack('voice');
-      voiced = v.value;
+  // ── UI → orchestrator ─────────────────────────────────────────────────────
+  /** The user asked their question (already transcribed). Runs the whole trial. */
+  async start(question: string) {
+    this.state = { ...this.initial(), question };
+    this.set({ phase: 'preparing', scene: 'cutscene', status: 'The court is preparing the case…' });
+    try {
+      await this.run();
+    } catch (err) {
+      console.error('[trial] crashed', err);
+      this.set({ phase: 'done', status: 'The court is adjourned (something broke).' });
     }
-    if (demo) this.rememberVoiced([...demo.events, ...Object.values(demo.elaborations).flat(), ...demo.interrupt.response.events]);
-    this.beginDebate(voiced.events, voiced.elaborations);
   }
 
-  /** ?demo=1 — play the cached run with believable loading times. Works offline. */
-  private async startDemo(transcript?: string) {
-    const demo = await this.demoRun;
-    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    this.set({ phase: 'parsing', transcript: transcript ?? demo?.transcript });
-    await wait(900);
-    this.set({ phase: 'simulating', decision: demo?.decision ?? (demoSim.decision as ParsedDecision) });
-    await wait(2500);
-    this.set({ phase: 'scripting', sim: demo?.sim ?? FIXTURE_SIM });
-    await wait(2000);
-    this.set({ phase: 'voicing' });
-    await wait(1200);
-    if (!demo) this.fellBack('demo-run.json missing — using mock (no audio)');
-    const run = demo ?? MOCK_SCRIPT;
-    this.rememberVoiced([...run.events, ...Object.values(run.elaborations).flat(), ...(demo?.interrupt.response.events ?? [])]);
-    this.beginDebate(run.events, run.elaborations);
-  }
-
-  private rememberVoiced(events: DebateEvent[]) {
-    for (const e of events) if (e.audioUrl) this.voicedById.set(e.id, e);
-  }
-  private voiced = (e: DebateEvent) => this.voicedById.get(e.id) ?? e;
-
-  private beginDebate(events: DebateEvent[], elaborations: Record<string, DebateEvent[]>) {
-    this.events = events;
-    this.chunks = chunkIndex(events);
-    this.elaborations = elaborations;
-    this.rememberVoiced(Object.values(elaborations).flat());
-    this.set({ phase: 'debate', round: 1, tokens: INTERRUPT_TOKENS });
-    this.playFrom(0);
-  }
-
-  // ── playback ──────────────────────────────────────────────────────────────
-  /** Play main events from index i to the end of i's chunk, after `prefix`. */
-  private playFrom(i: number, prefix: DebateEvent[] = []) {
-    const chunk = this.chunks[i] ?? 4;
-    let end = i;
-    while (end < this.events.length && this.chunks[end] === chunk) end++;
-    this.playingChunk = chunk;
-    this.resumeAt = i;
-    this.player.load([...prefix, ...this.events.slice(i, end)].map(this.voiced));
-    this.set({ round: chunk });
-  }
-
-  onEventStart = (event: DebateEvent) => {
-    const i = this.events.findIndex((e) => e.id === event.id);
-    if (i >= 0) this.resumeAt = i + 1;
-    const holdable =
-      this.state.phase === 'debate' &&
-      (event.type === 'speech' || event.type === 'interrupt') &&
-      (event.speaker === 'prosecution' || event.speaker === 'defense') &&
-      !!this.elaborations[`${event.speaker}-${event.round}`] &&
-      !this.usedElaborations.has(`${event.speaker}-${event.round}`);
-    this.set({ current: event, canHoldIt: holdable });
+  /** The current line finished playing. */
+  lineEnded = (id: string) => {
+    if (this.state.current?.id === id) this.sayResolve?.('done');
   };
 
-  onQueueEnd = () => {
-    const { phase } = this.state;
-    if (phase === 'user_speaking' || phase === 'responding') return; // filler finished while we wait — hold
-    if (phase === 'verdict') return this.set({ phase: 'done', canHoldIt: false });
-    if (phase !== 'debate') return;
-    if (this.playingChunk < 3) return this.openWindow();
-    return this.playVerdict();
-  };
-
-  private openWindow() {
-    const next = this.resumeAt;
-    this.set({ phase: 'interrupt_window', windowEndsAt: Date.now() + INTERRUPT_WINDOW_MS, canHoldIt: false });
-    this.windowTimer = setTimeout(() => this.continueNow(next), INTERRUPT_WINDOW_MS);
-  }
-
-  /** Close the interrupt window early (e.g. a "Continue" button). */
-  continueNow(next = this.resumeAt) {
-    clearTimeout(this.windowTimer);
-    if (this.state.phase !== 'interrupt_window') return;
-    this.set({ phase: 'debate', windowEndsAt: undefined });
-    this.playFrom(next);
-  }
-
-  private async playVerdict() {
-    this.set({ phase: 'verdict', canHoldIt: false });
-    const reRuled = this.pendingVerdict ? await this.pendingVerdict : null;
-    if (reRuled?.length) {
-      this.playingChunk = 4;
-      this.player.load(reRuled.map(this.voiced));
-      return;
-    }
-    const first = this.chunks.indexOf(4);
-    if (first < 0) return this.set({ phase: 'done' });
-    this.playFrom(first);
-    this.set({ phase: 'verdict' });
-  }
-
-  // ── user controls ─────────────────────────────────────────────────────────
-  /** MOVE ON: skip the current speaker. */
-  moveOn() {
-    if (this.state.phase !== 'debate') return;
-    this.playFrom(this.resumeAt, [splash('skip', 'MOVE ON!')]);
-  }
-
-  /** HOLD IT: current speaker elaborates on their last point (pre-generated, instant). */
-  holdIt() {
+  /** INTERRUPT pressed: stop the line, zoom out to the witness. Returns who is being interrupted, or null. */
+  beginInterrupt(): Speaker | null {
     const cur = this.state.current;
-    if (!this.state.canHoldIt || !cur) return;
-    const key = `${cur.speaker}-${cur.round}`;
-    this.usedElaborations.add(key);
-    this.playFrom(this.resumeAt, [splash('elaborate', 'HOLD IT!'), ...this.elaborations[key]]);
+    if (!this.state.canInterrupt || !cur || cur.speaker === 'user') return null;
+    this.epoch++;
+    this.inputPromise = new Promise((r) => (this.inputResolve = r));
+    this.set({ phase: 'listening', scene: 'witness', interruptTarget: cur.speaker, canInterrupt: false });
+    this.sayResolve?.('interrupted');
+    return cur.speaker;
   }
 
-  /** INTERRUPT pressed (hold-to-talk starts): flash OBJECTION, stop the debate. Returns false if not allowed. */
-  beginInterrupt(): boolean {
-    const { phase, tokens } = this.state;
-    if (tokens <= 0 || (phase !== 'debate' && phase !== 'interrupt_window')) return false;
-    clearTimeout(this.windowTimer);
-    this.set({ phase: 'user_speaking', windowEndsAt: undefined, canHoldIt: false });
-    this.player.load([splash('user_challenge', Math.random() < 0.7 ? 'OBJECTION!' : 'WAIT!')]);
-    return true;
+  /** INTERRUPT released: the recording (→ Scribe) or text. null = cancelled. */
+  endInterrupt(input: Blob | string | null) {
+    this.inputResolve?.(input);
   }
 
-  /** INTERRUPT released: `input` is the recording (→ Scribe) or an already-made transcript. */
-  async interrupt(input: Blob | string) {
-    if (this.state.phase !== 'user_speaking') return;
-    this.set({ phase: 'responding', tokens: this.state.tokens - 1 });
-    // Mask latency: "The court considers…" (pre-voiced) while STT + Claude + TTS run.
-    this.player.load(FIXED_LINES['judge-considers'].map(this.voiced));
+  // ── speaking ──────────────────────────────────────────────────────────────
+  /** Attach audio (B's TTS) to a line. Text-only with an estimated duration if voice isn't available. */
+  private async prepare(line: Line): Promise<Line> {
+    if (line.durationMs != null) return line;
+    if (line.speaker === 'user') return { ...line, durationMs: 0 };
+    const r = await withFallback<TtsResponse | null>(
+      (signal) => postJson<TtsResponse>('/api/voice/tts', { text: line.tts ?? line.text, speaker: line.speaker, voiceId: this.opts.voiceId }, signal),
+      null,
+      7000,
+      'tts',
+    );
+    return r.value && !r.value.fallback ? { ...line, audioUrl: r.value.audioUrl, durationMs: r.value.durationMs } : { ...line, durationMs: estimateMs(line.text) };
+  }
 
-    const demo = this.opts.demo ? await this.demoRun : null;
-    let transcript: string;
-    let response: InterruptResponse;
-    if (this.opts.demo) {
-      transcript = demo?.interrupt.challenge ?? FALLBACK_CHALLENGE;
-      response = demo?.interrupt.response ?? { relevant: true, responder: 'prosecution', events: [FALLBACK_INTERRUPT_REPLY], fallback: true };
-      await new Promise((r) => setTimeout(r, 1500));
-    } else {
-      transcript = typeof input === 'string' ? input : await this.transcribe(input);
-      const recentLines = this.events.slice(0, this.resumeAt).filter((e) => e.type === 'speech' || e.type === 'interrupt').slice(-3);
-      const r = await withFallback<InterruptResponse>(
-        (signal) =>
-          postJson<InterruptResponse>(
-            '/api/debate/interrupt',
-            {
-              transcript,
-              context: { decision: this.state.decision ?? demoSim.decision, recentLines, findings: this.state.sim?.findings ?? demoSim.findings, round: this.playingChunk },
-            },
-            signal,
-          ),
-        { relevant: true, responder: 'prosecution', events: [FALLBACK_INTERRUPT_REPLY], fallback: true },
-        6000,
-        'interrupt',
-      );
-      if (r.fallback || r.value.fallback) this.fellBack('interrupt');
-      response = r.value;
-    }
+  private async say(line: Line): Promise<SayResult> {
+    const ready = await this.prepare(line);
+    const done = new Promise<SayResult>((r) => (this.sayResolve = r));
+    this.set({
+      phase: 'speaking',
+      scene: SPEAKER_SCENE[ready.speaker],
+      current: ready,
+      status: undefined,
+      transcript: [...this.state.transcript, ready],
+      canInterrupt: ready.kind !== 'verdict',
+    });
+    const result = await done;
+    this.sayResolve = undefined;
+    return result;
+  }
 
-    this.set({ lastChallenge: transcript });
-    if (!response.relevant) {
-      // Penalty: the Judge scolds and the wasted objection costs an extra token.
-      this.set({ tokens: Math.max(0, this.state.tokens - 1) });
-    } else {
-      this.userChallenges.push(transcript);
-      this.pendingVerdict = this.reRule(demo);
-    }
-    this.set({ phase: 'debate' });
-    // Resume where we were: rest of the current round, or the next round if we were in the window.
-    if (this.resumeAt >= this.events.length || this.chunks[this.resumeAt] === 4) {
-      this.player.load(response.events.map(this.voiced));
-      this.playingChunk = 3; // reply ends → onQueueEnd → verdict
-    } else {
-      this.playFrom(this.resumeAt, response.events);
+  /** Say a line; if the user interrupts it, deal with the interrupt before returning. */
+  private async sayHandled(line: Line): Promise<void> {
+    if ((await this.say(line)) === 'interrupted') await this.handleInterrupt();
+  }
+
+  private thinking(status: string, scene: Scene = 'judge') {
+    this.set({ phase: 'thinking', scene, status, canInterrupt: false });
+  }
+
+  // ── research (A's agents) ─────────────────────────────────────────────────
+  private research(topics: Topic[]) {
+    const add = (r: ResearchResponse) => this.set({ cards: [...this.state.cards, ...r.cards] });
+    for (const topic of topics) {
+      const q = (side: Side) =>
+        this.call<ResearchResponse>(
+          '/api/research',
+          { question: this.state.question, topic: { id: topic.id, title: topic.title, question: topic.question }, side, tier: 'quick' },
+          () => ({ cards: mockCards({ question: this.state.question, topic, side, tier: 'quick' }), fallback: true }),
+          6000,
+        ).then(add);
+      this.quickResearch.set(topic.id, Promise.all([q('yes'), q('no')]).then(() => undefined));
+      // Deep search lands later and is used by later cycles/topics. No mock: quick cards already cover it.
+      for (const side of ['yes', 'no'] as const) {
+        withFallback(
+          (signal) => postJson<ResearchResponse>('/api/research', { question: this.state.question, topic, side, tier: 'deep' }, signal),
+          { cards: [], fallback: true },
+          50000,
+          'deep research',
+        ).then((r) => {
+          if (!r.fallback) add(r.value);
+        });
+      }
     }
   }
 
-  private async transcribe(audio: Blob): Promise<string> {
+  // ── the trial ─────────────────────────────────────────────────────────────
+  private async run() {
+    const { question } = this.state;
+    const agenda = await this.call<AgendaResponse>('/api/trial/agenda', { question }, () => mockAgenda(question), 10000);
+    this.intros = agenda.intros;
+    this.set({ agenda: agenda.topics });
+    this.research(agenda.topics);
+    // Hold the cut-scene until the first topic has its quick evidence.
+    await this.quickResearch.get(agenda.topics[0].id);
+
+    await this.sayHandled(agenda.opening);
+
+    let topic: Topic | undefined;
+    while ((topic = this.state.agenda.find((t) => t.status === 'pending'))) {
+      this.patchTopic(topic.id, { status: 'active' });
+      this.set({ activeTopicId: topic.id, cycle: 1 });
+      await this.quickResearch.get(topic.id);
+      const intro = this.intros[topic.id] ?? { id: uid('line'), speaker: 'judge', kind: 'intro', text: `Next: ${topic.title.toLowerCase()}. ${topic.question} Prosecution?`, cites: [], topic_id: topic.id };
+      await this.sayHandled(intro);
+      if (this.topic(topic.id)?.status !== 'active') continue; // removed by the user during the intro
+      await this.debate(topic.id);
+      if (this.topic(topic.id)?.status !== 'active') continue;
+      await this.score(topic.id);
+    }
+
+    this.thinking('The court retires to consider its verdict…');
+    const userLines = this.state.transcript.filter((l) => l.speaker === 'user');
+    const v = await this.call<VerdictResponse>(
+      '/api/trial/verdict',
+      { question, agenda: this.state.agenda, userLines },
+      () => mockVerdict({ question, agenda: this.state.agenda, userLines }),
+      10000,
+    );
+    this.set({ verdict: v.verdict, spectrum: v.verdict.spectrum });
+    await this.say(v.verdict.line);
+    this.set({
+      phase: 'done',
+      canInterrupt: false,
+      current: undefined,
+      result: buildTranscript(question, this.state.transcript, this.state.cards, v.verdict),
+    });
+  }
+
+  private topicLines(topicId: string) {
+    return this.state.transcript.filter((l) => l.topic_id === topicId && l.kind !== 'intro');
+  }
+
+  private argueReq(topicId: string, side: Side, cycle: number, extra: Line[] = [], userPoint?: string): ArgueRequest {
+    return {
+      question: this.state.question,
+      topic: this.topic(topicId)!,
+      side,
+      cycle,
+      history: [...this.topicLines(topicId), ...extra],
+      cards: this.state.cards.filter((c) => c.topic_id === topicId),
+      userPoint,
+    };
+  }
+
+  private argue(req: ArgueRequest) {
+    return this.call<ArgueResponse>('/api/trial/argue', req, () => mockArgue(req), 9000);
+  }
+
+  /** INNER LOOP: YES → NO, up to MAX_CYCLES. The next line is generated (and voiced) while the current one plays. */
+  private async debate(topicId: string) {
+    const turns: { side: Side; cycle: number }[] = [];
+    for (let c = 1; c <= MAX_CYCLES; c++) turns.push({ side: 'yes', cycle: c }, { side: 'no', cycle: c });
+
+    let prefetch: { epoch: number; p: Promise<ArgueResponse> } | null = null;
+    const exhausted = new Set<Side>();
+    for (let i = 0; i < turns.length; i++) {
+      if (this.topic(topicId)?.status !== 'active') return;
+      const { side, cycle } = turns[i];
+      this.set({ cycle });
+      if (!prefetch) this.thinking(side === 'yes' ? 'The prosecution prepares…' : 'The defense prepares…', side);
+      const res = prefetch && prefetch.epoch === this.epoch ? await prefetch.p : await this.argue(this.argueReq(topicId, side, cycle));
+      prefetch = null;
+      if (res.exhausted) exhausted.add(side);
+
+      const next = turns[i + 1];
+      if (next && exhausted.size < 2) {
+        const epoch = this.epoch;
+        const req = this.argueReq(topicId, next.side, next.cycle, [res.line]);
+        prefetch = { epoch, p: this.argue(req).then(async (r) => ({ ...r, line: await this.prepare(r.line) })) };
+      }
+      this.scoreInBackground(topicId, res.line);
+      await this.sayHandled(res.line);
+      // Both sides out of new points after a full cycle → the Judge closes the topic early.
+      if (side === 'no' && exhausted.size === 2) return;
+    }
+  }
+
+  private scoreInBackground(topicId: string, line: Line) {
+    const topic = this.topic(topicId);
+    if (!topic) return;
+    const req = { question: this.state.question, topic, line, cards: this.state.cards.filter((c) => c.topic_id === topicId) };
+    this.ledgerPending.push(
+      this.call<ScoreArgumentResponse>('/api/trial/score-argument', req, () => ({ entry: mockScoreArgument(req), fallback: true }), 8000).then((r) =>
+        this.set({ ledger: [...this.state.ledger, r.entry] }),
+      ),
+    );
+  }
+
+  /** Judge closes the topic, scores it, moves the spectrum. */
+  private async score(topicId: string) {
+    this.thinking('The court weighs the arguments…');
+    await Promise.all(this.ledgerPending);
+    this.ledgerPending = [];
+    const topic = this.topic(topicId)!;
+    const req = { question: this.state.question, topic, ledger: this.state.ledger.filter((e) => e.topic_id === topicId), history: this.topicLines(topicId) };
+    const r = await this.call<ScoreTopicResponse>('/api/trial/score-topic', req, () => mockScoreTopic(req), 9000);
+    this.patchTopic(topicId, { status: 'done', score: r.score });
+    this.set({ spectrum: computeSpectrum(this.state.agenda) });
+    await this.sayHandled(r.line);
+  }
+
+  // ── interrupts ────────────────────────────────────────────────────────────
+  private async transcribe(input: Blob | string): Promise<string> {
+    if (typeof input === 'string') return input.trim();
     const form = new FormData();
-    form.append('audio', audio, 'interrupt.webm');
+    form.append('audio', input, 'interrupt.webm');
     const r = await withFallback(
       async (signal) => {
         const res = await fetch('/api/voice/stt', { method: 'POST', body: form, signal });
         if (!res.ok) throw new Error(`stt ${res.status}`);
         return ((await res.json()) as SttResponse).transcript;
       },
-      FALLBACK_CHALLENGE,
-      5000,
+      '',
+      8000,
       'stt',
     );
-    if (r.fallback || !r.value.trim()) {
-      this.fellBack('stt');
-      return FALLBACK_CHALLENGE;
-    }
-    return r.value;
+    if (r.fallback) this.set({ fallbacks: [...this.state.fallbacks, 'voice/stt'] });
+    return r.value.trim();
   }
 
-  /** Re-rule the verdict so the Judge acknowledges the user's point. Runs during the rest of the debate. */
-  private async reRule(demo: DemoRun | null): Promise<DebateEvent[] | null> {
-    if (this.opts.demo) return demo?.verdictAfterInterrupt ?? null;
-    const sim = this.state.sim;
-    if (!sim || !this.state.decision) return null;
-    const v = await withFallback(
-      (signal) =>
-        postJson<VerdictResponse>(
-          '/api/debate/verdict',
-          { decision: this.state.decision, result: sim.result, findings: sim.findings, sensitivity: sim.sensitivity, userChallenges: this.userChallenges },
-          signal,
-        ),
-      null,
-      8000,
-      'verdict',
-    );
-    if (!v.value) return null;
-    const voiced = await withFallback(
-      (signal) => postJson<VoiceDebateResponse>('/api/voice/debate', { events: v.value!.events, elaborations: {}, voiceId: this.opts.voiceId }, signal),
-      null,
-      12000,
-      'verdict-voice',
-    );
-    // A re-ruled verdict without audio is worse than the voiced default one.
-    return voiced.value && !voiced.value.fallback ? voiced.value.events : null;
+  private async handleInterrupt() {
+    const target = this.state.interruptTarget!;
+    const input = await this.inputPromise;
+    this.inputPromise = undefined;
+    this.set({ interruptTarget: undefined });
+    if (input == null) return; // cancelled → carry on with the next line
+
+    this.thinking('The court considers your objection…', 'witness');
+    const text = await this.transcribe(input);
+    if (!text) {
+      await this.sayHandled({ id: uid('line'), speaker: 'judge', kind: 'agenda_change', text: "The court didn't catch that. Let us continue.", cites: [] });
+      return;
+    }
+    const topicId = this.state.activeTopicId;
+    const userLine: Line = { id: uid('line'), speaker: 'user', kind: 'user', text, cites: [], topic_id: target === 'judge' ? undefined : topicId };
+    this.set({ transcript: [...this.state.transcript, userLine] });
+
+    if (target === 'judge') return this.agendaChange(text);
+    if (!topicId) return;
+
+    // A side was interrupted: it must answer the user's point; then the other side may reply. Not a cycle.
+    const side: Side = target === 'prosecution' ? 'yes' : 'no';
+    const other: Side = side === 'yes' ? 'no' : 'yes';
+    this.scoreInBackground(topicId, userLine);
+    const answer = await this.argue(this.argueReq(topicId, side, this.state.cycle, [], text));
+    this.scoreInBackground(topicId, answer.line);
+    await this.sayHandled(answer.line);
+    if (this.topic(topicId)?.status !== 'active') return;
+    const reply = await this.argue(this.argueReq(topicId, other, this.state.cycle));
+    this.scoreInBackground(topicId, reply.line);
+    await this.sayHandled(reply.line);
+  }
+
+  /** User interrupted the Judge → add or remove a topic. */
+  private async agendaChange(text: string) {
+    const req = { question: this.state.question, agenda: this.state.agenda, text };
+    const r = await this.call<JudgeInterruptResponse>('/api/trial/judge-interrupt', req, () => mockJudgeInterrupt(req), 8000);
+    if (r.action === 'add' && r.topic) {
+      this.set({ agenda: addTopic(this.state.agenda, r.topic, r.topic.importance) });
+      this.research([r.topic]);
+    } else if (r.action === 'remove' && r.remove_id) {
+      this.set({ agenda: removeTopic(this.state.agenda, r.remove_id), spectrum: computeSpectrum(removeTopic(this.state.agenda, r.remove_id)) });
+    }
+    await this.sayHandled(r.line);
   }
 }
