@@ -46,3 +46,6 @@ scripts/out/
 voice-sample*
 *.m4a
 *.wav
+
+# Generated TTS cache (B5)
+.cache/
