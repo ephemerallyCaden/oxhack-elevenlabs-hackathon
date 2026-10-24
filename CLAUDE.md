@@ -17,7 +17,7 @@
 - `npm run dev` to start dev server (http://localhost:3000; use `127.0.0.1:3000` for any ElevenLabs allowlist)
 - `npm run build` to build
 - `npm run lint` to lint
-- No test runner yet — use small `npx tsx scripts/<name>.ts` scripts for sim/ingest checks
+- `npm test` to run tests once (Vitest + Testing Library, jsdom; `npx vitest` to watch). Tests live next to code as `*.test.ts(x)` or in `__tests__/`
 - Put the same commands in `.claude/auto-check.json` (`static`, `dynamic`, `tester.testCommand`).
 
 ## Automatic checks (auto-check plugin)

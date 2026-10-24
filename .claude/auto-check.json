@@ -1,11 +1,11 @@
 {
   "static": [["lint", "npm run lint"], ["build", "npm run build"]],
-  "dynamic": [],
+  "dynamic": [["tests", "npm test"]],
   "setup": ["npm ci"],
   "testGlobs": ["tests/**", "test/**", "**/__tests__/**", "**/*.test.*", "**/*.spec.*", "**/test_*.py", "**/*_test.py"],
   "tester": {
     "enabled": true,
-    "testCommand": "",
+    "testCommand": "npm test",
     "model": "sonnet",
     "maxBudgetUsd": 1,
     "timeoutSec": 300
