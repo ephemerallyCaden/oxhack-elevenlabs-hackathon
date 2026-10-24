@@ -1,25 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { UserProfile } from "@/types";
 import VoiceStep, { type VoiceStepResult } from "@/components/onboarding/VoiceStep";
 import HoldToTalk from "@/components/HoldToTalk";
+import SelfieStep from "@/components/onboarding/SelfieStep";
 import { getProfile } from "@/lib/debate/orchestrator";
 import { saveOnboarding } from "@/lib/onboarding/session";
 
-type Step = "welcome" | "voice" | "thinking" | "confirm";
+type Step = "welcome" | "voice" | "selfie" | "thinking" | "confirm";
 
-// Onboarding: read the script aloud (voice clone + transcript) → profile + question → the trial.
+// Onboarding: read the script aloud (voice clone + transcript) → selfie → profile + question → the trial.
 export default function Home() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("welcome");
   const [profile, setProfile] = useState<UserProfile>({});
   const [question, setQuestion] = useState("");
+  const profileCall = useRef<ReturnType<typeof getProfile> | null>(null);
 
-  async function onVoice(r: VoiceStepResult) {
+  function onVoice(r: VoiceStepResult) {
+    profileCall.current = getProfile({ transcript: r.transcript }); // runs while they take the selfie
+    setStep("selfie");
+  }
+
+  async function onSelfie() {
     setStep("thinking");
-    const res = await getProfile({ transcript: r.transcript });
+    const res = await (profileCall.current ?? getProfile({}));
     setProfile(res.profile);
     setQuestion(res.question ?? "");
     setStep("confirm");
@@ -58,6 +65,8 @@ export default function Home() {
       )}
 
       {step === "voice" && <VoiceStep onDone={onVoice} />}
+
+      {step === "selfie" && <SelfieStep onDone={onSelfie} />}
 
       {step === "thinking" && <p className="text-2xl text-zinc-300">The court is reading your file…</p>}
 

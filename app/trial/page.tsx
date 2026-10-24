@@ -9,10 +9,11 @@
 //   4. Crowd ambience via engine.setAmbience() during debate
 //   5. Voice playback via engine.playVoice() with stereo panning
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, useSyncExternalStore } from 'react';
 import type { Line, Scene, Speaker, SttResponse } from '@/types';
 import { TrialOrchestrator } from '@/lib/debate/orchestrator';
 import { sessionVoiceId } from '@/components/onboarding/VoiceStep';
+import { sessionSelfie } from '@/components/onboarding/SelfieStep';
 import { sessionProfile, takeSessionQuestion } from '@/lib/onboarding/session';
 import { useTrialState } from '@/lib/debate/useTrial';
 import { footnotes } from '@/lib/debate/transcript';
@@ -77,11 +78,15 @@ function useRecorder() {
   };
 }
 
+const noSubscribe = () => () => {};
+
 // -- Main trial page --
 export default function TrialPage() {
   // Onboarding (/) leaves the user's cloned voice + profile in sessionStorage; none → presenter voice.
   const orch = useMemo(() => new TrialOrchestrator({ voiceId: sessionVoiceId(), profile: sessionProfile() }), []);
   const s = useTrialState(orch);
+  // Selfie from onboarding (client-only, so the server render keeps the default face)
+  const faceSrc = useSyncExternalStore(noSubscribe, sessionSelfie, () => undefined);
   const recorder = useRecorder();
   const [holding, setHolding] = useState(false);
   const held = useRef(false);
@@ -357,6 +362,7 @@ export default function TrialPage() {
           objection={s.phase === 'listening'}
           status={s.phase === 'preparing' || s.phase === 'thinking' ? s.status : undefined}
           controls={controls}
+          faceSrc={faceSrc}
         />
       </div>
 
