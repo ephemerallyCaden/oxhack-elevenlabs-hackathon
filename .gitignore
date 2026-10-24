@@ -36,3 +36,6 @@ secrets/
 next-env.d.ts
 /coverage
 npm-debug.log*
+
+# Script output (test audio)
+scripts/out/
