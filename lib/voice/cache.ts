@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { accentFor } from "./accent";
 import { TTS_MODEL, voiceIdFor } from "./client";
 import { VOICE_SETTINGS, type VoiceRole } from "./configs";
 import { synthesize, type TtsResult } from "./tts";
@@ -11,7 +12,7 @@ const DIR = process.env.VERCEL ? "/tmp/roulette-tts" : join(process.cwd(), ".cac
 
 export async function synthesizeCached(text: string, role: VoiceRole, voiceId?: string): Promise<TtsResult & { cached: boolean }> {
   const key = createHash("sha256")
-    .update(JSON.stringify([TTS_MODEL, voiceIdFor(voiceId), VOICE_SETTINGS[role], text]))
+    .update(JSON.stringify([TTS_MODEL, voiceIdFor(voiceId), VOICE_SETTINGS[role], accentFor(voiceId), text]))
     .digest("hex")
     .slice(0, 32);
   const file = join(DIR, `${key}.json`);
