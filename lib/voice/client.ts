@@ -1,7 +1,7 @@
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 
 // Server-only. Never import this from a "use client" file — it reads the API key.
-export const TTS_MODEL = process.env.ELEVENLABS_MODEL ?? "eleven_v4_turbo";
+export const TTS_MODEL = process.env.ELEVENLABS_MODEL ?? "eleven_v4";
 export const STT_MODEL = process.env.ELEVENLABS_STT_MODEL ?? "scribe_v2";
 
 // null when there's no key → callers return mock data (mock-first rule in CLAUDE.md).

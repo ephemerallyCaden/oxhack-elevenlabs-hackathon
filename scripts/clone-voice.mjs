@@ -28,7 +28,7 @@ console.log(`Add to .env.local:  ELEVENLABS_VOICE_ID=${voice.voiceId}\n`);
 // One preview line so you can hear the clone straight away.
 const stream = await el.textToSpeech.convert(voice.voiceId, {
   text: "[confident] In five years I'm a millionaire. [hesitant] Or... I'm completely broke. [calm] Order in the court.",
-  modelId: "eleven_v4_turbo",
+  modelId: "eleven_v4",
   outputFormat: "mp3_44100_128",
 });
 const chunks = [];

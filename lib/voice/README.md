@@ -21,10 +21,12 @@ Check models + credits: `node --env-file=.env.local scripts/check-elevenlabs.mjs
 
 ## Findings (B1, tested with our key)
 - **Plan:** Creator — 131,000 credits/month, Instant Voice Cloning allowed, 30 voice slots.
-- **Use `eleven_v4_turbo` for everything (dev AND demo).** 0.5x credit cost, 10k chars/request, acts out audio tags.
+- **Use `eleven_v4` for everything.** Accent test on the presenter clone: `eleven_v4` with stability 0.6 + similarity 1.0 was the closest to the real voice (turbo and v3 drifted American; `[British accent]` tag and multilingual_v2 overshot). 1x credit cost (~2.3k credits per full debate), acts out audio tags. `eleven_v4_turbo` (0.5x, lower latency) is the fallback if the live interrupt is too slow.
+- **Presenter voice:** `wTNKgSCmH1QxQxX91F1r` (cloned from a 2:17 recording). Keep `similarityBoost: 1.0` or the accent drifts. Don't use accent tags.
+- Clone source quality matters: WhatsApp re-compresses voice notes (70 kbps) — send recordings via OneDrive/email instead (ElevenLabs recommends ≥128 kbps).
 - **Never use `eleven_flash_v2_5` with audio tags — Flash reads `[confident]` out loud** (verified by transcribing its output). Research files 07/08 say "Flash for dev" — ignore that.
-- `eleven_v4` (1x cost) and `eleven_v3` also act tags out; keep `eleven_v4` as an A/B option in the voice lab (B4).
+- `eleven_v4_turbo` and `eleven_v3` also act tags out.
 - Scribe STT model: `scribe_v2` (works with `speechToText.convert`).
 - Pass `timeoutInSeconds` to `new ElevenLabsClient(...)` — without it a call hung once in testing.
 
-Env (defaults in code if unset): `ELEVENLABS_MODEL=eleven_v4_turbo`, `ELEVENLABS_STT_MODEL=scribe_v2`.
+Env (defaults in code if unset): `ELEVENLABS_MODEL=eleven_v4`, `ELEVENLABS_STT_MODEL=scribe_v2`, `ELEVENLABS_VOICE_ID=wTNKgSCmH1QxQxX91F1r`.
