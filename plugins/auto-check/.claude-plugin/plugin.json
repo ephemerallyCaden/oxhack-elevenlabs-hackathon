@@ -1,0 +1,6 @@
+{
+  "name": "auto-check",
+  "version": "0.1.0",
+  "description": "After each coding turn: static checks, a test-only tester session that adds missing tests, then the project's tests. Failures go back to the coder once, then to you.",
+  "author": { "name": "oxhack team" }
+}
