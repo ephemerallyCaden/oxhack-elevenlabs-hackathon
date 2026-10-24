@@ -29,3 +29,6 @@ Thumbs.db
 secrets/
 *.pem
 *.key
+
+# Claude Code per-machine settings
+.claude/settings.local.json
