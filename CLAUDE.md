@@ -38,6 +38,12 @@
 - No abstractions for one-time code. Inline is fine for 24 hours.
 - Skip error handling except on the demo path.
 
+## Context management
+- When context feels long (50+ tool calls, or responses getting shorter): write your current plan to PLAN.md, then run `/compact`.
+- Compact AFTER: finishing a research phase, fixing a bug, completing a feature.
+- Do NOT compact DURING: active implementation, multi-file changes, debugging.
+- After compacting: read PLAN.md and SPEC.md back to restore state.
+
 ## Agent auto-routing
 Use these agents and skills proactively without being asked:
 - After writing code that changes behavior: run `/verify` to check build/types/lint/tests
