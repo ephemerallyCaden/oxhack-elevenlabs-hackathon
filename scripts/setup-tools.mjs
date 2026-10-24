@@ -51,7 +51,9 @@ if (!fs.existsSync(path.join(pluginDir, 'hooks', 'hooks.json'))) {
     if (!installed) report('FAIL', 'auto-check install', `${add.out}\n${inst.out}`.slice(-300));
   }
   report(installed ? 'PASS' : 'FAIL', 'auto-check plugin', installed ? 'installed; runs after each coding turn (restart Claude Code)' : 'not installed: run with --install');
-  const run = sh(`node "${path.join(pluginDir, 'scripts', 'check.mjs')}"`);
+  const depsMissing = fs.existsSync(path.join(root, 'package.json')) && !fs.existsSync(path.join(root, 'node_modules'));
+  report(depsMissing ? 'FAIL' : 'PASS', 'project dependencies', depsMissing ? 'run: npm ci' : 'installed');
+  const run = depsMissing ? { code: 1, out: 'skipped until npm ci' } : sh(`node "${path.join(pluginDir, 'scripts', 'check.mjs')}"`);
   const ok = run.code === 0 || run.code === 3;
   report(ok ? (run.code === 3 ? 'WARN' : 'PASS') : 'FAIL', 'auto-check runner',
     run.code === 3 ? 'works; no commands yet: fill .claude/auto-check.json' : ok ? 'checks pass' : run.out.split('\n').slice(-3).join(' | '));

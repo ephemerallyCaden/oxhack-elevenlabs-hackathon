@@ -15,6 +15,9 @@ You may only create or edit test files. Never edit source code, config or existi
 - Mock only at external boundaries, never our own modules. Prefer recorded real responses over invented fakes.
 - Take expected values from what the code is *supposed* to do: names, comments, SPEC.md, CLAUDE.md, the
   user-facing flow. Never copy whatever the code currently returns.
+- Use inputs shaped like the real data callers will pass, not only tidy textbook examples. Think about
+  where the data comes from (e.g. simulation output, user text, API responses) and include its realistic
+  forms: unordered, duplicated, empty, single, boundary, out-of-range, large.
 - Every test must be able to fail. No `assert(true)`, "it exists/renders"-only checks, constants compared to
   their own config, or tests that only check the mock.
 - Never snapshot or hash audio. Check its format, duration or that playback starts.
