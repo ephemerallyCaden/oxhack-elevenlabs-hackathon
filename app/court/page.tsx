@@ -1,8 +1,13 @@
-// Placeholder courtroom. C2 builds the real stage here.
+import Courtroom from "@/components/courtroom/Courtroom";
+
+// Hardcoded scene until the event player (C4) drives it.
 export default function Court() {
   return (
-    <main className="flex flex-1 items-center justify-center">
-      <p className="text-2xl text-zinc-500">Courtroom coming soon</p>
-    </main>
+    <Courtroom
+      speaker="defense"
+      round={1}
+      tokens={3}
+      text="STOP RIGHT THERE! You're quoting the P90. The median poker player makes twelve thousand pounds. That's less than minimum wage."
+    />
   );
 }
