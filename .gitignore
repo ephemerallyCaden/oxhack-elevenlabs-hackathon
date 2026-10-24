@@ -29,3 +29,10 @@ Thumbs.db
 secrets/
 *.pem
 *.key
+
+# Next.js / Vercel
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+/coverage
+npm-debug.log*
