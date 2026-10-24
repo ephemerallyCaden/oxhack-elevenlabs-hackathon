@@ -52,6 +52,15 @@ claude
 claude
 ```
 
+### Skills cheat sheet
+| Command | When | What it does |
+|---------|------|-------------|
+| `/spec` | Hour 0 | Interview -> SPEC.md with demo script and team split |
+| `/fix` | Something breaks | Paste error, get fix. Max 3 cycles. |
+| `/verify` | Before merge | Build, types, lint, tests, diff review. PASS/FAIL report. |
+| `/ship` | Feature done | Build, test, commit, push. One command. |
+| `/demo` | Hour 20 | Write pitch script from what's actually built |
+
 ### Speed rules
 - `/clear` between unrelated tasks. Don't let context get stale.
 - After 2 failed corrections, `/clear` and rewrite the prompt with what you learned.
@@ -59,9 +68,11 @@ claude
 - Paste screenshots for UI work. Claude reads images.
 - Commit after every working feature. `git commit` is your save button.
 - One feature per session. Start fresh for the next feature.
+- Claude auto-runs `/verify` after code changes and `/fix` on failures. Let it.
 
 ### When stuck
-- `/clear` and describe the problem from scratch
+- `/fix [paste the error]` first. Handles 80% of hackathon bugs.
+- If `/fix` doesn't work: `/clear` and describe the problem from scratch
 - Use the `explorer` agent: "Use the explorer agent to find where X is defined"
 - Use the `reviewer` agent before merging: "Use the reviewer agent to check my changes"
 - Ask a teammate. 5 min of human conversation beats 30 min of fighting the AI.

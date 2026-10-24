@@ -38,6 +38,14 @@
 - No abstractions for one-time code. Inline is fine for 24 hours.
 - Skip error handling except on the demo path.
 
+## Agent auto-routing
+Use these agents and skills proactively without being asked:
+- After writing code that changes behavior: run `/verify` to check build/types/lint/tests
+- When a build or test fails: run `/fix` with the error output
+- Before committing: run `git diff` and scan for debug code, hardcoded secrets, console.logs
+- When starting a new feature: read SPEC.md first to check scope and team ownership
+- When exploring unfamiliar code: use the `explorer` agent, don't read files one by one
+
 ## Team
 Four developers working in parallel on feature branches.
 - Merge to `main` only when your feature works and builds.

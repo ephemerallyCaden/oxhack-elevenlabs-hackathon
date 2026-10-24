@@ -13,33 +13,43 @@ cp .env.example .env
 
 ## First 30 minutes
 
-1. Run `/spec` to turn your idea into a spec through an interview
-2. Choose your tech stack and fill in CLAUDE.md
-3. Each teammate checks out their own branch: `git checkout -b feature/[name]`
+1. Run `/spec` to turn your idea into a buildable spec
+2. Choose your tech stack, fill in CLAUDE.md
+3. Each teammate: `git checkout -b feature/[name]`
 4. Start building
 
 ## What's included
 
 ```
 .claude/
-  settings.json        # Auto-approved commands, desktop notifications
+  settings.json            Auto-approved commands, desktop notifications
   agents/
-    reviewer.md        # Demo-focused code review (opus, read-only)
-    explorer.md        # Fast codebase search (haiku, read-only)
-    test-runner.md     # Build/test reporter (haiku, read-only)
-    integrator.md      # Branch merging assistant (sonnet)
+    reviewer.md            Demo-focused code review (opus)
+    explorer.md            Fast codebase search (haiku)
+    test-runner.md         Build/test failure reporter (haiku)
+    integrator.md          Branch merging assistant (sonnet)
   skills/
-    ship/SKILL.md      # /ship: build, test, commit, push
-    spec/SKILL.md      # /spec: idea -> spec interview
-CLAUDE.md              # Fill in at kickoff
-HACKATHON.md           # Timeline, tactics, ElevenLabs reference
-.env.example           # API keys template
+    spec/SKILL.md          /spec: idea -> SPEC.md via interview
+    fix/SKILL.md           /fix: paste error, get fix
+    verify/SKILL.md        /verify: build + types + lint + tests + diff review
+    ship/SKILL.md          /ship: build, test, commit, push
+    demo/SKILL.md          /demo: generate pitch script from codebase
+CLAUDE.md                  Fill in at kickoff (with agent auto-routing rules)
+HACKATHON.md               Timeline, tactics, ElevenLabs reference
 ```
 
-## Commands
+## Workflow
 
-- `/spec` to write SPEC.md from an idea
-- `/ship` to build, test, commit, push
-- `/clear` between features (most important speed tactic)
+```
+/spec -> build features -> /fix when broken -> /verify before merge -> /ship -> /demo for the pitch
+```
+
+## Agent auto-routing
+
+Claude uses agents proactively without being asked:
+- After writing code: auto-runs `/verify`
+- On build failure: auto-runs `/fix`
+- Before commits: scans diff for debug code and secrets
+- When exploring: uses the `explorer` agent
 
 Read `HACKATHON.md` for the full playbook.
