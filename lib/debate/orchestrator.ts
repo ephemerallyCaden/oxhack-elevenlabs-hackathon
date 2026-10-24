@@ -159,7 +159,7 @@ export class TrialOrchestrator {
     const r = await withFallback<TtsResponse | null>(
       (signal) => postJson<TtsResponse>('/api/voice/tts', { text: line.tts || line.text, speaker: line.speaker, voiceId: this.opts.voiceId }, signal),
       null,
-      7000,
+      15000,
       'tts',
     );
     return r.value && !r.value.fallback ? { ...line, audioUrl: r.value.audioUrl, durationMs: r.value.durationMs } : { ...line, durationMs: estimateMs(line.text) };
@@ -221,7 +221,7 @@ export class TrialOrchestrator {
   // ── the trial ─────────────────────────────────────────────────────────────
   private async run() {
     const { question } = this.state;
-    const agenda = await this.call<AgendaResponse>('/api/trial/agenda', { question }, () => mockAgenda(question), 10000);
+    const agenda = await this.call<AgendaResponse>('/api/trial/agenda', { question }, () => mockAgenda(question), 25000);
     this.intros = agenda.intros;
     this.set({ agenda: agenda.topics });
     this.research(agenda.topics);
@@ -249,7 +249,7 @@ export class TrialOrchestrator {
       '/api/trial/verdict',
       { question, agenda: this.state.agenda, userLines },
       () => mockVerdict({ question, agenda: this.state.agenda, userLines }),
-      10000,
+      25000,
     );
     this.set({ verdict: v.verdict, spectrum: v.verdict.spectrum });
     await this.say(v.verdict.line);
@@ -279,7 +279,7 @@ export class TrialOrchestrator {
   }
 
   private argue(req: ArgueRequest) {
-    return this.call<ArgueResponse>('/api/trial/argue', req, () => mockArgue(req), 9000);
+    return this.call<ArgueResponse>('/api/trial/argue', req, () => mockArgue(req), 25000);
   }
 
   /**
@@ -345,7 +345,7 @@ export class TrialOrchestrator {
     if (!topic) return;
     const req = { question: this.state.question, topic, line, cards: this.state.cards.filter((c) => c.topic_id === topicId) };
     this.ledgerPending.push(
-      this.call<ScoreArgumentResponse>('/api/trial/score-argument', req, () => ({ entry: mockScoreArgument(req), fallback: true }), 8000).then((r) =>
+      this.call<ScoreArgumentResponse>('/api/trial/score-argument', req, () => ({ entry: mockScoreArgument(req), fallback: true }), 25000).then((r) =>
         this.set({ ledger: [...this.state.ledger, r.entry] }),
       ),
     );
@@ -358,7 +358,7 @@ export class TrialOrchestrator {
     this.ledgerPending = [];
     const topic = this.topic(topicId)!;
     const req = { question: this.state.question, topic, ledger: this.state.ledger.filter((e) => e.topic_id === topicId), history: this.topicLines(topicId) };
-    const r = await this.call<ScoreTopicResponse>('/api/trial/score-topic', req, () => mockScoreTopic(req), 9000);
+    const r = await this.call<ScoreTopicResponse>('/api/trial/score-topic', req, () => mockScoreTopic(req), 25000);
     this.patchTopic(topicId, { status: 'done', score: r.score });
     this.set({ spectrum: computeSpectrum(this.state.agenda) });
     await this.sayHandled(r.line);
@@ -376,7 +376,7 @@ export class TrialOrchestrator {
         return ((await res.json()) as SttResponse).transcript;
       },
       '',
-      8000,
+      25000,
       'stt',
     );
     if (r.fallback) this.set({ fallbacks: [...this.state.fallbacks, 'voice/stt'] });
@@ -416,7 +416,7 @@ export class TrialOrchestrator {
   /** User interrupted the Judge → add or remove a topic. */
   private async agendaChange(text: string) {
     const req = { question: this.state.question, agenda: this.state.agenda, text };
-    const r = await this.call<JudgeInterruptResponse>('/api/trial/judge-interrupt', req, () => mockJudgeInterrupt(req), 8000);
+    const r = await this.call<JudgeInterruptResponse>('/api/trial/judge-interrupt', req, () => mockJudgeInterrupt(req), 25000);
     if (r.action === 'add' && r.topic) {
       this.set({ agenda: addTopic(this.state.agenda, r.topic, r.topic.importance) });
       this.research([r.topic]);

@@ -1,0 +1,8 @@
+<svg width="160" height="240" xmlns="http://www.w3.org/2000/svg">
+  <rect width="160" height="240" rx="8" fill="#e84040"/>
+  <text x="80" y="100" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-size="13" font-weight="bold">PROSECUTOR</text>
+  <text x="80" y="120" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-family="Arial, sans-serif" font-size="11">Pointing Forward</text>
+  <text x="80" y="140" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-family="Arial, sans-serif" font-size="10">Confident Stance</text>
+  <!-- Pointing arm hint -->
+  <line x1="100" y1="110" x2="145" y2="95" stroke="rgba(255,255,255,0.3)" stroke-width="3" stroke-linecap="round"/>
+</svg>

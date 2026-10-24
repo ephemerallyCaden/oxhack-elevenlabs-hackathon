@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roulette — Expression States Mockup</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', system-ui, sans-serif; padding: 20px; }
+  h1 { text-align: center; margin-bottom: 8px; color: #f0b830; font-size: 28px; }
+  h2 { text-align: center; margin-bottom: 30px; color: #888; font-size: 14px; font-weight: normal; }
+  h3 { color: #f0b830; margin: 40px 0 20px; text-align: center; font-size: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+
+  .states-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    max-width: 1100px;
+    margin: 0 auto 40px;
+  }
+  .state-card {
+    background: #16213e;
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+    border: 2px solid #333;
+  }
+  .state-card.active { border-color: #f0b830; }
+  .state-label {
+    font-weight: bold;
+    font-size: 14px;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .state-when {
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 12px;
+  }
+
+  /* Character container */
+  .character {
+    position: relative;
+    width: 120px;
+    height: 180px;
+    margin: 0 auto;
+  }
+  .character .body {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 180px;
+    border-radius: 4px;
+  }
+  /* Face is split into upper (eyes/forehead) and jaw (mouth/chin).
+     Both use the same source image, clipped at the detected lip line.
+     Jaw moves independently via JS TalkEngine.
+     Clip points set dynamically by MediaPipe Face Mesh on load. */
+  .face-container {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60px;
+    height: 60px;
+    z-index: 2;
+  }
+  .face-upper {
+    position: absolute;
+    top: 0; left: 0;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    object-fit: cover;
+    /* Default fallback (70/30 split) — overridden by JS once lips detected */
+    clip-path: inset(0 0 30% 0);
+  }
+  .face-jaw {
+    position: absolute;
+    top: 0; left: 0;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    object-fit: cover;
+    /* Default fallback (70/30 split) — overridden by JS once lips detected */
+    clip-path: inset(68% 0 0 0);
+    transform-origin: center 70%;
+    will-change: transform;
+  }
+  /* Legacy .face class — still used by expression CSS that targets it */
+  .character .face {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    object-fit: cover;
+    z-index: 2;
+    display: none; /* hidden — replaced by face-container */
+  }
+  .character .overlay {
+    position: absolute;
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  /* ===== EXPRESSION ANIMATIONS ===== */
+
+  /* IDLE — no animation */
+  .state-idle .face { }
+  .state-idle .body { }
+
+  /* TALKING — jaw driven by JS TalkEngine + body bob */
+  /* Jaw animation is entirely JS-driven, no CSS keyframes needed */
+  .state-talking .body {
+    animation: bodyBob 0.4s ease-in-out infinite;
+  }
+  @keyframes bodyBob {
+    0%, 100% { transform: translateX(-50%) translateY(0); }
+    50% { transform: translateX(-50%) translateY(-3px); }
+  }
+
+  /* CONFIDENT — chin up, squint, sparkle + body lean forward */
+  .state-confident .face {
+    transform: translateX(-50%) perspective(200px) rotateX(-3deg) scaleY(0.95);
+  }
+  .state-confident .body {
+    transform: translateX(-50%) translateX(4px);
+    filter: brightness(1.15);
+    transition: transform 0.2s steps(2), filter 0.3s steps(3);
+  }
+  .state-confident .overlay-sparkle1 {
+    top: 2px; right: 8px;
+    width: 24px; height: 24px;
+    animation: sparkle 1.5s ease-in-out infinite;
+  }
+  .state-confident .overlay-sparkle2 {
+    top: 20px; left: 10px;
+    width: 16px; height: 16px;
+    animation: sparkle 1.5s ease-in-out 0.5s infinite;
+  }
+  @keyframes sparkle {
+    0%, 100% { transform: scale(0.8) rotate(0deg); opacity: 0.6; }
+    50% { transform: scale(1.2) rotate(10deg); opacity: 1; }
+  }
+
+  /* SWEATING — squish, tremble, sweat drops + body shake */
+  .state-sweating .face {
+    transform: translateX(-50%) scaleX(0.95);
+    animation: tremble 0.12s linear infinite;
+  }
+  .state-sweating .body {
+    animation: bodyShake 0.15s steps(2) infinite;
+  }
+  @keyframes tremble {
+    0%, 100% { transform: translateX(-50%) scaleX(0.95) translateX(0); }
+    25% { transform: translateX(-50%) scaleX(0.95) translateX(-1px); }
+    75% { transform: translateX(-50%) scaleX(0.95) translateX(1px); }
+  }
+  @keyframes bodyShake {
+    0%, 100% { transform: translateX(-50%) translateX(0); }
+    50% { transform: translateX(-50%) translateX(3px); }
+  }
+  .state-sweating .overlay-sweat1 {
+    top: 10px; right: 18px;
+    width: 16px; height: 20px;
+    animation: sweatDrop 2s ease-in infinite;
+  }
+  .state-sweating .overlay-sweat2 {
+    top: 10px; right: 26px;
+    width: 12px; height: 16px;
+    animation: sweatDrop 2s ease-in 0.4s infinite;
+  }
+  .state-sweating .overlay-sweat3 {
+    top: 14px; right: 12px;
+    width: 10px; height: 13px;
+    animation: sweatDrop 2s ease-in 0.9s infinite;
+  }
+  @keyframes sweatDrop {
+    0% { transform: translateY(0); opacity: 0.9; }
+    80% { transform: translateY(50px); opacity: 0.7; }
+    100% { transform: translateY(60px); opacity: 0; }
+  }
+
+  /* SHOCKED — eyes wide, jaw drop, exclamation pop + body jolt */
+  .state-shocked .face {
+    transform: translateX(-50%) scaleY(1.1) translateY(4px);
+    animation: shockBounce 0.3s ease-out 1;
+  }
+  .state-shocked .body {
+    animation: bodyShock 0.3s steps(2) forwards;
+  }
+  @keyframes shockBounce {
+    0% { transform: translateX(-50%) scale(1.15); }
+    60% { transform: translateX(-50%) scaleY(1.12) translateY(5px); }
+    100% { transform: translateX(-50%) scaleY(1.1) translateY(4px); }
+  }
+  @keyframes bodyShock {
+    0% { transform: translateX(-50%) scale(1) translateY(0); }
+    100% { transform: translateX(-50%) scale(1.1) translateY(-6px); filter: brightness(1.2); }
+  }
+  .state-shocked .overlay-exclamation {
+    top: -30px; left: 50%; transform: translateX(-50%);
+    width: 28px; height: 36px;
+    animation: exclamationPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  }
+  @keyframes exclamationPop {
+    0% { transform: translateX(-50%) scale(0); opacity: 0; }
+    60% { transform: translateX(-50%) scale(1.3); opacity: 1; }
+    100% { transform: translateX(-50%) scale(1); opacity: 1; }
+  }
+  .state-shocked .overlay-exclamation {
+    animation: exclamationPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards,
+               exclamationBounce 0.6s ease-in-out 0.5s infinite;
+  }
+  @keyframes exclamationBounce {
+    0%, 100% { transform: translateX(-50%) scale(1) translateY(0); }
+    50% { transform: translateX(-50%) scale(1.15) translateY(-4px); }
+  }
+  .state-shocked .flash-overlay {
+    position: absolute;
+    inset: 0;
+    background: white;
+    border-radius: 12px;
+    animation: flashPulse 0.15s ease-out forwards;
+    z-index: 10;
+  }
+  @keyframes flashPulse {
+    0% { opacity: 0.8; }
+    100% { opacity: 0; }
+  }
+
+  /* ANGRY — eyebrows pinch, tilt forward, vein throb */
+  .state-angry .face {
+    transform: translateX(-50%) perspective(200px) rotateX(-4deg);
+    animation: angryPulse 0.5s ease-in-out infinite;
+  }
+  @keyframes angryPulse {
+    0%, 100% { transform: translateX(-50%) perspective(200px) rotateX(-4deg) scale(1); }
+    50% { transform: translateX(-50%) perspective(200px) rotateX(-4deg) scale(1.02); }
+  }
+  .state-angry .overlay-vein1 {
+    top: -4px; right: 10px;
+    width: 30px; height: 30px;
+    animation: veinBounce1 0.45s ease-in-out infinite;
+  }
+  .state-angry .overlay-vein2 {
+    top: 8px; left: 8px;
+    width: 22px; height: 22px;
+    animation: veinBounce2 0.55s ease-in-out infinite;
+  }
+  .state-angry .overlay-vein3 {
+    top: -8px; left: 30px;
+    width: 18px; height: 18px;
+    animation: veinBounce3 0.38s ease-in-out infinite;
+  }
+  @keyframes veinBounce1 {
+    0%, 100% { transform: scale(1) translateY(0); }
+    50% { transform: scale(1.25) translateY(-3px); }
+  }
+  @keyframes veinBounce2 {
+    0%, 100% { transform: scale(1) translateY(0); }
+    50% { transform: scale(1.2) translateY(-4px); }
+  }
+  @keyframes veinBounce3 {
+    0%, 100% { transform: scale(1) translateY(0); }
+    50% { transform: scale(1.3) translateY(-2px); }
+  }
+  /* ── Angry eyebrows ──
+     Asset slopes thick-upper-left → point-lower-right.
+     Angry brows point DOWN toward the nose:
+       viewer-LEFT eye  → nose is to its right → as drawn
+       viewer-RIGHT eye → mirrored (scaleX(-1))
+     Position comes from MediaPipe eye detection via CSS vars
+     (--eye-left-x/y, --eye-right-x/y, % of face-container). */
+  .face-eyebrow {
+    position: absolute;
+    width: 45%;
+    height: auto;
+    z-index: 3;
+    pointer-events: none;
+    opacity: 0;
+  }
+  .face-eyebrow-left {
+    left: var(--eye-left-x, 32%);
+    top: var(--eye-left-y, 24%);
+    transform: translate(-50%, -50%);
+  }
+  .face-eyebrow-right {
+    left: var(--eye-right-x, 68%);
+    top: var(--eye-right-y, 24%);
+    transform: translate(-50%, -50%) scaleX(-1);
+  }
+  .state-angry .face-eyebrow-left {
+    animation: browSlamL 0.15s ease-in forwards;
+  }
+  .state-angry .face-eyebrow-right {
+    animation: browSlamR 0.15s ease-in forwards;
+  }
+  /* Brows slam DOWN into place from above — classic anime anger beat */
+  @keyframes browSlamL {
+    0% { opacity: 0; transform: translate(-50%, -120%); }
+    100% { opacity: 1; transform: translate(-50%, -50%); }
+  }
+  @keyframes browSlamR {
+    0% { opacity: 0; transform: translate(-50%, -120%) scaleX(-1); }
+    100% { opacity: 1; transform: translate(-50%, -50%) scaleX(-1); }
+  }
+
+  /* ── Side profile (talking view) ──
+     One visible eye, one eyebrow.
+     .facing-right (prosecutor, faces courtroom center from the left): as drawn.
+     .facing-left  (defendant,  faces courtroom center from the right): mirrored.
+     Eye sits toward the facing edge of the face. */
+  .face-container.facing-right .face-eyebrow-right { display: none; }
+  .face-container.facing-right .face-eyebrow-left {
+    left: 62%; /* eye is on the leading (right) side when facing right */
+    top: var(--eye-left-y, 24%);
+  }
+  .face-container.facing-left .face-eyebrow-left { display: none; }
+  .face-container.facing-left .face-eyebrow-right {
+    left: 38%; /* eye is on the leading (left) side when facing left */
+    top: var(--eye-right-y, 24%);
+  }
+
+  .state-angry .face-tint {
+    position: absolute;
+    top: 8px; left: 50%; transform: translateX(-50%);
+    width: 60px; height: 60px;
+    border-radius: 50%;
+    background: rgba(232, 64, 64, 0.1);
+    z-index: 2;
+    animation: redPulse 0.5s ease-in-out infinite;
+  }
+  @keyframes redPulse {
+    0%, 100% { opacity: 0.05; }
+    50% { opacity: 0.15; }
+  }
+
+  /* BREAKDOWN — melt, desaturate, crack reveal + body tilt shake */
+  .state-breakdown .face {
+    transform: translateX(-50%) perspective(200px) rotateX(8deg) translateY(3px);
+    filter: saturate(0.3) brightness(0.8);
+    transition: all 1s ease;
+  }
+  .state-breakdown .body {
+    filter: grayscale(0.4) brightness(0.75);
+    animation: bodyBreakdown 0.2s steps(2) infinite;
+  }
+  @keyframes bodyBreakdown {
+    0%, 100% { transform: translateX(-50%) rotate(-2deg) translateX(0); }
+    50% { transform: translateX(-50%) rotate(-2deg) translateX(-4px); }
+  }
+  /* Crack lines fan out radially from center of character.
+     Rotation lives on the WRAPPER (.crack-slot), flip lives on the IMG inside.
+     This way the flip never overrides the rotation. */
+  .state-breakdown .crack-fan {
+    position: absolute;
+    top: 38px; left: 50%;
+    width: 0; height: 0;
+    z-index: 5;
+  }
+  .state-breakdown .crack-slot {
+    position: absolute;
+    top: 0; left: -10px;
+    width: 20px; height: 60px;
+    transform-origin: top center;
+  }
+  .state-breakdown .crack-slot img {
+    width: 100%; height: 100%;
+    animation: crackReveal 0.6s ease-out forwards;
+  }
+  .state-breakdown .crack-1 { transform: rotate(0deg); }
+  .state-breakdown .crack-1 img { animation-delay: 0.0s; }
+  .state-breakdown .crack-2 { transform: rotate(55deg); }
+  .state-breakdown .crack-2 img { animation-delay: 0.1s; }
+  .state-breakdown .crack-3 { transform: rotate(-50deg); }
+  .state-breakdown .crack-3 img { animation-delay: 0.15s; }
+  .state-breakdown .crack-4 { transform: rotate(120deg); }
+  .state-breakdown .crack-4 img { animation-delay: 0.2s; }
+  .state-breakdown .crack-5 { transform: rotate(-115deg); }
+  .state-breakdown .crack-5 img { animation-delay: 0.25s; }
+  .state-breakdown .crack-6 { transform: rotate(175deg); }
+  .state-breakdown .crack-6 img { animation-delay: 0.3s; }
+
+  @keyframes crackReveal {
+    0% { clip-path: inset(0 0 100% 0); opacity: 0; }
+    30% { opacity: 1; }
+    100% { clip-path: inset(0 0 0 0); opacity: 1; }
+  }
+  /* Flip runs on the img INSIDE the rotated wrapper — rotation is never touched */
+  .state-breakdown .crack-slot img {
+    animation: crackReveal 0.6s ease-out forwards, crackFlicker 0.3s step-end 0.8s infinite;
+  }
+  @keyframes crackFlicker {
+    0%, 49.9% { transform: scaleX(1); }
+    50%, 100% { transform: scaleX(-1); }
+  }
+  .state-breakdown .vignette {
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    background: radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.6) 100%);
+    animation: vignetteFade 1s ease-in forwards;
+    z-index: 4;
+  }
+  @keyframes vignetteFade {
+    0% { opacity: 0; }
+    100% { opacity: 1; }
+  }
+
+  /* ===== COURTROOM MOCKUP ===== */
+  .courtroom {
+    max-width: 900px;
+    margin: 0 auto;
+    background: linear-gradient(180deg, #0f3460 0%, #16213e 40%, #1a1a2e 100%);
+    border-radius: 16px;
+    padding: 30px;
+    position: relative;
+    border: 2px solid #333;
+  }
+  .courtroom-label {
+    text-align: center;
+    font-size: 11px;
+    color: #666;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+  .courtroom-characters {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding: 0 20px;
+    margin-bottom: 20px;
+  }
+  .courtroom-char {
+    text-align: center;
+  }
+  .courtroom-char .role-label {
+    font-size: 11px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  .prosecution .role-label { color: #e84040; }
+  .defense .role-label { color: #4a9eff; }
+  .judge .role-label { color: #f0b830; }
+
+  .textbox {
+    background: rgba(0,0,0,0.7);
+    border: 2px solid #f0b830;
+    border-radius: 8px;
+    padding: 16px 20px;
+    position: relative;
+  }
+  .textbox .speaker-name {
+    position: absolute;
+    top: -12px; left: 16px;
+    background: #f0b830;
+    color: #1a1a2e;
+    padding: 2px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+  }
+  .textbox .dialogue {
+    font-size: 15px;
+    line-height: 1.5;
+    color: #eee;
+    min-height: 44px;
+  }
+  .textbox .cursor {
+    display: inline-block;
+    width: 8px;
+    height: 16px;
+    background: #f0b830;
+    animation: blink 0.6s step-end infinite;
+    vertical-align: text-bottom;
+    margin-left: 2px;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  .tug-bar-container {
+    margin: 16px 0;
+    text-align: center;
+  }
+  .tug-bar {
+    height: 8px;
+    background: #333;
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+  }
+  .tug-bar .fill {
+    position: absolute;
+    top: 0; left: 0;
+    height: 100%;
+    width: 62%;
+    background: linear-gradient(90deg, #4a9eff 0%, #f0b830 50%, #e84040 100%);
+    border-radius: 4px;
+    transition: width 0.5s ease;
+  }
+  .tug-bar .marker {
+    position: absolute;
+    top: -4px;
+    left: 62%;
+    width: 4px;
+    height: 16px;
+    background: white;
+    border-radius: 2px;
+    transform: translateX(-50%);
+  }
+  .tug-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: #666;
+    margin-top: 4px;
+  }
+
+  .buttons-bar {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .btn {
+    padding: 8px 20px;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 13px;
+    border: 2px solid;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .btn-interrupt { background: #e84040; border-color: #ff6b6b; color: white; }
+  .btn-holdit { background: transparent; border-color: #4ade80; color: #4ade80; }
+  .btn-moveon { background: transparent; border-color: #888; color: #888; }
+</style>
+</head>
+<body>
+
+<h1>Roulette — Expression States</h1>
+<h2>All 7 character states with face warps + overlay animations</h2>
+
+<!-- ===== PROSECUTOR STATES ===== -->
+<h3>Prosecution (Red) — All States</h3>
+<div class="states-grid">
+
+  <div class="state-card">
+    <div class="state-label" style="color:#e84040">Idle</div>
+    <div class="state-when">Default / listening</div>
+    <div class="character state-idle">
+      <div class="body" style="background:#e84040; border-radius:4px;"></div>
+      <div class="face-container">
+        <img class="face-upper" src="assets/face.png" alt="face">
+        <img class="face-jaw" src="assets/face.png" alt="jaw">
+      </div>
+    </div>
+  </div>
+
+  <div class="state-card">
+    <div class="state-label" style="color:#e84040">Talking</div>
+    <div class="state-when">During TTS playback</div>
+    <div class="character state-talking" data-talk-speed="120">
+      <div class="body" style="background:#e84040; border-radius:4px;"></div>
+      <div class="face-container">
+        <img class="face-upper" src="assets/face.png" alt="face">
+        <img class="face-jaw" src="assets/face.png" alt="jaw">
+      </div>
+    </div>
+  </div>
+
+  <div class="state-card active">
+    <div class="state-label" style="color:#f0b830">Confident</div>
+    <div class="state-when">Winning an argument</div>
+    <div class="character state-confident">
+      <div class="body" style="background:#e84040; border-radius:4px;"></div>
+      <div class="face-container">
+        <img class="face-upper" src="assets/face.png" alt="face">
+        <img class="face-jaw" src="assets/face.png" alt="jaw">
+      </div>
+      <img class="overlay overlay-sparkle1" src="assets/expressions/sparkle.png" alt="">
+      <img class="overlay overlay-sparkle2" src="assets/expressions/sparkle.png" alt="">
+    </div>
+  </div>
+
+  <div class="state-card">
+    <div class="state-label" style="color:#4a9eff">Sweating</div>
+    <div class="state-when">Losing an argument</div>
+    <div class="character state-sweating">
+      <div class="body" style="background:#e84040; border-radius:4px;"></div>
+      <div class="face-container">
+        <img class="face-upper" src="assets/face.png" alt="face">
+        <img class="face-jaw" src="assets/face.png" alt="jaw">
+      </div>
+      <img class="overlay overlay-sweat1" src="assets/expressions/sweat-drop.png" alt="">
+      <img class="overlay overlay-sweat2" src="assets/expressions/sweat-drop.png" alt="">
+      <img class="overlay overlay-sweat3" src="assets/expressions/sweat-drop.png" alt="">
+    </div>
+  </div>
+
+  <div class="state-card">
+    <div class="state-label" style="color:#ff6b6b">Shocked</div>
+    <div class="state-when">Hit by counter-point</div>
+    <div class="character state-shocked">
+      <div class="flash-overlay"></div>
+      <div class="body" style="background:#e84040; border-radius:4px;"></div>
+      <div class="face-container">
+        <img class="face-upper" src="assets/face.png" alt="face">
+        <img class="face-jaw" src="assets/face.png" alt="jaw">
+      </div>
+      <img class="overlay overlay-exclamation" src="assets/expressions/exclamation.png" alt="">
+    </div>
+  </div>
+
+  <div class="state-card">
+    <div class="state-label" style="color:#ff4444">Angry</div>
+    <div class="state-when">Interrupted / challenged</div>
+    <div class="character state-angry">
+      <div class="body" style="background:#e84040; border-radius:4px;"></div>
+      <div class="face-container">
+        <img class="face-upper" src="assets/face.png" alt="face">
+        <img class="face-jaw" src="assets/face.png" alt="jaw">
+        <img class="face-eyebrow face-eyebrow-left" src="assets/expressions/eyebrow.png" alt="">
+        <img class="face-eyebrow face-eyebrow-right" src="assets/expressions/eyebrow.png" alt="">
+      </div>
+      <div class="face-tint"></div>
+      <img class="overlay overlay-vein1" src="assets/expressions/anger-vein.png" alt="">
+      <img class="overlay overlay-vein2" src="assets/expressions/anger-vein.png" alt="">
+      <img class="overlay overlay-vein3" src="assets/expressions/anger-vein.png" alt="">
+    </div>
+  </div>
+
+  <div class="state-card">
+    <div class="state-label" style="color:#666">Breakdown</div>
+    <div class="state-when">Argument demolished</div>
+    <div class="character state-breakdown">
+      <div class="vignette"></div>
+      <div class="body" style="background:#e84040; border-radius:4px;"></div>
+      <div class="face-container">
+        <img class="face-upper" src="assets/face.png" alt="face">
+        <img class="face-jaw" src="assets/face.png" alt="jaw">
+      </div>
+      <div class="crack-fan">
+        <div class="crack-slot crack-1"><img src="assets/expressions/crack-lines.png" alt=""></div>
+        <div class="crack-slot crack-2"><img src="assets/expressions/crack-lines.png" alt=""></div>
+        <div class="crack-slot crack-3"><img src="assets/expressions/crack-lines.png" alt=""></div>
+        <div class="crack-slot crack-4"><img src="assets/expressions/crack-lines.png" alt=""></div>
+        <div class="crack-slot crack-5"><img src="assets/expressions/crack-lines.png" alt=""></div>
+        <div class="crack-slot crack-6"><img src="assets/expressions/crack-lines.png" alt=""></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ===== SIDE PROFILE — ANGRY TALKING ===== -->
+<h3>Side Profile — Angry Talking (one brow, facing direction)</h3>
+<div class="states-grid" style="grid-template-columns: repeat(2, 1fr); max-width: 560px;">
+
+  <div class="state-card">
+    <div class="state-label" style="color:#e84040">Prosecutor (faces right)</div>
+    <div class="state-when">Eyebrow as drawn — point angles down-right toward nose</div>
+    <div class="character state-angry state-talking" data-talk-speed="120">
+      <div class="body" style="background:#e84040; border-radius:4px;"></div>
+      <div class="face-container facing-right">
+        <img class="face-upper" src="assets/face.png" alt="face">
+        <img class="face-jaw" src="assets/face.png" alt="jaw">
+        <img class="face-eyebrow face-eyebrow-left" src="assets/expressions/eyebrow.png" alt="">
+        <img class="face-eyebrow face-eyebrow-right" src="assets/expressions/eyebrow.png" alt="">
+      </div>
+      <div class="face-tint"></div>
+      <img class="overlay overlay-vein1" src="assets/expressions/anger-vein.png" alt="">
+    </div>
+  </div>
+
+  <div class="state-card">
+    <div class="state-label" style="color:#4a9eff">Defendant (faces left)</div>
+    <div class="state-when">Eyebrow mirrored — point angles down-left toward nose</div>
+    <div class="character state-angry state-talking" data-talk-speed="120">
+      <div class="body" style="background:#4a9eff; border-radius:4px;"></div>
+      <div class="face-container facing-left">
+        <img class="face-upper" src="assets/face.png" alt="face">
+        <img class="face-jaw" src="assets/face.png" alt="jaw">
+        <img class="face-eyebrow face-eyebrow-left" src="assets/expressions/eyebrow.png" alt="">
+        <img class="face-eyebrow face-eyebrow-right" src="assets/expressions/eyebrow.png" alt="">
+      </div>
+      <div class="face-tint"></div>
+      <img class="overlay overlay-vein1" src="assets/expressions/anger-vein.png" alt="">
+    </div>
+  </div>
+
+</div>
+
+<!-- ===== FULL COURTROOM MOCKUP ===== -->
+<h3>Full Courtroom — Active Debate State</h3>
+<div class="courtroom">
+  <div class="courtroom-label">The Council of Future Selves</div>
+
+  <div class="courtroom-characters">
+    <!-- Prosecution (left) — currently confident/winning -->
+    <div class="courtroom-char prosecution">
+      <div class="role-label">Prosecution</div>
+      <div class="character state-confident" style="width:160px; height:240px;">
+        <img class="body" src="assets/pose-bodies/prosecutor-front.svg" alt="body" style="width:160px; height:240px;">
+        <div class="face-container" style="width:65px; height:65px; top:10px;">
+          <img class="face-upper" src="assets/face.png" alt="face" style="width:65px; height:65px;">
+          <img class="face-jaw" src="assets/face.png" alt="jaw" style="width:65px; height:65px;">
+        </div>
+        <img class="overlay overlay-sparkle1" src="assets/expressions/sparkle.png" alt="" style="top:2px; right:16px; width:22px; height:22px;">
+        <img class="overlay overlay-sparkle2" src="assets/expressions/sparkle.png" alt="" style="top:24px; left:18px; width:15px; height:15px;">
+      </div>
+    </div>
+
+    <!-- Judge (center) — calm/idle -->
+    <div class="courtroom-char judge" style="margin-bottom: 30px;">
+      <div class="role-label">Judge</div>
+      <div class="character state-idle" style="width:120px; height:180px;">
+        <img class="body" src="assets/pose-bodies/judge-front.svg" alt="body" style="width:120px; height:180px;">
+        <div class="face-container" style="width:55px; height:55px; top:8px;">
+          <img class="face-upper" src="assets/face.png" alt="face" style="width:55px; height:55px;">
+          <img class="face-jaw" src="assets/face.png" alt="jaw" style="width:55px; height:55px;">
+        </div>
+      </div>
+    </div>
+
+    <!-- Defense (right) — currently sweating/losing -->
+    <div class="courtroom-char defense">
+      <div class="role-label">Defense</div>
+      <div class="character state-sweating" style="width:160px; height:240px;">
+        <img class="body" src="assets/pose-bodies/defendant-front.svg" alt="body" style="width:160px; height:240px;">
+        <div class="face-container" style="width:65px; height:65px; top:10px;">
+          <img class="face-upper" src="assets/face.png" alt="face" style="width:65px; height:65px;">
+          <img class="face-jaw" src="assets/face.png" alt="jaw" style="width:65px; height:65px;">
+        </div>
+        <img class="overlay overlay-sweat1" src="assets/expressions/sweat-drop.png" alt="" style="top:12px; right:24px; width:14px; height:18px;">
+        <img class="overlay overlay-sweat2" src="assets/expressions/sweat-drop.png" alt="" style="top:12px; right:34px; width:11px; height:14px;">
+        <img class="overlay overlay-sweat3" src="assets/expressions/sweat-drop.png" alt="" style="top:16px; right:18px; width:9px; height:12px;">
+      </div>
+    </div>
+  </div>
+
+  <!-- Tug of war bar -->
+  <div class="tug-bar-container">
+    <div class="tug-bar">
+      <div class="fill"></div>
+      <div class="marker"></div>
+    </div>
+    <div class="tug-labels">
+      <span style="color:#4a9eff">Defense</span>
+      <span style="color:#888">62% Prosecution</span>
+      <span style="color:#e84040">Prosecution</span>
+    </div>
+  </div>
+
+  <!-- Text box -->
+  <div class="textbox">
+    <div class="speaker-name">PROSECUTION</div>
+    <div class="dialogue">
+      The top 1% of poker players earn more than any quant on Wall Street. And unlike you, they don't have a 6am alarm.<span class="cursor"></span>
+    </div>
+  </div>
+
+  <!-- Buttons -->
+  <div class="buttons-bar">
+    <button class="btn btn-interrupt">INTERRUPT</button>
+    <button class="btn btn-holdit">HOLD IT</button>
+    <button class="btn btn-moveon">MOVE ON</button>
+  </div>
+</div>
+
+<script type="module">
+import { FaceLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/+esm';
+
+/**
+ * LipDetector — runs MediaPipe Face Mesh once on a face image,
+ * returns the Y% where the upper lip sits so we can split the face there.
+ *
+ * Landmark 13 = upper lip top center
+ * Landmark 14 = lower lip bottom center
+ * We split at landmark 13 (top of upper lip) — jaw gets everything below.
+ */
+async function detectLipLine(imgSrc) {
+  const vision = await FilesetResolver.forVisionTasks(
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm'
+  );
+  const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+      delegate: 'GPU'
+    },
+    runningMode: 'IMAGE',
+    numFaces: 1
+  });
+
+  // Draw the image to a canvas — MediaPipe needs an ImageData/Canvas/Video source
+  const img = new Image();
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = reject;
+    img.src = imgSrc;
+  });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+
+  // Pass the canvas element, not the img (avoids cross-origin issues with file://)
+  const result = faceLandmarker.detect(canvas);
+
+  if (!result.faceLandmarks || result.faceLandmarks.length === 0) {
+    console.warn('No face detected — using fallback split at 70%');
+    return {
+      lipY: 0.70, jawOriginY: 0.70,
+      // Fallback eye positions: ~38% down, at 32% / 68% horizontally
+      eyeViewerLeft: { x: 0.32, y: 0.38 },
+      eyeViewerRight: { x: 0.68, y: 0.38 },
+    };
+  }
+
+  const landmarks = result.faceLandmarks[0];
+  // Landmark 13 = top of upper lip (center)
+  // Landmark 14 = bottom of lower lip (center)
+  const upperLipY = landmarks[13].y; // 0-1 normalized
+  const lowerLipY = landmarks[14].y;
+
+  // Split point: right at the top of the upper lip
+  // Overlap by 2% so there's no visible gap
+  const splitY = upperLipY;
+
+  // Eyes — for eyebrow placement.
+  // Subject's RIGHT eye = viewer's LEFT: corners 33 (outer) + 133 (inner), top 159
+  // Subject's LEFT eye = viewer's RIGHT: corners 362 (inner) + 263 (outer), top 386
+  const eyeViewerLeft = {
+    x: (landmarks[33].x + landmarks[133].x) / 2,
+    y: landmarks[159].y,
+  };
+  const eyeViewerRight = {
+    x: (landmarks[362].x + landmarks[263].x) / 2,
+    y: landmarks[386].y,
+  };
+
+  console.log(`Lip detected: upper lip at ${(splitY * 100).toFixed(1)}%, lower lip at ${(lowerLipY * 100).toFixed(1)}%`);
+  console.log(`Eyes: viewer-left (${(eyeViewerLeft.x*100).toFixed(1)}%, ${(eyeViewerLeft.y*100).toFixed(1)}%), viewer-right (${(eyeViewerRight.x*100).toFixed(1)}%, ${(eyeViewerRight.y*100).toFixed(1)}%)`);
+
+  faceLandmarker.close();
+  return { lipY: splitY, jawOriginY: splitY, eyeViewerLeft, eyeViewerRight };
+}
+
+/**
+ * Apply the detected lip line to all face-upper and face-jaw elements.
+ */
+async function applyLipSplit() {
+  const { lipY, jawOriginY, eyeViewerLeft, eyeViewerRight } = await detectLipLine('assets/face.png');
+
+  const upperClip = `inset(0 0 ${((1 - lipY) * 100).toFixed(1)}% 0)`;
+  const jawClip = `inset(${((lipY - 0.02) * 100).toFixed(1)}% 0 0 0)`; // 2% overlap to hide seam
+
+  document.querySelectorAll('.face-upper').forEach(el => {
+    el.style.clipPath = upperClip;
+  });
+  document.querySelectorAll('.face-jaw').forEach(el => {
+    el.style.clipPath = jawClip;
+    el.style.transformOrigin = `center ${(jawOriginY * 100).toFixed(1)}%`;
+  });
+
+  // Eyebrow anchors — CSS vars on :root, consumed by .face-eyebrow-* elements.
+  // Positions are % of the face-container; eyebrows sit slightly above the eye top.
+  const root = document.documentElement;
+  root.style.setProperty('--eye-left-x', `${(eyeViewerLeft.x * 100).toFixed(1)}%`);
+  root.style.setProperty('--eye-left-y', `${((eyeViewerLeft.y - 0.14) * 100).toFixed(1)}%`);
+  root.style.setProperty('--eye-right-x', `${(eyeViewerRight.x * 100).toFixed(1)}%`);
+  root.style.setProperty('--eye-right-y', `${((eyeViewerRight.y - 0.14) * 100).toFixed(1)}%`);
+
+  console.log(`Applied lip split: upper=${upperClip}, jaw=${jawClip}`);
+}
+
+// Run detection on page load
+applyLipSplit().catch(err => {
+  console.warn('Lip detection failed, using CSS fallback:', err);
+});
+
+/**
+ * TalkEngine — drives jaw animation for any character.
+ *
+ * Usage:
+ *   const engine = new TalkEngine(jawElement, { speed: 120 });
+ *   engine.start();   // begin talking
+ *   engine.stop();    // stop talking, jaw returns to closed
+ *   engine.setSpeed(80);  // faster talking (lower ms = faster)
+ *
+ * The jaw alternates up/down at a constant interval (speed in ms).
+ * Each tick, it also rotates to a random angle within ±20° of center.
+ * Works on any element regardless of character pose or expression state.
+ */
+class TalkEngine {
+  constructor(jawEl, { speed = 120, maxRotation = 20, openDistance = 5 } = {}) {
+    this.jaw = jawEl;
+    this.speed = speed;           // ms per tick — lower = faster talking
+    this.maxRotation = maxRotation; // max ± degrees from center
+    this.openDistance = openDistance; // px the jaw moves down when open
+    this.interval = null;
+    this.isOpen = false;
+  }
+
+  start() {
+    if (this.interval) return; // already running
+    this.tick(); // immediate first tick
+    this.interval = setInterval(() => this.tick(), this.speed);
+  }
+
+  stop() {
+    if (this.interval) {
+      clearInterval(this.interval);
+      this.interval = null;
+    }
+    // Reset jaw to closed, centered
+    this.jaw.style.transform = 'translateY(0) rotate(0deg)';
+    this.isOpen = false;
+  }
+
+  setSpeed(ms) {
+    this.speed = ms;
+    if (this.interval) {
+      // Restart with new speed
+      clearInterval(this.interval);
+      this.interval = setInterval(() => this.tick(), this.speed);
+    }
+  }
+
+  tick() {
+    this.isOpen = !this.isOpen;
+    const y = this.isOpen ? this.openDistance : 0;
+    const rotation = (Math.random() * 2 - 1) * this.maxRotation; // random ±maxRotation
+    this.jaw.style.transform = `translateY(${y}px) rotate(${rotation.toFixed(1)}deg)`;
+  }
+}
+
+// ── Auto-start TalkEngine on all .state-talking characters ──
+// Also provide global controls for the demo
+
+const allEngines = [];
+
+function initTalkEngines() {
+  // Find all talking characters and start their jaw engines
+  document.querySelectorAll('.state-talking .face-jaw').forEach(jaw => {
+    const speed = jaw.closest('.character')?.dataset.talkSpeed || 120;
+    const engine = new TalkEngine(jaw, { speed: parseInt(speed) });
+    engine.start();
+    allEngines.push({ element: jaw.closest('.character'), engine });
+  });
+}
+
+// Start any character talking by passing its .character element
+function startTalking(characterEl, speed = 120) {
+  const jaw = characterEl.querySelector('.face-jaw');
+  if (!jaw) return null;
+
+  // Check if already has an engine
+  const existing = allEngines.find(e => e.element === characterEl);
+  if (existing) {
+    existing.engine.setSpeed(speed);
+    existing.engine.start();
+    return existing.engine;
+  }
+
+  const engine = new TalkEngine(jaw, { speed });
+  engine.start();
+  allEngines.push({ element: characterEl, engine });
+  return engine;
+}
+
+// Stop a character talking
+function stopTalking(characterEl) {
+  const existing = allEngines.find(e => e.element === characterEl);
+  if (existing) existing.engine.stop();
+}
+
+// Expose to global for button onclick handlers
+window.startTalking = startTalking;
+window.stopTalking = stopTalking;
+
+// Init on load — wait for lip detection to finish first
+setTimeout(() => initTalkEngines(), 2000);
+</script>
+
+<!-- Demo controls for jaw speed -->
+<h3>Jaw Talk Speed Demo</h3>
+<div style="display:flex; gap:12px; justify-content:center; margin-bottom:40px; flex-wrap:wrap;">
+  <button class="btn" style="background:#f0b830; color:#1a1a2e; border-color:#c99520;"
+    onclick="document.querySelectorAll('.state-talking').forEach(c => startTalking(c, 60))">
+    Fast (60ms)
+  </button>
+  <button class="btn" style="background:#f0b830; color:#1a1a2e; border-color:#c99520;"
+    onclick="document.querySelectorAll('.state-talking').forEach(c => startTalking(c, 120))">
+    Normal (120ms)
+  </button>
+  <button class="btn" style="background:#f0b830; color:#1a1a2e; border-color:#c99520;"
+    onclick="document.querySelectorAll('.state-talking').forEach(c => startTalking(c, 200))">
+    Slow (200ms)
+  </button>
+  <button class="btn" style="background:#f0b830; color:#1a1a2e; border-color:#c99520;"
+    onclick="document.querySelectorAll('.state-talking').forEach(c => stopTalking(c))">
+    Stop
+  </button>
+</div>
+
+</body>
+</html>

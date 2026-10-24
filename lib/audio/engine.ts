@@ -19,6 +19,10 @@ const buffers = new Map<string, Promise<AudioBuffer>>();
 let voice: { src: AudioBufferSourceNode; done: () => void } | null = null;
 let music: { name: BgmName; src: AudioBufferSourceNode; gain: GainNode } | null = null;
 let ambience: AudioBufferSourceNode | null = null;
+// Loads are async: each seq token cancels calls that were still loading when a newer call (or stop) arrived.
+let voiceSeq = 0;
+let musicSeq = 0;
+let ambienceSeq = 0;
 
 function graph() {
   if (ctx) return ctx;
@@ -74,7 +78,9 @@ export function preload(url: string) {
  * Resolves when it finishes OR is cut off by stopVoice() (interrupts). Starting a new line stops the old one.
  */
 export async function playVoice(speaker: Exclude<Speaker, "user">, url: string): Promise<void> {
+  const token = ++voiceSeq;
   const buffer = await load(url);
+  if (token !== voiceSeq) return; // interrupted or superseded while loading
   stopVoice();
   const panner = graph().createStereoPanner();
   panner.pan.value = PAN[speaker];
@@ -94,6 +100,7 @@ export async function playVoice(speaker: Exclude<Speaker, "user">, url: string):
 
 /** Cut the current line immediately (the user pressed INTERRUPT). Its playVoice() promise resolves. */
 export function stopVoice() {
+  voiceSeq++; // also cancels a line still loading
   if (!voice) return;
   const v = voice;
   voice = null;
@@ -119,6 +126,7 @@ export function gavel(times = 1) {
 /** Crossfade to a music track (or null for silence). `trial` and `cutscene` loop; `verdict` plays once. */
 export async function setMusic(name: BgmName | null, fadeSeconds = 1) {
   if (music?.name === name) return;
+  const token = ++musicSeq;
   const c = graph();
   const t = c.currentTime;
   if (music) {
@@ -129,6 +137,7 @@ export async function setMusic(name: BgmName | null, fadeSeconds = 1) {
   }
   if (!name) return;
   const buffer = await load(BGM[name]);
+  if (token !== musicSeq) return; // a newer setMusic won while loading
   const gain = c.createGain();
   gain.gain.value = 0;
   gain.gain.setTargetAtTime(1, c.currentTime, fadeSeconds / 3);
@@ -138,16 +147,19 @@ export async function setMusic(name: BgmName | null, fadeSeconds = 1) {
 
 /** Low crowd murmur under everything (on during the trial, off for the verdict). */
 export async function setAmbience(on: boolean) {
+  const token = ++ambienceSeq;
   if (!on) {
     ambience?.stop();
     ambience = null;
     return;
   }
   if (ambience) return;
+  const buffer = await load(SFX.murmur);
+  if (token !== ambienceSeq || ambience) return; // turned off or already started while loading
   const gain = graph().createGain();
   gain.gain.value = 0.25;
   gain.connect(sfxBus);
-  ambience = play(await load(SFX.murmur), gain, { loop: true });
+  ambience = play(buffer, gain, { loop: true });
 }
 
 /** The OBJECTION moment: cut the speaker, sting, dip the music. */

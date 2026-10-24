@@ -41,8 +41,8 @@ async function ask<S extends z.ZodType, R>(
           model: MODEL,
           max_tokens: 4000,
           system: `${P.COURT}\n\n${task}`,
-          output_config: { effort: 'low', format: zodOutputFormat(schema) },
           messages: [{ role: 'user', content }],
+          output_config: { effort: 'low', format: zodOutputFormat(schema) },
         },
         { signal },
       );
@@ -81,7 +81,7 @@ export async function buildAgenda(question: string): Promise<AgendaResponse> {
     P.AGENDA_TASK,
     `QUESTION: ${question}`,
     AgendaSchema,
-    9000,
+    20000,
     'agenda',
     (out): AgendaResponse => {
       if (!out.topics.length) throw new Error('empty agenda');
@@ -121,7 +121,7 @@ CUT-IN ALLOWED: ${req.cutInAllowed && !req.userPoint ? 'yes' : 'no'}
 ${P.cardsBlock(own)}
 ${P.historyBlock(req.history)}${req.userPoint ? `\n\nUSER POINT (the witness just interrupted you): "${req.userPoint}"` : ''}`,
     ArgueSchema,
-    8000,
+    20000,
     'argue',
     (out): ArgueResponse => {
       if (!out.text.trim()) throw new Error('empty argument'); // → mock fallback
@@ -170,7 +170,7 @@ export async function scoreArgument(req: ScoreArgumentRequest): Promise<ScoreArg
 ${P.cardsBlock(req.cards)}
 LINE (by ${req.line.speaker}): ${req.line.text}`,
     LedgerSchema,
-    7000,
+    20000,
     'score-argument',
     (out) => ({
       id: uid('ledger'),
@@ -204,7 +204,7 @@ export async function scoreTopic(req: ScoreTopicRequest): Promise<ScoreTopicResp
 ${P.ledgerBlock(req.ledger)}
 ${P.historyBlock(req.history)}`,
     TopicScoreSchema,
-    8000,
+    20000,
     'score-topic',
     (out): ScoreTopicResponse => ({
       score: {
@@ -243,7 +243,7 @@ ${req.agenda.map((t) => `- ${t.id} [${t.status}, ${Math.round(t.importance * 100
 
 THE WITNESS SAYS: "${req.text}"`,
     JudgeInterruptSchema,
-    7000,
+    20000,
     'judge-interrupt',
     (out): JudgeInterruptResponse => {
       const line = judgeLine('agenda_change', out.line);
@@ -284,7 +284,7 @@ ${scored.map((t) => `- ${t.title} (${Math.round(t.importance * 100)}% weight${t.
 ${req.agenda.some((t) => t.status === 'removed') ? `REMOVED BY THE WITNESS: ${req.agenda.filter((t) => t.status === 'removed').map((t) => t.title).join(', ')}` : ''}
 WITNESS INTERRUPTS: ${req.userLines.length ? req.userLines.map((l) => `"${l.text}"`).join('; ') : '(none)'}`,
     VerdictSchema,
-    9000,
+    20000,
     'verdict',
     (out): VerdictResponse => ({
       verdict: { spectrum, explanation: out.explanation, breakdown, line: judgeLine('verdict', out.line) },
