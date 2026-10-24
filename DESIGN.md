@@ -25,6 +25,13 @@ The mechanic is always `interrupt`. The presentation varies. This avoids confusi
 1. ONBOARD
    → Sign up (Supabase auth)
    → Record voice (30s script) → IVC clone → voice_id saved to profile
+   → "Now take a selfie" — webcam capture becomes the courtroom avatars
+     • **Lip detection** runs immediately after photo capture:
+       - MediaPipe Face Mesh (browser-only, ~3MB model, one-shot)
+       - Detects landmark 13 (upper lip top) → lip Y% stored with profile
+       - Used to split face into upper + jaw for talking animation
+       - Fallback: 70/30 split if no face detected
+       - Value saved to Supabase alongside voice_id and avatar
    → "What decision are you wrestling with?" (hold-to-talk)
 
 2. SIMULATE
