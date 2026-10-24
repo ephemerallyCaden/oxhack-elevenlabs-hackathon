@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roulette — Manga Noir Courtroom (Camera Demo)</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #000;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .courtroom {
+    width: 960px;
+    height: 540px;
+    position: relative;
+    overflow: hidden;
+    border: 3px solid #222;
+  }
+
+  /* ═══════════════════════════════════════════
+     BACKGROUND — courtroom image, greyscale manga
+     ═══════════════════════════════════════════ */
+  .bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background: url('../public/assets/courtroom-bg.png') center center / cover no-repeat;
+    /* Greyscale + high contrast for manga look */
+    filter: grayscale(1) contrast(1.3) brightness(0.7);
+  }
+
+  /* Halftone dot overlay — manga print texture */
+  .halftone {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+    background-image: radial-gradient(circle, rgba(0,0,0,0.15) 1px, transparent 1px);
+    background-size: 4px 4px;
+    mix-blend-mode: multiply;
+  }
+
+  /* Ink edge / heavy shadow overlay for manga depth */
+  .ink-shadow {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    background:
+      /* darken the lower area where benches are */
+      linear-gradient(0deg, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.2) 25%, transparent 45%),
+      /* darken corners */
+      radial-gradient(ellipse 80% 80% at 50% 45%, transparent 40%, rgba(0,0,0,0.6) 100%);
+  }
+
+  /* Scanlines — fine, manga screen-tone feel */
+  .scanlines {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    pointer-events: none;
+    background: repeating-linear-gradient(0deg,
+      transparent 0px, transparent 2px,
+      rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 3px
+    );
+  }
+
+  /* Vignette — heavy black frame, manga panel border */
+  .vignette {
+    position: absolute;
+    inset: 0;
+    z-index: 51;
+    pointer-events: none;
+    border: 4px solid #000;
+    box-shadow:
+      inset 0 0 80px rgba(0,0,0,0.5),
+      inset 0 0 20px rgba(0,0,0,0.3);
+  }
+  /* Corner accents — thick manga panel lines */
+  .vignette::before {
+    content: '';
+    position: absolute;
+    top: -1px; left: -1px;
+    width: 40px; height: 40px;
+    border-top: 4px solid #fff;
+    border-left: 4px solid #fff;
+    opacity: 0.15;
+  }
+  .vignette::after {
+    content: '';
+    position: absolute;
+    bottom: -1px; right: -1px;
+    width: 40px; height: 40px;
+    border-bottom: 4px solid #fff;
+    border-right: 4px solid #fff;
+    opacity: 0.15;
+  }
+
+  /* ═══════════════════════════════════════════
+     SPEED LINES — manga action radial
+     ═══════════════════════════════════════════ */
+  .speed-lines {
+    position: absolute;
+    inset: -50%;
+    width: 200%;
+    height: 200%;
+    z-index: 2;
+    pointer-events: none;
+    background: repeating-conic-gradient(
+      from 0deg at 50% 45%,
+      transparent 0deg, transparent 2.8deg,
+      rgba(0,0,0,0.04) 2.8deg, rgba(0,0,0,0.04) 3deg
+    );
+  }
+
+  /* ═══════════════════════════════════════════
+     CHARACTERS — torso-centered on courtroom image landmarks
+
+     Red zones in the reference image (curtains/throne):
+     - Judge throne curtains: ~50% X, ~32% Y
+     - Left desk area:        ~25% X, ~58% Y
+     - Right desk area:       ~75% X, ~58% Y
+
+     Characters use transform: translate(-50%, -50%) to
+     CENTER their torso on these points, not their feet.
+     ═══════════════════════════════════════════ */
+  .character {
+    position: absolute;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    /* Center the element on its position point (torso center) */
+    transform: translate(-50%, -50%);
+  }
+
+  .char-body {
+    position: relative;
+    width: 140px;
+  }
+  .char-body img {
+    width: 100%;
+    display: block;
+  }
+
+  /* Face overlay */
+  .char-face {
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 56px;
+    height: 62px;
+    z-index: 2;
+    overflow: hidden;
+    border: 2px solid #333;
+  }
+  .char-face img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* Name tags — manga caption boxes */
+  .char-tag {
+    margin-top: 6px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 8px;
+    letter-spacing: 2px;
+    padding: 3px 8px;
+    border: 2px solid;
+    background: #08080e;
+  }
+
+  /* ── PROSECUTION (left desk — red marker at 23.3% X, 76.4% Y in image,
+     adjusted for cover crop → 23.3% X, 78% Y in container) ── */
+  .prosecution {
+    left: 23.3%;
+    top: 78%;
+  }
+  .prosecution .char-body img {
+    filter: sepia(1) saturate(2.5) hue-rotate(-10deg) brightness(0.6) contrast(1.4);
+    transform: scaleX(-1);
+  }
+  .prosecution .char-face {
+    transform: translateX(-50%) scaleX(-1);
+  }
+  .prosecution .char-tag {
+    color: #e84040;
+    border-color: #e84040;
+    text-shadow: 2px 2px 0 #400808;
+  }
+
+  /* ── DEFENSE (right desk — red marker at 76.5% X, 76.4% Y in image,
+     adjusted for cover crop → 76.5% X, 78% Y in container) ── */
+  .defense {
+    left: 76.5%;
+    top: 78%;
+  }
+  .defense .char-body img {
+    filter: sepia(1) saturate(2) hue-rotate(180deg) brightness(0.6) contrast(1.4);
+  }
+  .defense .char-tag {
+    color: #4a9eff;
+    border-color: #4a9eff;
+    text-shadow: 2px 2px 0 #081840;
+  }
+
+  /* ── JUDGE (throne — pure #ff0000 marker at 49.8% X, 61.7% Y in image,
+     adjusted for cover crop → 50% X, 62.5% Y in container) ── */
+  .judge {
+    left: 50%;
+    top: 62.5%;
+  }
+  .judge .char-body {
+    width: 110px;
+  }
+  .judge .char-body img {
+    filter: sepia(1) saturate(1.8) hue-rotate(20deg) brightness(0.65) contrast(1.3);
+  }
+  .judge .char-face {
+    width: 42px;
+    height: 46px;
+  }
+  .judge .char-tag {
+    color: #f0b830;
+    border-color: #f0b830;
+    text-shadow: 2px 2px 0 #402800;
+  }
+
+  /* ═══════════════════════════════════════════
+     TEXT BOX — manga speech panel
+     ═══════════════════════════════════════════ */
+  .textbox {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 22%;
+    z-index: 30;
+    background: #08080e;
+    border-top: 3px solid #2a3050;
+    padding: 12px 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .textbox-speaker {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+  }
+  .textbox-text {
+    font-family: 'VT323', monospace;
+    font-size: 22px;
+    color: #e0e0e0;
+    line-height: 1.4;
+    overflow: hidden;
+  }
+  .textbox-text em {
+    color: #f0b830;
+    font-style: normal;
+  }
+
+  /* Blinking cursor */
+  .cursor {
+    display: inline-block;
+    width: 12px;
+    height: 20px;
+    background: #e0e0e0;
+    vertical-align: text-bottom;
+    animation: blink 0.5s steps(1) infinite;
+    margin-left: 2px;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ═══════════════════════════════════════════
+     OBJECTION — manga impact frame
+     ═══════════════════════════════════════════ */
+  .objection {
+    position: absolute;
+    top: 35%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 40;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 32px;
+    color: #fff;
+    letter-spacing: 4px;
+    padding: 8px 20px;
+    border: 4px solid #fff;
+    background: #000;
+    text-shadow: 3px 3px 0 #333;
+    opacity: 0;
+    display: none;
+  }
+
+  .flash {
+    position: absolute;
+    inset: 0;
+    z-index: 35;
+    pointer-events: none;
+    background: #fff;
+    opacity: 0;
+    display: none;
+  }
+
+  /* ═══════════════════════════════════════════
+     TUG-OF-WAR BAR — monochrome
+     ═══════════════════════════════════════════ */
+  .tug-bar-container {
+    position: absolute;
+    top: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .tug-bar {
+    width: 200px;
+    height: 10px;
+    background: #000;
+    border: 2px solid #333;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+  }
+
+  .tug-bar-left {
+    height: 100%;
+    background: #4a9eff;
+  }
+
+  .tug-bar-right {
+    height: 100%;
+    background: #e84040;
+  }
+
+  .tug-bar-marker {
+    position: absolute;
+    left: 50%;
+    top: -2px;
+    bottom: -2px;
+    width: 3px;
+    background: #f0b830;
+    transform: translateX(-50%);
+    z-index: 1;
+  }
+
+  /* Round indicator */
+  .round-indicator {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 8px;
+    color: #f0b830;
+    letter-spacing: 2px;
+    padding: 4px 12px;
+    background: #08080e;
+    border: 2px solid #f0b830;
+  }
+
+  /* Interrupt tokens */
+  .tokens {
+    position: absolute;
+    bottom: calc(22% + 8px);
+    right: 16px;
+    z-index: 20;
+    display: flex;
+    gap: 6px;
+  }
+  .token {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #f0b830;
+    background: #1a1408;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 6px;
+    color: #f0b830;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .token.used {
+    border-color: #222028;
+    background: #08080e;
+    color: #222028;
+  }
+
+  /* ═══════════════════════════════════════════
+     CAMERA SYSTEM
+     Transforms computed at load from actual DOM face
+     positions, using the formula validated in
+     camera-offset-calculator.js / courtroom-visual-tests.html:
+       translateX% = ((targetX - 480)/S + 480 - faceX)/960*100
+       translateY% = ((targetY - 270)/S + 270 - faceY)/540*100
+     Targets: lawyers 11% off-center (facing each other),
+     judge centered; all at effective-viewport vertical center.
+     ═══════════════════════════════════════════ */
+  .camera-wrapper {
+    width: 100%;
+    height: 100%;
+    transition: transform 0.8s ease-out;
+    transform-origin: center center;
+  }
+
+  /* ═══════════════════════════════════════════
+     CAMERA BUTTONS
+     ═══════════════════════════════════════════ */
+  .camera-controls {
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    display: flex;
+    gap: 8px;
+  }
+  .cam-btn {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 8px;
+    letter-spacing: 1px;
+    padding: 10px 14px;
+    background: #08080e;
+    color: #888;
+    border: 2px solid #333;
+    cursor: pointer;
+  }
+  .cam-btn:hover { color: #fff; border-color: #888; }
+  .cam-btn.active {
+    color: #f0b830;
+    border-color: #f0b830;
+    background: #1a1408;
+  }
+</style>
+</head>
+<body>
+
+<div class="courtroom">
+  <div class="camera-wrapper camera-zoomed-out">
+    <!-- Background image — greyscale manga -->
+    <div class="bg"></div>
+    <div class="speed-lines"></div>
+    <div class="halftone"></div>
+    <div class="ink-shadow"></div>
+
+    <!-- Round indicator -->
+    <div class="round-indicator">ROUND 2</div>
+
+    <!-- Tug-of-war bar -->
+    <div class="tug-bar-container">
+      <div class="tug-bar">
+        <div class="tug-bar-left" style="width:45%;"></div>
+        <div class="tug-bar-right" style="width:55%;"></div>
+        <div class="tug-bar-marker"></div>
+      </div>
+    </div>
+
+    <!-- Characters — positioned to match courtroom desk layout -->
+    <div class="character judge">
+      <div class="char-body">
+        <div class="char-face"><img src="../public/assets/face.png" alt="face"></div>
+        <img src="../public/assets/suit_tpose_nobg.png" alt="judge">
+      </div>
+      <span class="char-tag">JUDGE</span>
+    </div>
+
+    <div class="character prosecution">
+      <div class="char-body">
+        <div class="char-face"><img src="../public/assets/face.png" alt="face"></div>
+        <img src="../public/assets/suit_tpose_nobg.png" alt="prosecution">
+      </div>
+      <span class="char-tag">PROSECUTION</span>
+    </div>
+
+    <div class="character defense">
+      <div class="char-body">
+        <div class="char-face"><img src="../public/assets/face.png" alt="face"></div>
+        <img src="../public/assets/suit_tpose_nobg.png" alt="defense">
+      </div>
+      <span class="char-tag">DEFENSE</span>
+    </div>
+
+    <div class="tokens">
+      <div class="token">!</div>
+      <div class="token">!</div>
+      <div class="token used">!</div>
+    </div>
+  </div>
+
+  <!-- Viewport overlays -->
+  <div class="flash"></div>
+  <div class="objection">OBJECTION!</div>
+  <div class="scanlines"></div>
+  <div class="vignette"></div>
+
+  <!-- Textbox -->
+  <div class="textbox">
+    <div class="textbox-speaker" style="color:#e84040;">PROSECUTION</div>
+    <div class="textbox-text">
+      "Your <em>Monte Carlo</em> simulation — ironic name by the way — shows a 23% chance I'm a millionaire in 5 years."<span class="cursor"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Camera position buttons -->
+<div class="camera-controls">
+  <button class="cam-btn active" data-cam="zoomed-out">ZOOMED OUT</button>
+  <button class="cam-btn" data-cam="prosecutor">PROSECUTOR</button>
+  <button class="cam-btn" data-cam="defendant">DEFENDANT</button>
+  <button class="cam-btn" data-cam="mediator">MEDIATOR</button>
+</div>
+
+<script>
+// Constants from camera-offset-calculator.js (validated by courtroom-visual-tests.html)
+const VIEWPORT_W = 960, VIEWPORT_H = 540;
+const TEXTBOX_H = VIEWPORT_H * 0.22;
+const EFFECTIVE_CENTER_Y = (VIEWPORT_H - TEXTBOX_H) / 2; // 210.6
+const ORIGIN_X = VIEWPORT_W / 2, ORIGIN_Y = VIEWPORT_H / 2; // transform-origin: center
+const LAWYER_SCALE = 2.2, JUDGE_SCALE = 2.0;
+const OFFSET_PCT = 11.0; // lawyers 11% off-center → "facing each other"
+const ZOOM_OUT_SCALE = 1.4; // mild zoom: crops ceiling, enlarges bodies
+
+// translate% that puts (faceX, faceY) at (targetX, targetY) after scale S about center
+function calcTranslate(faceX, faceY, targetX, targetY, S) {
+  return {
+    x: ((targetX - ORIGIN_X) / S + ORIGIN_X - faceX) / VIEWPORT_W * 100,
+    y: ((targetY - ORIGIN_Y) / S + ORIGIN_Y - faceY) / VIEWPORT_H * 100,
+  };
+}
+
+// Face centers measured from the live DOM (courtroom-local coords, zoomed-out state)
+function facePos(sel) {
+  const court = document.querySelector('.courtroom').getBoundingClientRect();
+  const f = document.querySelector(sel + ' .char-face').getBoundingClientRect();
+  return { x: f.left + f.width / 2 - court.left, y: f.top + f.height / 2 - court.top };
+}
+
+const wrapper = document.querySelector('.camera-wrapper');
+let cams;
+
+function computeCams() {
+  const p = facePos('.prosecution'), d = facePos('.defense'), j = facePos('.judge');
+  const off = OFFSET_PCT / 100 * VIEWPORT_W;
+  const pT = calcTranslate(p.x, p.y, ORIGIN_X - off, EFFECTIVE_CENTER_Y, LAWYER_SCALE);
+  const dT = calcTranslate(d.x, d.y, ORIGIN_X + off, EFFECTIVE_CENTER_Y, LAWYER_SCALE);
+  const jT = calcTranslate(j.x, j.y, ORIGIN_X, EFFECTIVE_CENTER_Y, JUDGE_SCALE);
+
+  // Zoomed out: target the lawyers' face midpoint at the effective center,
+  // then clamp the translate so no blank content shows past the image edges.
+  const S = ZOOM_OUT_SCALE;
+  const midX = (p.x + d.x) / 2, midY = (p.y + d.y) / 2;
+  const zT = calcTranslate(midX, midY, ORIGIN_X, EFFECTIVE_CENTER_Y, S);
+  const maxTxPx = ORIGIN_X - ORIGIN_X / S;  // horizontal clamp
+  const maxTyPx = ORIGIN_Y - ORIGIN_Y / S;  // vertical clamp
+  const zx = Math.max(-maxTxPx, Math.min(maxTxPx, zT.x / 100 * VIEWPORT_W)) / VIEWPORT_W * 100;
+  const zy = Math.max(-maxTyPx, Math.min(maxTyPx, zT.y / 100 * VIEWPORT_H)) / VIEWPORT_H * 100;
+
+  cams = {
+    'zoomed-out': `scale(${S}) translate(${zx.toFixed(1)}%, ${zy.toFixed(1)}%)`,
+    'prosecutor': `scale(${LAWYER_SCALE}) translate(${pT.x.toFixed(1)}%, ${pT.y.toFixed(1)}%)`,
+    'defendant':  `scale(${LAWYER_SCALE}) translate(${dT.x.toFixed(1)}%, ${dT.y.toFixed(1)}%)`,
+    'mediator':   `scale(${JUDGE_SCALE}) translate(${jT.x.toFixed(1)}%, ${jT.y.toFixed(1)}%)`,
+  };
+  console.log('Computed camera transforms:', cams);
+  // Apply the new zoomed-out framing as the default view
+  wrapper.style.transform = cams['zoomed-out'];
+}
+
+document.querySelectorAll('.cam-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.cam-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    wrapper.style.transform = cams[btn.dataset.cam];
+  });
+});
+
+// Measure after images load so face rects are final
+window.addEventListener('load', computeCams);
+</script>
+
+</body>
+</html>

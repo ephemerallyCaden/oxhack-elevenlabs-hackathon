@@ -16,6 +16,8 @@ import { useTrialState } from '@/lib/debate/useTrial';
 import { footnotes } from '@/lib/debate/transcript';
 import * as engine from '@/lib/audio/engine';
 import type { BgmName } from '@/lib/audio/assets';
+import Courtroom from '@/components/courtroom/Courtroom';
+import { deriveMoods } from '@/components/courtroom/expressions';
 
 // -- Scene -> BGM mapping --
 const SCENE_MUSIC: Record<Scene, BgmName | null> = {
@@ -32,14 +34,6 @@ const WHO: Record<Line['speaker'], { name: string; color: string }> = {
   defense: { name: 'DEFENSE \u00B7 NO', color: '#2563eb' },
   judge: { name: 'THE JUDGE', color: '#a16207' },
   user: { name: 'YOU', color: '#e4e4e7' },
-};
-
-const SCENE_LABEL: Record<Scene, string> = {
-  yes: 'Prosecution',
-  no: 'Defense',
-  judge: 'The Judge',
-  witness: 'The Court',
-  cutscene: 'Cut-scene',
 };
 
 // -- Hold-to-talk recorder --
@@ -267,195 +261,145 @@ export default function TrialPage() {
   const pos = `${(s.spectrum.value + 100) / 2}%`;
   const canTalk = s.phase === 'ask' || (s.phase === 'speaking' && s.canInterrupt) || holding;
 
+
+  // -- Expressions (sticky) + talking (independent), derived from the transcript --
+  const moods = useMemo(() => deriveMoods(s), [s]);
+
+  // -- Textbox content --
+  const box =
+    s.phase === 'speaking' && line
+      ? { name: WHO[line.speaker].name, color: WHO[line.speaker].color, text: line.text }
+      : s.phase === 'listening'
+        ? {
+            name: 'YOU',
+            color: WHO.user.color,
+            text: `Interrupting ${
+              s.interruptTarget === 'judge'
+                ? 'the Judge (add or remove a topic)'
+                : s.interruptTarget === 'prosecution'
+                  ? 'YES'
+                  : 'NO'
+            }… speak, then release.`,
+          }
+        : s.phase === 'ask'
+          ? { name: 'THE COURT', color: '#a16207', text: 'Hold to talk and ask: "Should I …?"' }
+          : undefined;
+
+  const controls = (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={!canTalk}
+          onPointerDown={down}
+          onPointerUp={up}
+          onPointerLeave={() => held.current && up()}
+          className="min-h-11 flex-1 rounded-full bg-red-600 px-4 py-2 text-xs font-bold uppercase tracking-wide disabled:opacity-40"
+        >
+          {holding ? 'Listening… release' : s.phase === 'ask' ? 'Hold to ask' : 'Hold to interrupt'}
+        </button>
+        <span className="text-[10px] text-zinc-500">or SPACE</span>
+      </div>
+      {(needTyping || s.phase === 'ask') && (
+        <div className="flex gap-2">
+          <label htmlFor="typed" className="sr-only">
+            Type instead
+          </label>
+          <input
+            type="text"
+            id="typed"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submitTyped();
+              }
+            }}
+            placeholder={s.phase === 'ask' ? 'or type: Should I…?' : 'Type your interruption'}
+            className="min-h-9 min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-xs"
+          />
+          <button type="button" onClick={submitTyped} className="min-h-9 rounded-lg border border-zinc-600 px-3 text-xs">
+            Send
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 text-zinc-100">
-      <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="text-2xl font-black tracking-tight">Court of Future Selves</h1>
-        <span className="text-sm text-zinc-400">
-          {s.question ? `"${s.question}"` : 'Ask a yes/no question to begin'}
-        </span>
-      </header>
-
-      <div className="flex flex-wrap gap-4">
-        {/* Scene */}
-        <section className="flex min-w-0 flex-[999_1_560px] flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900">
-          <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-2 text-xs uppercase tracking-widest text-zinc-400">
-            <span>{SCENE_LABEL[s.scene]}</span>
-            <span>{active ? `${active.title} \u00B7 cycle ${s.cycle}/${s.totalCycles}` : s.phase}</span>
-          </div>
-          <div className="relative flex h-72 items-end justify-center gap-10 p-6">
-            {(['prosecution', 'judge', 'defense'] as const).map((who) => {
-              const focus =
-                s.scene === 'witness' || s.scene === 'cutscene'
-                  ? true
-                  : (s.scene === 'yes' && who === 'prosecution') ||
-                    (s.scene === 'no' && who === 'defense') ||
-                    (s.scene === 'judge' && who === 'judge');
-              const target = s.phase === 'listening' && s.interruptTarget === who;
-              return (
-                <div
-                  key={who}
-                  className="flex flex-col items-center gap-2 transition-all duration-300"
-                  style={{
-                    opacity: s.scene === 'cutscene' ? 0.15 : focus ? 1 : 0.2,
-                    transform: focus && s.scene !== 'witness' ? 'scale(1.25)' : undefined,
-                  }}
-                >
-                  <div
-                    className="h-16 w-16 rounded-full border-4 bg-zinc-800"
-                    style={{
-                      borderColor: WHO[who].color,
-                      boxShadow: target ? `0 0 24px ${WHO[who].color}` : undefined,
-                    }}
-                  />
-                  <div
-                    className="h-20 w-28 rounded-t-3xl border-4 bg-zinc-800"
-                    style={{ borderColor: WHO[who].color }}
-                  />
-                  <span className="text-xs font-bold" style={{ color: WHO[who].color }}>
-                    {WHO[who].name}
-                  </span>
-                </div>
-              );
-            })}
-            {s.phase === 'listening' && (
-              <div className="absolute top-6 -rotate-3 border-4 border-white bg-zinc-950 px-6 py-1 text-4xl font-black">
-                OBJECTION!
-              </div>
-            )}
-            {(s.phase === 'preparing' || s.phase === 'thinking') && (
-              <div className="absolute inset-x-0 top-6 text-center text-lg text-zinc-300">
-                {s.status}
-              </div>
-            )}
-          </div>
-          <div className="min-h-32 border-t border-zinc-800 bg-zinc-950 p-4">
-            {line && s.phase === 'speaking' ? (
-              <>
-                <div className="mb-1 text-xs font-bold tracking-widest" style={{ color: WHO[line.speaker].color }}>
-                  {WHO[line.speaker].name}
-                </div>
-                <p className="text-lg leading-snug">{line.text}</p>
-              </>
-            ) : s.phase === 'listening' ? (
-              <p className="text-lg text-zinc-300">
-                Interrupting{' '}
-                {s.interruptTarget === 'judge'
-                  ? 'the Judge (add or remove a topic)'
-                  : s.interruptTarget === 'prosecution'
-                    ? 'YES'
-                    : 'NO'}
-                … speak, then release.
-              </p>
-            ) : s.phase === 'ask' ? (
-              <p className="text-lg text-zinc-300">Hold to talk and ask: &ldquo;Should I …?&rdquo;</p>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap items-center gap-3 border-t border-zinc-800 p-4">
-            <button
-              type="button"
-              disabled={!canTalk}
-              onPointerDown={down}
-              onPointerUp={up}
-              onPointerLeave={() => held.current && up()}
-              className="min-h-11 rounded-full bg-red-600 px-6 py-3 font-bold uppercase tracking-wide disabled:opacity-40"
-            >
-              {holding
-                ? 'Listening… release to send'
-                : s.phase === 'ask'
-                  ? 'Hold to ask'
-                  : 'Hold to interrupt'}
-            </button>
-            <span className="text-xs text-zinc-500">or hold SPACE</span>
-            {(needTyping || s.phase === 'ask') && (
-              <div className="flex min-w-0 flex-1 gap-2">
-                <label htmlFor="typed" className="sr-only">
-                  Type instead
-                </label>
-                <input
-                  type="text"
-                  id="typed"
-                  value={typed}
-                  onChange={(e) => setTyped(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      submitTyped();
-                    }
-                  }}
-                  placeholder={s.phase === 'ask' ? 'or type: Should I…?' : 'Type your interruption'}
-                  className="min-h-11 min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3"
-                />
-                <button
-                  type="button"
-                  onClick={submitTyped}
-                  className="min-h-11 rounded-lg border border-zinc-600 px-4"
-                >
-                  Send
-                </button>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Judge's board */}
-        <aside className="flex flex-[1_1_300px] flex-col gap-4">
-          <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4">
-            <h2 className="mb-2 text-xs font-bold uppercase tracking-widest text-amber-500">
-              Where the court stands
-            </h2>
-            <div className="relative h-3 rounded-full bg-gradient-to-r from-blue-600 via-zinc-600 to-orange-600">
-              <div
-                className="absolute -top-1.5 h-6 w-1.5 rounded bg-white transition-all"
-                style={{ left: pos }}
-              />
-            </div>
-            <div className="mt-1 flex justify-between text-xs text-zinc-400">
-              <span>NO -100</span>
-              <span>0</span>
-              <span>+100 YES</span>
-            </div>
-            <p className="mt-2 font-bold">
-              {s.spectrum.value > 0 ? '+' : ''}
-              {s.spectrum.value} · {s.spectrum.label}
-            </p>
-          </div>
-          <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4">
-            <h2 className="mb-2 text-xs font-bold uppercase tracking-widest text-amber-500">Agenda</h2>
-            <ul className="flex flex-col gap-2 text-sm">
-              {s.agenda.map((t) => (
-                <li
-                  key={t.id}
-                  className={`flex justify-between gap-2 ${
-                    t.status === 'removed'
-                      ? 'text-zinc-600 line-through'
-                      : t.id === s.activeTopicId
-                        ? 'font-bold'
-                        : ''
-                  }`}
-                >
-                  <span>
-                    {t.title}
-                    {t.added_by === 'user' ? ' (yours)' : ''}
-                  </span>
-                  <span className="shrink-0 text-zinc-400">
-                    {Math.round(t.importance * 100)}%
-                    {t.score ? ` · ${t.score.t > 0 ? '+' : ''}${t.score.t.toFixed(2)}` : ''}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-          {s.fallbacks.length > 0 && (
-            <p className="text-xs text-zinc-500">
-              Mock data used for: {[...new Set(s.fallbacks)].join(', ')}
-            </p>
-          )}
-        </aside>
+    <main className="relative h-dvh w-full overflow-hidden bg-black text-zinc-100">
+      {/* Full-bleed manga courtroom */}
+      <div className="absolute inset-0">
+        <Courtroom
+          scene={s.scene}
+          moods={moods}
+          speakerName={box?.name}
+          speakerColor={box?.color}
+          text={box?.text}
+          objection={s.phase === 'listening'}
+          status={s.phase === 'preparing' || s.phase === 'thinking' ? s.status : undefined}
+          controls={controls}
+        />
       </div>
 
+      {/* Top-left: question + topic/cycle */}
+      <header className="absolute left-4 top-4 z-50 max-w-md rounded-lg bg-black/70 px-4 py-2">
+        <h1 className="text-sm font-black tracking-tight">Court of Future Selves</h1>
+        <p className="text-xs text-zinc-400">
+          {s.question ? `"${s.question}"` : 'Ask a yes/no question to begin'}
+        </p>
+        {active && (
+          <p className="mt-1 text-xs text-amber-500">
+            {active.title} · cycle {s.cycle}/{s.totalCycles}
+          </p>
+        )}
+      </header>
+
+      {/* Top-right: spectrum + agenda */}
+      <aside className="absolute right-4 top-4 z-50 w-72 rounded-lg bg-black/70 p-3">
+        <div className="relative h-2 rounded-full bg-gradient-to-r from-blue-600 via-zinc-600 to-orange-600">
+          <div className="absolute -top-1 h-4 w-1 rounded bg-white transition-all" style={{ left: pos }} />
+        </div>
+        <p className="mt-1 text-center text-xs font-bold">
+          {s.spectrum.value > 0 ? '+' : ''}
+          {s.spectrum.value} · {s.spectrum.label}
+        </p>
+        {s.agenda.length > 0 && (
+          <ul className="mt-2 flex flex-col gap-1 text-xs">
+            {s.agenda.map((t) => (
+              <li
+                key={t.id}
+                className={`flex justify-between gap-2 ${
+                  t.status === 'removed'
+                    ? 'text-zinc-600 line-through'
+                    : t.id === s.activeTopicId
+                      ? 'font-bold text-white'
+                      : 'text-zinc-400'
+                }`}
+              >
+                <span>
+                  {t.title}
+                  {t.added_by === 'user' ? ' (yours)' : ''}
+                </span>
+                <span className="shrink-0">
+                  {Math.round(t.importance * 100)}%
+                  {t.score ? ` · ${t.score.t > 0 ? '+' : ''}${t.score.t.toFixed(2)}` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {s.fallbacks.length > 0 && (
+          <p className="mt-2 text-[10px] text-zinc-500">
+            Mock data: {[...new Set(s.fallbacks)].join(', ')}
+          </p>
+        )}
+      </aside>
+
+      {/* Verdict + transcript overlay */}
       {s.result && (
-        <section className="flex flex-col gap-4 rounded-xl border border-zinc-700 bg-zinc-900 p-4">
+        <section className="absolute inset-x-4 bottom-4 top-20 z-[60] mx-auto flex max-w-3xl flex-col gap-4 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950/95 p-6">
           <h2 className="text-xl font-black">
             Verdict: {s.result.verdict?.spectrum.label} ({s.spectrum.value > 0 ? '+' : ''}
             {s.spectrum.value})
