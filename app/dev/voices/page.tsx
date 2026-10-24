@@ -33,7 +33,7 @@ export default function VoiceLab() {
     const res = await fetch("/api/voice/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: line, role, voiceSettings: s }),
+      body: JSON.stringify({ text: line, speaker: role, voiceSettings: s }),
     });
     const out: TtsResult = await res.json();
     cache.current.set(key, out);
