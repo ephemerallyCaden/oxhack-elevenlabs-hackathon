@@ -16,6 +16,41 @@ export type Scene = 'yes' | 'no' | 'judge' | 'witness' | 'cutscene';
 export const SIDE_SPEAKER: Record<Side, Speaker> = { yes: 'prosecution', no: 'defense' };
 export const SPEAKER_SCENE: Record<Speaker, Scene> = { prosecution: 'yes', defense: 'no', judge: 'judge', user: 'witness' };
 
+// ─── The user & their two futures ───────────────────────────────────────────
+
+/** From the onboarding form (C), gaps filled from the voice transcript (B8 → D10). All optional. */
+export interface UserProfile {
+  name?: string;
+  age?: number;
+  /** "first-year CS student", "nurse with two kids" */
+  situation?: string;
+  location?: string;
+  /** Anything else they said that matters. */
+  notes?: string;
+}
+
+/**
+ * One future version of the user who said YES to the question, at the moment that future is most
+ * likely to look its best (YES side) or its worst (NO side). Chosen per question in the cut-scene.
+ */
+export interface Persona {
+  side: Side;
+  /** Their age at that moment, if the user's age is known. */
+  age?: number;
+  /** How far from now, for the UI: "1 year from now". */
+  when: string;
+  years_from_now: number;
+  /** 2-3 sentences: where they are and what their life looks like. */
+  snapshot: string;
+  /** One or two words: "thriving", "exhausted". */
+  mood: string;
+}
+
+export interface Personas {
+  yes: Persona;
+  no: Persona;
+}
+
 // ─── Agenda (outer loop) ────────────────────────────────────────────────────
 
 export interface Topic {
@@ -150,6 +185,7 @@ export interface Transcript {
 /** POST /api/trial/agenda */
 export interface AgendaRequest {
   question: string;
+  profile?: UserProfile;
 }
 export interface AgendaResponse {
   /** 1-4 topics, quick-to-research first, importance normalised. */
@@ -161,11 +197,24 @@ export interface AgendaResponse {
   fallback: boolean;
 }
 
+/** POST /api/trial/personas — runs in the cut-scene, in parallel with the agenda. */
+export interface PersonasRequest {
+  question: string;
+  profile?: UserProfile;
+}
+export interface PersonasResponse {
+  personas: Personas;
+  fallback: boolean;
+}
+
 /** POST /api/trial/argue */
 export interface ArgueRequest {
   question: string;
   topic: Topic;
   side: Side;
+  /** The future self who is speaking (argues in the first person from their moment). */
+  persona?: Persona;
+  profile?: UserProfile;
   cycle: number;
   /** All lines so far on this topic, oldest first. */
   history: Line[];

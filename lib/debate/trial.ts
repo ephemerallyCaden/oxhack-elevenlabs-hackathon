@@ -8,18 +8,22 @@ import type {
   JudgeInterruptRequest,
   JudgeInterruptResponse,
   Line,
+  Persona,
+  PersonasRequest,
+  PersonasResponse,
   ScoreArgumentRequest,
   ScoreArgumentResponse,
   ScoreTopicRequest,
   ScoreTopicResponse,
   Topic,
+  UserProfile,
   VerdictRequest,
   VerdictResponse,
 } from '@/types';
 import { SIDE_SPEAKER } from '@/types';
 import { claude, hasClaudeKey, MODEL } from './claude';
 import { uid, withFallback } from './fallback';
-import { mockAgenda, mockArgue, mockJudgeInterrupt, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
+import { mockAgenda, mockArgue, mockJudgeInterrupt, mockPersonas, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
 import * as P from './prompts';
 import { computeSpectrum, MAX_TOPICS, normalise, orderAgenda } from './spectrum';
 
@@ -76,10 +80,11 @@ const AgendaSchema = z.object({
   opening: Spoken,
 });
 
-export async function buildAgenda(question: string): Promise<AgendaResponse> {
+export async function buildAgenda(question: string, profile?: UserProfile): Promise<AgendaResponse> {
   const { value, fallback } = await ask(
     P.AGENDA_TASK,
-    `QUESTION: ${question}`,
+    `QUESTION: ${question}
+${P.profileBlock(profile)}`,
     AgendaSchema,
     9000,
     'agenda',
@@ -99,6 +104,39 @@ export async function buildAgenda(question: string): Promise<AgendaResponse> {
   return { ...value, fallback: value.fallback || fallback };
 }
 
+// ─── personas (cut-scene) ───────────────────────────────────────────────────
+
+const PersonaSchema = z.object({
+  years_from_now: z.number(),
+  when: z.string(),
+  age: z.number().nullable(),
+  snapshot: z.string(),
+  mood: z.string(),
+});
+const PersonasSchema = z.object({ yes: PersonaSchema, no: PersonaSchema });
+
+export async function buildPersonas(req: PersonasRequest): Promise<PersonasResponse> {
+  const { value } = await ask(
+    P.PERSONAS_TASK,
+    `QUESTION: ${req.question}
+${P.profileBlock(req.profile)}`,
+    PersonasSchema,
+    9000,
+    'personas',
+    (out): PersonasResponse => {
+      const persona = (side: 'yes' | 'no', p: z.infer<typeof PersonaSchema>): Persona => {
+        if (!p.snapshot.trim()) throw new Error('empty persona'); // → mock fallback
+        const years = Math.min(30, Math.max(0.25, p.years_from_now));
+        const age = req.profile?.age != null ? Math.round(req.profile.age + years) : p.age ?? undefined;
+        return { side, age, when: p.when, years_from_now: years, snapshot: p.snapshot, mood: p.mood };
+      };
+      return { personas: { yes: persona('yes', out.yes), no: persona('no', out.no) }, fallback: false };
+    },
+    () => mockPersonas(req),
+  );
+  return value;
+}
+
 // ─── argue (inner loop) ─────────────────────────────────────────────────────
 
 const ArgueSchema = z.object({
@@ -116,7 +154,9 @@ export async function argue(req: ArgueRequest): Promise<ArgueResponse> {
   const { value } = await ask(
     P.ARGUE_TASK,
     `${P.topicBlock(req.question, req.topic)}
-YOU ARE: ${req.side === 'yes' ? 'PROSECUTION (YES)' : 'DEFENSE (NO)'} · cycle ${req.cycle}
+YOU ARE: ${req.side === 'yes' ? 'PROSECUTION (YES), the best future you' : 'DEFENSE (NO), the worst future you'} · cycle ${req.cycle}
+${P.personaBlock(req.persona)}
+${P.profileBlock(req.profile)}
 CUT-IN ALLOWED: ${req.cutInAllowed && !req.userPoint ? 'yes' : 'no'}
 ${P.cardsBlock(own)}
 ${P.historyBlock(req.history)}${req.userPoint ? `\n\nUSER POINT (the witness just interrupted you): "${req.userPoint}"` : ''}`,

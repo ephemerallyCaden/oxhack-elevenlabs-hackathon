@@ -14,6 +14,8 @@ import type {
   JudgeInterruptResponse,
   LedgerEntry,
   Line,
+  Personas,
+  PersonasResponse,
   ResearchResponse,
   Scene,
   ScoreArgumentResponse,
@@ -25,12 +27,13 @@ import type {
   Topic,
   Transcript,
   TtsResponse,
+  UserProfile,
   Verdict,
   VerdictResponse,
 } from '@/types';
 import { SPEAKER_SCENE } from '@/types';
 import { estimateMs, postJson, uid, withFallback } from './fallback';
-import { mockAgenda, mockArgue, mockCards, mockJudgeInterrupt, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
+import { mockAgenda, mockArgue, mockCards, mockJudgeInterrupt, mockPersonas, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
 import { addTopic, computeSpectrum, removeTopic } from './spectrum';
 import { buildTranscript } from './transcript';
 
@@ -43,6 +46,10 @@ export interface TrialState {
   phase: TrialPhase;
   scene: Scene;
   question: string;
+  /** Who's asking (from onboarding). */
+  profile?: UserProfile;
+  /** Best (yes) and worst (no) future you: age, when, snapshot, mood. Set during the cut-scene. */
+  personas?: Personas;
   agenda: Topic[];
   activeTopicId?: string;
   /** Inner-loop cycle of the active topic (1-based). */
@@ -86,7 +93,7 @@ export class TrialOrchestrator {
   /** User interrupts of YES/NO answered during the current turn: each adds one cycle. */
   private userAddedCycles = 0;
 
-  constructor(private opts: { voiceId?: string } = {}) {}
+  constructor(private opts: { voiceId?: string; profile?: UserProfile } = {}) {}
 
   // ── store ─────────────────────────────────────────────────────────────────
   subscribe = (fn: () => void) => {
@@ -117,9 +124,9 @@ export class TrialOrchestrator {
 
   // ── UI → orchestrator ─────────────────────────────────────────────────────
   /** The user asked their question (already transcribed). Runs the whole trial. */
-  async start(question: string) {
+  async start(question: string, profile: UserProfile | undefined = this.opts.profile) {
     if (this.state.phase !== 'ask') return; // already running (e.g. a double submit)
-    this.state = { ...this.initial(), question };
+    this.state = { ...this.initial(), question, profile };
     this.set({ phase: 'preparing', scene: 'cutscene', status: 'The court is preparing the case…' });
     try {
       await this.run();
@@ -220,10 +227,14 @@ export class TrialOrchestrator {
 
   // ── the trial ─────────────────────────────────────────────────────────────
   private async run() {
-    const { question } = this.state;
-    const agenda = await this.call<AgendaResponse>('/api/trial/agenda', { question }, () => mockAgenda(question), 10000);
+    const { question, profile } = this.state;
+    // Agenda and the two future selves are independent: build both during the cut-scene.
+    const [agenda, cast] = await Promise.all([
+      this.call<AgendaResponse>('/api/trial/agenda', { question, profile }, () => mockAgenda(question), 10000),
+      this.call<PersonasResponse>('/api/trial/personas', { question, profile }, () => mockPersonas({ question, profile }), 10000),
+    ]);
     this.intros = agenda.intros;
-    this.set({ agenda: agenda.topics });
+    this.set({ agenda: agenda.topics, personas: cast.personas });
     this.research(agenda.topics);
     // Hold the cut-scene until the first topic has its quick evidence.
     await this.quickResearch.get(agenda.topics[0].id);
@@ -270,6 +281,8 @@ export class TrialOrchestrator {
       question: this.state.question,
       topic: this.topic(topicId)!,
       side,
+      persona: this.state.personas?.[side],
+      profile: this.state.profile,
       cycle,
       history: [...this.topicLines(topicId), ...extra],
       cards: this.state.cards.filter((c) => c.topic_id === topicId),
