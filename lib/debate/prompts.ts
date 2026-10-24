@@ -18,6 +18,10 @@ Choose 1-4 topics that together settle the question. Simple questions get 1-2 to
 For each topic give: a short title (2-4 words), the sub-question it settles, importance (0-1, how much it should count; they will be normalised), research_speed ("quick" if facts are easy to look up, e.g. costs, statistics; "deep" if it needs nuanced research), and the Judge's one-sentence intro line that ends by inviting the prosecution to begin.
 Also write the opening line: call the court to order, restate the question in second person, and name the topics (max 40 words).`;
 
+export const PROFILE_TASK = `You are the court clerk taking down the witness's background from their onboarding recording, before their trial. The text is speech-to-text: expect filler words, mis-heard words and run-on sentences.
+Extract only what they actually said or clearly implied; use null for anything they didn't cover. Keep phrases short and in their own terms. Never guess an age, a name or a place.
+"question": if they described a decision they're wrestling with, rewrite it as one yes/no question starting "Should I" (e.g. "Should I take a gap year before university?"). If they named two options, frame it as the change vs staying put.`;
+
 export const PERSONAS_TASK = `You cast the two future selves for this question. Both are the witness in a future where they said YES:
 - yes: the BEST version, at the point in time when that future is MOST LIKELY to be going well (e.g. a gap year is usually best a few months in).
 - no: the WORST version, at the point in time when that future is MOST LIKELY to have gone wrong (e.g. a gap year usually hurts most 3-4 years later, when peers are ahead).
@@ -70,6 +74,12 @@ export function profileBlock(profile?: UserProfile): string {
         profile.age != null && `age ${profile.age}`,
         profile.situation && `situation: ${profile.situation}`,
         profile.location && `lives in ${profile.location}`,
+        profile.people && `people affected: ${profile.people}`,
+        profile.risk_tolerance && `risk: ${profile.risk_tolerance}`,
+        profile.money && `money: ${profile.money}`,
+        profile.goals && `goals: ${profile.goals}`,
+        profile.fears && `fears: ${profile.fears}`,
+        profile.values?.length && `values: ${profile.values.join(', ')}`,
         profile.notes && `notes: ${profile.notes}`,
       ].filter(Boolean)
     : [];

@@ -11,6 +11,9 @@ import type {
   Line,
   PersonasRequest,
   PersonasResponse,
+  ProfileRequest,
+  ProfileResponse,
+  UserProfile,
   ResearchRequest,
   ScoreArgumentRequest,
   ScoreTopicRequest,
@@ -53,6 +56,40 @@ export function mockAgenda(question: string): AgendaResponse {
     intros,
     fallback: true,
   };
+}
+
+/** Form fields win over extracted ones; empty strings don't count. */
+export function mergeProfile(extracted: UserProfile, form?: UserProfile): UserProfile {
+  const out: UserProfile = { ...extracted };
+  for (const [k, v] of Object.entries(form ?? {})) {
+    if (v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length)) (out as Record<string, unknown>)[k] = v;
+  }
+  return out;
+}
+
+/** All the onboarding speech as one text. */
+export function onboardingText(req: ProfileRequest): string {
+  return [req.transcript ?? '', ...(req.answers ?? []).map((a) => a.transcript)].join(' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Offline extraction: the facts people state plainly. Claude does the rest when it's available. */
+export function mockProfile(req: ProfileRequest): ProfileResponse {
+  const text = onboardingText(req);
+  const p: UserProfile = {};
+  const name = text.match(/\bmy name(?:'s| is)\s+([A-Z][a-z]+)/i)?.[1];
+  if (name && !/^(not|a|the)$/i.test(name)) p.name = name[0].toUpperCase() + name.slice(1);
+  const age = Number(text.match(/\b(\d{1,2})\s*(?:years?\s*old|yo)\b/i)?.[1] ?? text.match(/\bI(?:'m| am)\s+(\d{1,2})\b/i)?.[1]);
+  if (age >= 10 && age <= 99) p.age = age;
+  const place = text.match(/\b(?:live|living|based|from)\s+in\s+([A-Z][\w'-]+(?:\s+[A-Z][\w'-]+)?)/)?.[1];
+  if (place) p.location = place;
+  if (/\b(play it safe|plan everything|careful|cautious|overthink)/i.test(text)) p.risk_tolerance = 'cautious';
+  else if (/\b(jump (?:straight )?in|go for it|risk[- ]taker|spontaneous|leap)/i.test(text)) p.risk_tolerance = 'bold';
+
+  // "should I move to Berlin" / "whether to quit my job" → "Should I move to Berlin?"
+  const ask = text.match(/\b(?:should I|whether (?:or not )?(?:I should |to )|deciding (?:whether )?to )\s*([^.?!]{4,120})/i)?.[1];
+  const question = ask ? `Should I ${ask.trim().replace(/\s+(?:or not|and)$/i, '')}?` : undefined;
+
+  return { profile: mergeProfile(p, req.form), question, fallback: true };
 }
 
 export function mockPersonas(req: PersonasRequest): PersonasResponse {

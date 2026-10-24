@@ -16,6 +16,8 @@ import type {
   Line,
   Personas,
   PersonasResponse,
+  ProfileRequest,
+  ProfileResponse,
   ResearchResponse,
   Scene,
   ScoreArgumentResponse,
@@ -33,7 +35,7 @@ import type {
 } from '@/types';
 import { SPEAKER_SCENE } from '@/types';
 import { estimateMs, postJson, uid, withFallback } from './fallback';
-import { mockAgenda, mockArgue, mockCards, mockJudgeInterrupt, mockPersonas, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
+import { mockAgenda, mockArgue, mockCards, mockJudgeInterrupt, mockPersonas, mockProfile, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
 import { addTopic, computeSpectrum, removeTopic } from './spectrum';
 import { buildTranscript } from './transcript';
 import { TIMEOUTS } from './timeouts';
@@ -439,4 +441,14 @@ export class TrialOrchestrator {
     }
     await this.sayHandled(r.line);
   }
+}
+
+/**
+ * Onboarding → profile (+ the decision they described as a "Should I …?" question).
+ * Use after VoiceStep: `const { profile, question } = await getProfile({ transcript, form })`,
+ * then `new TrialOrchestrator({ voiceId, profile })` and `orch.start(question ?? typedQuestion)`.
+ */
+export async function getProfile(req: ProfileRequest): Promise<ProfileResponse> {
+  const r = await withFallback((signal) => postJson<ProfileResponse>('/api/trial/profile', req, signal), () => mockProfile(req), TIMEOUTS.profile.client, 'profile');
+  return r.value;
 }

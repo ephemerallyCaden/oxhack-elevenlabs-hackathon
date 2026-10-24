@@ -3,6 +3,7 @@
 // browser waits for the route. Keep client > server so the route's own fallback arrives first.
 // Tune these after the real-key smoke test (scripts/smoke-trial.ts).
 export const TIMEOUTS = {
+  profile: { server: 7000, client: 8000 },
   agenda: { server: 7000, client: 8000 },
   personas: { server: 7000, client: 8000 },
   argue: { server: 7000, client: 8000 },

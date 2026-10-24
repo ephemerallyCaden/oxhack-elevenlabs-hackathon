@@ -11,6 +11,8 @@ import type {
   Persona,
   PersonasRequest,
   PersonasResponse,
+  ProfileRequest,
+  ProfileResponse,
   ScoreArgumentRequest,
   ScoreArgumentResponse,
   ScoreTopicRequest,
@@ -24,7 +26,7 @@ import { SIDE_SPEAKER } from '@/types';
 import { claude, hasClaudeKey, MODEL } from './claude';
 import { uid, withFallback } from './fallback';
 import { TIMEOUTS } from './timeouts';
-import { mockAgenda, mockArgue, mockJudgeInterrupt, mockPersonas, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
+import { mergeProfile, mockAgenda, mockArgue, mockJudgeInterrupt, mockPersonas, mockProfile, mockScoreArgument, mockScoreTopic, mockVerdict, onboardingText } from './mock';
 import * as P from './prompts';
 import { computeSpectrum, MAX_TOPICS, normalise, orderAgenda } from './spectrum';
 
@@ -103,6 +105,48 @@ ${P.profileBlock(profile)}`,
     () => mockAgenda(question),
   );
   return { ...value, fallback: value.fallback || fallback };
+}
+
+// ─── profile (onboarding) ───────────────────────────────────────────────────
+
+const ProfileSchema = z.object({
+  name: z.string().nullable(),
+  age: z.number().int().nullable(),
+  situation: z.string().nullable().describe('Short phrase: "first-year CS student", "nurse with two kids"'),
+  location: z.string().nullable(),
+  people: z.string().nullable().describe('Who their decisions affect'),
+  risk_tolerance: z.enum(['cautious', 'balanced', 'bold']).nullable(),
+  money: z.string().nullable().describe('Their money situation in a few words, no exact figures'),
+  goals: z.string().nullable(),
+  fears: z.string().nullable(),
+  values: z.array(z.string()).describe('1-4 single words, e.g. freedom, family, security'),
+  notes: z.string().nullable().describe('Anything else that would matter for a life decision'),
+  question: z.string().nullable().describe('The decision they described, as "Should I …?"; null if none'),
+});
+
+export async function extractProfile(req: ProfileRequest): Promise<ProfileResponse> {
+  const text = onboardingText(req);
+  if (!text) return { profile: mergeProfile({}, req.form), fallback: true };
+  const { value } = await ask(
+    P.PROFILE_TASK,
+    req.answers?.length
+      ? req.answers.map((a) => `Q: ${a.question}\nA: ${a.transcript}`).join('\n\n')
+      : `TRANSCRIPT:\n${text}`,
+    ProfileSchema,
+    TIMEOUTS.profile.server,
+    'profile',
+    (out): ProfileResponse => {
+      const extracted: UserProfile = {};
+      for (const [k, v] of Object.entries(out)) {
+        if (k === 'question' || v === null || v === '' || (Array.isArray(v) && !v.length)) continue;
+        (extracted as Record<string, unknown>)[k] = v;
+      }
+      if (extracted.age != null && (extracted.age < 10 || extracted.age > 99)) delete extracted.age;
+      return { profile: mergeProfile(extracted, req.form), question: out.question?.trim() || undefined, fallback: false };
+    },
+    () => mockProfile(req),
+  );
+  return value;
 }
 
 // ─── personas (cut-scene) ───────────────────────────────────────────────────
