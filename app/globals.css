@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+/* Always dark: the demo runs on a projector. */
+:root {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --animate-talk: talk 0.35s ease-in-out infinite alternate;
+}
+
+/* Speaking character bob */
+@keyframes talk {
+  from { transform: translateY(0); }
+  to { transform: translateY(-1.5%); }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}

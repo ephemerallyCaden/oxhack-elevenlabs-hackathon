@@ -1,0 +1,14 @@
+{
+  "name": "oxhack-tools",
+  "description": "Team tools for the OxHack ElevenLabs hackathon.",
+  "owner": {
+    "name": "oxhack team"
+  },
+  "plugins": [
+    {
+      "name": "auto-check",
+      "source": "./plugins/auto-check",
+      "description": "Automatic static checks, test writing and test runs after each coding turn."
+    }
+  ]
+}

@@ -43,5 +43,16 @@
         ]
       }
     ]
+  },
+  "extraKnownMarketplaces": {
+    "oxhack-tools": {
+      "source": {
+        "source": "github",
+        "repo": "ephemerallyCaden/oxhack-elevenlabs-hackathon"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "auto-check@oxhack-tools": true
   }
 }

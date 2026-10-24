@@ -29,3 +29,23 @@ Thumbs.db
 secrets/
 *.pem
 *.key
+
+# Claude Code per-machine settings
+.claude/settings.local.json
+# Next.js / Vercel
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+/coverage
+npm-debug.log*
+
+# Script output (test audio)
+scripts/out/
+
+# Voice recordings (real people) - never commit
+voice-sample*
+*.m4a
+*.wav
+
+# Generated TTS cache (B5)
+.cache/
