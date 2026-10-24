@@ -1,7 +1,7 @@
 import type { VoiceSettings } from "@elevenlabs/elevenlabs-js/api";
-import type { Role } from "@/types";
+import type { Speaker } from "@/types";
 
-export type VoiceRole = Exclude<Role, "user">;
+export type VoiceRole = Exclude<Speaker, "user">;
 
 // similarityBoost 1.0 keeps the presenter's real accent (accent test: eleven_v4 + stability 0.6 + similarity 1.0
 // was the closest match). Roles differ by stability + audio tags + stereo pan only: on eleven_v4 `speed` has no
