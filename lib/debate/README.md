@@ -4,7 +4,7 @@ The trial engine. Design: `docs/design-core-loop.md`. Contract: `types.ts`.
 
 | File | What |
 |---|---|
-| `orchestrator.ts` | Browser-side state machine: agenda → per-topic inner loop (≤ 3 YES/NO cycles) → Judge scores → spectrum → verdict → transcript. Interrupts: a side must answer you; the Judge changes the agenda. |
+| `orchestrator.ts` | Browser-side state machine: agenda → per-topic inner loop (2 YES/NO cycles, +1 per user interrupt, at most one AI cut-in per topic) → Judge scores → spectrum → verdict → transcript. Interrupts: a side must answer you; the Judge changes the agenda. |
 | `useTrial.ts` | `useTrialState(orch)` React binding |
 | `trial.ts` | Server-side Claude calls behind `app/api/trial/*` |
 | `prompts.ts` | All prompts (generic: any "Should I …?") |

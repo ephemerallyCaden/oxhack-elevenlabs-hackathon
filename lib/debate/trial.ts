@@ -8,18 +8,23 @@ import type {
   JudgeInterruptRequest,
   JudgeInterruptResponse,
   Line,
+  Persona,
+  PersonasRequest,
+  PersonasResponse,
   ScoreArgumentRequest,
   ScoreArgumentResponse,
   ScoreTopicRequest,
   ScoreTopicResponse,
   Topic,
+  UserProfile,
   VerdictRequest,
   VerdictResponse,
 } from '@/types';
 import { SIDE_SPEAKER } from '@/types';
 import { claude, hasClaudeKey, MODEL } from './claude';
 import { uid, withFallback } from './fallback';
-import { mockAgenda, mockArgue, mockJudgeInterrupt, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
+import { TIMEOUTS } from './timeouts';
+import { mockAgenda, mockArgue, mockJudgeInterrupt, mockPersonas, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
 import * as P from './prompts';
 import { computeSpectrum, MAX_TOPICS, normalise, orderAgenda } from './spectrum';
 
@@ -76,12 +81,13 @@ const AgendaSchema = z.object({
   opening: Spoken,
 });
 
-export async function buildAgenda(question: string): Promise<AgendaResponse> {
+export async function buildAgenda(question: string, profile?: UserProfile): Promise<AgendaResponse> {
   const { value, fallback } = await ask(
     P.AGENDA_TASK,
-    `QUESTION: ${question}`,
+    `QUESTION: ${question}
+${P.profileBlock(profile)}`,
     AgendaSchema,
-    9000,
+    TIMEOUTS.agenda.server,
     'agenda',
     (out): AgendaResponse => {
       if (!out.topics.length) throw new Error('empty agenda');
@@ -99,9 +105,49 @@ export async function buildAgenda(question: string): Promise<AgendaResponse> {
   return { ...value, fallback: value.fallback || fallback };
 }
 
+// ─── personas (cut-scene) ───────────────────────────────────────────────────
+
+const PersonaSchema = z.object({
+  years_from_now: z.number(),
+  when: z.string(),
+  age: z.number().nullable(),
+  snapshot: z.string(),
+  mood: z.string(),
+});
+const PersonasSchema = z.object({ yes: PersonaSchema, no: PersonaSchema });
+
+export async function buildPersonas(req: PersonasRequest): Promise<PersonasResponse> {
+  const { value } = await ask(
+    P.PERSONAS_TASK,
+    `QUESTION: ${req.question}
+${P.profileBlock(req.profile)}`,
+    PersonasSchema,
+    TIMEOUTS.personas.server,
+    'personas',
+    (out): PersonasResponse => {
+      const persona = (side: 'yes' | 'no', p: z.infer<typeof PersonaSchema>): Persona => {
+        if (!p.snapshot.trim()) throw new Error('empty persona'); // → mock fallback
+        const years = Math.min(30, Math.max(0.25, p.years_from_now));
+        const age = req.profile?.age != null ? Math.round(req.profile.age + years) : p.age ?? undefined;
+        return { side, age, when: p.when, years_from_now: years, snapshot: p.snapshot, mood: p.mood };
+      };
+      return { personas: { yes: persona('yes', out.yes), no: persona('no', out.no) }, fallback: false };
+    },
+    () => mockPersonas(req),
+  );
+  return value;
+}
+
 // ─── argue (inner loop) ─────────────────────────────────────────────────────
 
-const ArgueSchema = z.object({ text: z.string(), tts: z.string(), cites: z.array(z.string()), exhausted: z.boolean() });
+const ArgueSchema = z.object({
+  text: z.string(),
+  tts: z.string(),
+  cites: z.array(z.string()),
+  exhausted: z.boolean(),
+  cut_in: Spoken.describe('The other side cutting in; empty strings if none'),
+  resume: Spoken.describe('Your comeback after the cut-in; empty strings if none'),
+});
 
 export async function argue(req: ArgueRequest): Promise<ArgueResponse> {
   const valid = new Set(req.cards.map((c) => c.id));
@@ -109,15 +155,27 @@ export async function argue(req: ArgueRequest): Promise<ArgueResponse> {
   const { value } = await ask(
     P.ARGUE_TASK,
     `${P.topicBlock(req.question, req.topic)}
-YOU ARE: ${req.side === 'yes' ? 'PROSECUTION (YES)' : 'DEFENSE (NO)'} · cycle ${req.cycle} of 3
+YOU ARE: ${req.side === 'yes' ? 'PROSECUTION (YES), the best future you' : 'DEFENSE (NO), the worst future you'} · cycle ${req.cycle}
+${P.personaBlock(req.persona)}
+${P.profileBlock(req.profile)}
+CUT-IN ALLOWED: ${req.cutInAllowed && !req.userPoint ? 'yes' : 'no'}
 ${P.cardsBlock(own)}
 ${P.historyBlock(req.history)}${req.userPoint ? `\n\nUSER POINT (the witness just interrupted you): "${req.userPoint}"` : ''}`,
     ArgueSchema,
-    8000,
+    TIMEOUTS.argue.server,
     'argue',
     (out): ArgueResponse => {
       if (!out.text.trim()) throw new Error('empty argument'); // → mock fallback
+      const other = req.side === 'yes' ? 'no' : 'yes';
+      const cutIn =
+        req.cutInAllowed && !req.userPoint && out.cut_in.text.trim() && out.resume.text.trim()
+          ? {
+              line: { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in' as const, text: out.cut_in.text, tts: out.cut_in.tts, cites: [], topic_id: req.topic.id, cycle: req.cycle },
+              resume: { id: uid('line'), speaker: SIDE_SPEAKER[req.side], kind: 'resume' as const, text: out.resume.text, tts: out.resume.tts, cites: [], topic_id: req.topic.id, cycle: req.cycle },
+            }
+          : undefined;
       return {
+        cutIn,
         line: {
           id: uid('line'),
           speaker: SIDE_SPEAKER[req.side],
@@ -153,7 +211,7 @@ export async function scoreArgument(req: ScoreArgumentRequest): Promise<ScoreArg
 ${P.cardsBlock(req.cards)}
 LINE (by ${req.line.speaker}): ${req.line.text}`,
     LedgerSchema,
-    7000,
+    TIMEOUTS.scoreArgument.server,
     'score-argument',
     (out) => ({
       id: uid('ledger'),
@@ -187,7 +245,7 @@ export async function scoreTopic(req: ScoreTopicRequest): Promise<ScoreTopicResp
 ${P.ledgerBlock(req.ledger)}
 ${P.historyBlock(req.history)}`,
     TopicScoreSchema,
-    8000,
+    TIMEOUTS.scoreTopic.server,
     'score-topic',
     (out): ScoreTopicResponse => ({
       score: {
@@ -226,7 +284,7 @@ ${req.agenda.map((t) => `- ${t.id} [${t.status}, ${Math.round(t.importance * 100
 
 THE WITNESS SAYS: "${req.text}"`,
     JudgeInterruptSchema,
-    7000,
+    TIMEOUTS.judgeInterrupt.server,
     'judge-interrupt',
     (out): JudgeInterruptResponse => {
       const line = judgeLine('agenda_change', out.line);
@@ -267,7 +325,7 @@ ${scored.map((t) => `- ${t.title} (${Math.round(t.importance * 100)}% weight${t.
 ${req.agenda.some((t) => t.status === 'removed') ? `REMOVED BY THE WITNESS: ${req.agenda.filter((t) => t.status === 'removed').map((t) => t.title).join(', ')}` : ''}
 WITNESS INTERRUPTS: ${req.userLines.length ? req.userLines.map((l) => `"${l.text}"`).join('; ') : '(none)'}`,
     VerdictSchema,
-    9000,
+    TIMEOUTS.verdict.server,
     'verdict',
     (out): VerdictResponse => ({
       verdict: { spectrum, explanation: out.explanation, breakdown, line: judgeLine('verdict', out.line) },

@@ -1,7 +1,7 @@
 // The trial state machine (browser side). Design: docs/design-core-loop.md
 //
 //   ask → preparing (cut-scene: agenda + quick research) → opening
-//     → OUTER LOOP per topic: intro → INNER LOOP (≤ 3 cycles of YES → NO) → Judge scores → spectrum
+//     → OUTER LOOP per topic: intro → INNER LOOP (2 cycles of YES → NO, +1 per user interrupt) → Judge scores → spectrum
 //     → verdict → done (transcript)
 //
 // The UI renders `state.scene` + `state.current`, plays the line (audioUrl, or durationMs as a timer)
@@ -14,6 +14,8 @@ import type {
   JudgeInterruptResponse,
   LedgerEntry,
   Line,
+  Personas,
+  PersonasResponse,
   ResearchResponse,
   Scene,
   ScoreArgumentResponse,
@@ -25,16 +27,19 @@ import type {
   Topic,
   Transcript,
   TtsResponse,
+  UserProfile,
   Verdict,
   VerdictResponse,
 } from '@/types';
 import { SPEAKER_SCENE } from '@/types';
 import { estimateMs, postJson, uid, withFallback } from './fallback';
-import { mockAgenda, mockArgue, mockCards, mockJudgeInterrupt, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
+import { mockAgenda, mockArgue, mockCards, mockJudgeInterrupt, mockPersonas, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
 import { addTopic, computeSpectrum, removeTopic } from './spectrum';
 import { buildTranscript } from './transcript';
+import { TIMEOUTS } from './timeouts';
 
-export const MAX_CYCLES = 3;
+/** YES → NO cycles per topic before user interrupts add more. */
+export const BASE_CYCLES = 2;
 
 export type TrialPhase = 'ask' | 'preparing' | 'speaking' | 'listening' | 'thinking' | 'done';
 
@@ -42,10 +47,16 @@ export interface TrialState {
   phase: TrialPhase;
   scene: Scene;
   question: string;
+  /** Who's asking (from onboarding). */
+  profile?: UserProfile;
+  /** Best (yes) and worst (no) future you: age, when, snapshot, mood. Set during the cut-scene. */
+  personas?: Personas;
   agenda: Topic[];
   activeTopicId?: string;
-  /** Inner-loop cycle of the active topic (1-3). */
+  /** Inner-loop cycle of the active topic (1-based). */
   cycle: number;
+  /** Cycles this topic will run: 2 + 1 per user interrupt of YES/NO. */
+  totalCycles: number;
   /** The line on screen right now. */
   current?: Line;
   /** Who the user is interrupting (while phase = listening). */
@@ -80,10 +91,10 @@ export class TrialOrchestrator {
   private inputPromise?: Promise<Blob | string | null>;
   /** Bumped on every interrupt so stale prefetched lines are thrown away. */
   private epoch = 0;
-  /** Set when a side has just answered the user; the debate loop decides who replies. */
-  private answeredSide?: Side;
+  /** User interrupts of YES/NO answered during the current turn: each adds one cycle. */
+  private userAddedCycles = 0;
 
-  constructor(private opts: { voiceId?: string } = {}) {}
+  constructor(private opts: { voiceId?: string; profile?: UserProfile } = {}) {}
 
   // ── store ─────────────────────────────────────────────────────────────────
   subscribe = (fn: () => void) => {
@@ -96,7 +107,7 @@ export class TrialOrchestrator {
     this.listeners.forEach((fn) => fn());
   }
   private initial(): TrialState {
-    return { phase: 'ask', scene: 'witness', question: '', agenda: [], cycle: 0, canInterrupt: false, spectrum: { value: 0, label: 'Toss-up' }, transcript: [], cards: [], ledger: [], fallbacks: [] };
+    return { phase: 'ask', scene: 'witness', question: '', agenda: [], cycle: 0, totalCycles: BASE_CYCLES, canInterrupt: false, spectrum: { value: 0, label: 'Toss-up' }, transcript: [], cards: [], ledger: [], fallbacks: [] };
   }
   private topic(id?: string) {
     return this.state.agenda.find((t) => t.id === id);
@@ -114,9 +125,9 @@ export class TrialOrchestrator {
 
   // ── UI → orchestrator ─────────────────────────────────────────────────────
   /** The user asked their question (already transcribed). Runs the whole trial. */
-  async start(question: string) {
+  async start(question: string, profile: UserProfile | undefined = this.opts.profile) {
     if (this.state.phase !== 'ask') return; // already running (e.g. a double submit)
-    this.state = { ...this.initial(), question };
+    this.state = { ...this.initial(), question, profile };
     this.set({ phase: 'preparing', scene: 'cutscene', status: 'The court is preparing the case…' });
     try {
       await this.run();
@@ -156,7 +167,7 @@ export class TrialOrchestrator {
     const r = await withFallback<TtsResponse | null>(
       (signal) => postJson<TtsResponse>('/api/voice/tts', { text: line.tts || line.text, speaker: line.speaker, voiceId: this.opts.voiceId }, signal),
       null,
-      7000,
+      TIMEOUTS.tts.client,
       'tts',
     );
     return r.value && !r.value.fallback ? { ...line, audioUrl: r.value.audioUrl, durationMs: r.value.durationMs } : { ...line, durationMs: estimateMs(line.text) };
@@ -198,7 +209,7 @@ export class TrialOrchestrator {
           '/api/research',
           { question: this.state.question, topic: { id: topic.id, title: topic.title, question: topic.question }, side, tier: 'quick' },
           () => ({ cards: mockCards({ question: this.state.question, topic, side, tier: 'quick' }), fallback: true }),
-          6000,
+          TIMEOUTS.quickResearch.client,
         ).then(add);
       this.quickResearch.set(topic.id, Promise.all([q('yes'), q('no')]).then(() => undefined));
       // Deep search lands later and is used by later cycles/topics. No mock: quick cards already cover it.
@@ -206,7 +217,7 @@ export class TrialOrchestrator {
         withFallback(
           (signal) => postJson<ResearchResponse>('/api/research', { question: this.state.question, topic, side, tier: 'deep' }, signal),
           { cards: [], fallback: true },
-          50000,
+          TIMEOUTS.deepResearch.client,
           'deep research',
         ).then((r) => {
           if (!r.fallback) add(r.value);
@@ -217,10 +228,14 @@ export class TrialOrchestrator {
 
   // ── the trial ─────────────────────────────────────────────────────────────
   private async run() {
-    const { question } = this.state;
-    const agenda = await this.call<AgendaResponse>('/api/trial/agenda', { question }, () => mockAgenda(question), 10000);
+    const { question, profile } = this.state;
+    // Agenda and the two future selves are independent: build both during the cut-scene.
+    const [agenda, cast] = await Promise.all([
+      this.call<AgendaResponse>('/api/trial/agenda', { question, profile }, () => mockAgenda(question), TIMEOUTS.agenda.client),
+      this.call<PersonasResponse>('/api/trial/personas', { question, profile }, () => mockPersonas({ question, profile }), TIMEOUTS.personas.client),
+    ]);
     this.intros = agenda.intros;
-    this.set({ agenda: agenda.topics });
+    this.set({ agenda: agenda.topics, personas: cast.personas });
     this.research(agenda.topics);
     // Hold the cut-scene until the first topic has its quick evidence.
     await this.quickResearch.get(agenda.topics[0].id);
@@ -230,7 +245,7 @@ export class TrialOrchestrator {
     let topic: Topic | undefined;
     while ((topic = this.state.agenda.find((t) => t.status === 'pending'))) {
       this.patchTopic(topic.id, { status: 'active' });
-      this.set({ activeTopicId: topic.id, cycle: 1 });
+      this.set({ activeTopicId: topic.id, cycle: 1, totalCycles: BASE_CYCLES });
       await this.quickResearch.get(topic.id);
       const intro = this.intros[topic.id] ?? { id: uid('line'), speaker: 'judge', kind: 'intro', text: `Next: ${topic.title.toLowerCase()}. ${topic.question} Prosecution?`, cites: [], topic_id: topic.id };
       await this.sayHandled(intro);
@@ -246,7 +261,7 @@ export class TrialOrchestrator {
       '/api/trial/verdict',
       { question, agenda: this.state.agenda, userLines },
       () => mockVerdict({ question, agenda: this.state.agenda, userLines }),
-      10000,
+      TIMEOUTS.verdict.client,
     );
     this.set({ verdict: v.verdict, spectrum: v.verdict.spectrum });
     await this.say(v.verdict.line);
@@ -262,55 +277,77 @@ export class TrialOrchestrator {
     return this.state.transcript.filter((l) => l.topic_id === topicId && l.kind !== 'intro');
   }
 
-  private argueReq(topicId: string, side: Side, cycle: number, extra: Line[] = [], userPoint?: string): ArgueRequest {
+  private argueReq(topicId: string, side: Side, cycle: number, extra: Line[] = [], userPoint?: string, cutInAllowed = false): ArgueRequest {
     return {
       question: this.state.question,
       topic: this.topic(topicId)!,
       side,
+      persona: this.state.personas?.[side],
+      profile: this.state.profile,
       cycle,
       history: [...this.topicLines(topicId), ...extra],
       cards: this.state.cards.filter((c) => c.topic_id === topicId),
       userPoint,
+      cutInAllowed,
     };
   }
 
   private argue(req: ArgueRequest) {
-    return this.call<ArgueResponse>('/api/trial/argue', req, () => mockArgue(req), 9000);
+    return this.call<ArgueResponse>('/api/trial/argue', req, () => mockArgue(req), TIMEOUTS.argue.client);
   }
 
-  /** INNER LOOP: YES → NO, up to MAX_CYCLES. The next line is generated (and voiced) while the current one plays. */
+  /**
+   * INNER LOOP: YES → NO for BASE_CYCLES cycles; each user interrupt of a side appends one more cycle.
+   * The next line is generated (and voiced) while the current one plays.
+   * An AI cut-in plays inside the turn: speaker (cut off) → other side cuts in → speaker resumes.
+   */
   private async debate(topicId: string) {
     const turns: { side: Side; cycle: number }[] = [];
-    for (let c = 1; c <= MAX_CYCLES; c++) turns.push({ side: 'yes', cycle: c }, { side: 'no', cycle: c });
+    for (let c = 1; c <= BASE_CYCLES; c++) turns.push({ side: 'yes', cycle: c }, { side: 'no', cycle: c });
+    let total = BASE_CYCLES;
+    let cutInUsed = false;
 
     let prefetch: { epoch: number; p: Promise<ArgueResponse> } | null = null;
     const exhausted = new Set<Side>();
     for (let i = 0; i < turns.length; i++) {
       if (this.topic(topicId)?.status !== 'active') return;
       const { side, cycle } = turns[i];
-      this.set({ cycle });
+      this.set({ cycle, totalCycles: total });
       if (!prefetch) this.thinking(side === 'yes' ? 'The prosecution prepares…' : 'The defense prepares…', side);
-      const res = prefetch && prefetch.epoch === this.epoch ? await prefetch.p : await this.argue(this.argueReq(topicId, side, cycle));
+      const res =
+        prefetch && prefetch.epoch === this.epoch ? await prefetch.p : await this.argue(this.argueReq(topicId, side, cycle, [], undefined, !cutInUsed));
       prefetch = null;
       if (res.exhausted) exhausted.add(side);
+      const cutIn = res.cutIn && !cutInUsed ? res.cutIn : undefined;
+      if (cutIn) cutInUsed = true;
 
       const next = turns[i + 1];
       if (next && exhausted.size < 2) {
         const epoch = this.epoch;
-        const req = this.argueReq(topicId, next.side, next.cycle, [res.line]);
+        const said = cutIn ? [res.line, cutIn.line, cutIn.resume] : [res.line];
+        const req = this.argueReq(topicId, next.side, next.cycle, said, undefined, !cutInUsed);
         prefetch = { epoch, p: this.argue(req).then(async (r) => ({ ...r, line: await this.prepare(r.line) })) };
       }
+
+      const epoch = this.epoch;
+      this.userAddedCycles = 0;
       this.scoreInBackground(topicId, res.line);
-      this.answeredSide = undefined;
       await this.sayHandled(res.line);
-      // The user interrupted and a side answered them. The next scheduled turn is normally the other
-      // side, which replies. Only on the topic's last turn does the other side need an extra reply.
-      const answered = this.answeredSide as Side | undefined;
-      this.answeredSide = undefined;
-      if (answered && !next && this.topic(topicId)?.status === 'active') {
-        const reply = await this.argue(this.argueReq(topicId, answered === 'yes' ? 'no' : 'yes', cycle));
-        this.scoreInBackground(topicId, reply.line);
-        await this.sayHandled(reply.line);
+      // Cut-in: only if the user didn't interrupt the line it cuts into.
+      if (cutIn && this.epoch === epoch && this.topic(topicId)?.status === 'active') {
+        for (const l of [cutIn.line, cutIn.resume]) {
+          if (this.epoch !== epoch) break;
+          this.scoreInBackground(topicId, l);
+          await this.sayHandled(l);
+        }
+      }
+      for (; this.userAddedCycles > 0; this.userAddedCycles--) {
+        // The user interrupted YES/NO: one more cycle at the end of the topic. The interrupted side has
+        // already answered; the other side replies as the next scheduled turn, so turns still alternate.
+        total++;
+        turns.push({ side: 'yes', cycle: total }, { side: 'no', cycle: total });
+        exhausted.clear();
+        this.set({ totalCycles: total });
       }
       // Both sides out of new points after a full cycle → the Judge closes the topic early.
       if (side === 'no' && exhausted.size === 2) return;
@@ -322,7 +359,7 @@ export class TrialOrchestrator {
     if (!topic) return;
     const req = { question: this.state.question, topic, line, cards: this.state.cards.filter((c) => c.topic_id === topicId) };
     this.ledgerPending.push(
-      this.call<ScoreArgumentResponse>('/api/trial/score-argument', req, () => ({ entry: mockScoreArgument(req), fallback: true }), 8000).then((r) =>
+      this.call<ScoreArgumentResponse>('/api/trial/score-argument', req, () => ({ entry: mockScoreArgument(req), fallback: true }), TIMEOUTS.scoreArgument.client).then((r) =>
         this.set({ ledger: [...this.state.ledger, r.entry] }),
       ),
     );
@@ -335,7 +372,7 @@ export class TrialOrchestrator {
     this.ledgerPending = [];
     const topic = this.topic(topicId)!;
     const req = { question: this.state.question, topic, ledger: this.state.ledger.filter((e) => e.topic_id === topicId), history: this.topicLines(topicId) };
-    const r = await this.call<ScoreTopicResponse>('/api/trial/score-topic', req, () => mockScoreTopic(req), 9000);
+    const r = await this.call<ScoreTopicResponse>('/api/trial/score-topic', req, () => mockScoreTopic(req), TIMEOUTS.scoreTopic.client);
     this.patchTopic(topicId, { status: 'done', score: r.score });
     this.set({ spectrum: computeSpectrum(this.state.agenda) });
     await this.sayHandled(r.line);
@@ -353,7 +390,7 @@ export class TrialOrchestrator {
         return ((await res.json()) as SttResponse).transcript;
       },
       '',
-      8000,
+      TIMEOUTS.stt.client,
       'stt',
     );
     if (r.fallback) this.set({ fallbacks: [...this.state.fallbacks, 'voice/stt'] });
@@ -380,20 +417,20 @@ export class TrialOrchestrator {
     if (target === 'judge') return this.agendaChange(text);
     if (!topicId) return;
 
-    // A side was interrupted: it must answer the user's point. The other side replies as the debate
-    // loop's next turn (see debate()), so nobody speaks twice in a row. Not a cycle.
+    // A side was interrupted: it must answer the user's point. debate() then adds a cycle; the other
+    // side replies as the next scheduled turn, so nobody speaks twice in a row.
     const side: Side = target === 'prosecution' ? 'yes' : 'no';
     this.scoreInBackground(topicId, userLine);
     const answer = await this.argue(this.argueReq(topicId, side, this.state.cycle, [], text));
     this.scoreInBackground(topicId, answer.line);
     await this.sayHandled(answer.line);
-    this.answeredSide = side;
+    this.userAddedCycles++;
   }
 
   /** User interrupted the Judge → add or remove a topic. */
   private async agendaChange(text: string) {
     const req = { question: this.state.question, agenda: this.state.agenda, text };
-    const r = await this.call<JudgeInterruptResponse>('/api/trial/judge-interrupt', req, () => mockJudgeInterrupt(req), 8000);
+    const r = await this.call<JudgeInterruptResponse>('/api/trial/judge-interrupt', req, () => mockJudgeInterrupt(req), TIMEOUTS.judgeInterrupt.client);
     if (r.action === 'add' && r.topic) {
       this.set({ agenda: addTopic(this.state.agenda, r.topic, r.topic.importance) });
       this.research([r.topic]);
