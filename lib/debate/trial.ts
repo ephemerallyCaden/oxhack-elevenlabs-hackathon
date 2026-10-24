@@ -31,7 +31,19 @@ import { mergeProfile, mockAgenda, mockArgue, mockJudgeInterrupt, mockPersonas, 
 import * as P from './prompts';
 import { computeSpectrum, MAX_TOPICS, normalise, orderAgenda } from './spectrum';
 
-/** One structured Claude call (or Gemini without a Claude key) → parsed object, or `fallback()` if no key / error / timeout. */
+/**
+ * Which model writes the debate. DEBATE_LLM in .env.local: `mock` (testing, no API calls),
+ * `gemini`, `claude`, or `auto` (default: Claude if its key is set, else Gemini, else mock).
+ */
+function debateLlm(): 'claude' | 'gemini' | 'mock' {
+  const want = process.env.DEBATE_LLM ?? 'auto';
+  if (want === 'mock') return 'mock';
+  if ((want === 'claude' || want === 'auto') && hasClaudeKey()) return 'claude';
+  if ((want === 'gemini' || want === 'auto') && hasGeminiKey()) return 'gemini';
+  return 'mock';
+}
+
+/** One structured Claude/Gemini call → parsed object, or `fallback()` if no key / error / timeout. */
 async function ask<S extends z.ZodType, R>(
   task: string,
   content: string,
@@ -41,8 +53,9 @@ async function ask<S extends z.ZodType, R>(
   build: (out: z.infer<S>) => R,
   fallback: () => R,
 ): Promise<{ value: R; fallback: boolean }> {
-  if (!hasClaudeKey()) {
-    if (!hasGeminiKey()) return { value: fallback(), fallback: true };
+  const llm = debateLlm();
+  if (llm === 'mock') return { value: fallback(), fallback: true };
+  if (llm === 'gemini') {
     return withFallback(async (signal) => build(await askGemini(`${P.COURT}\n\n${task}`, content, schema, signal)), fallback, ms, label);
   }
   return withFallback(
