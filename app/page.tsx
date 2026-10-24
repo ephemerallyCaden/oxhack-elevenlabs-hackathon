@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { UserProfile } from "@/types";
 import VoiceStep, { type VoiceStepResult } from "@/components/onboarding/VoiceStep";
+import HoldToTalk from "@/components/HoldToTalk";
 import { getProfile } from "@/lib/debate/orchestrator";
 import { saveOnboarding } from "@/lib/onboarding/session";
 
@@ -80,6 +81,7 @@ export default function Home() {
               onKeyDown={(e) => e.key === "Enter" && toCourt()}
             />
           </label>
+          <HoldToTalk label="Hold to say your question" spacebar={false} onTranscript={setQuestion} />
           <button
             className="rounded-full bg-red-600 px-10 py-4 text-xl font-bold text-white hover:bg-red-500 disabled:opacity-40"
             disabled={!question.trim()}
