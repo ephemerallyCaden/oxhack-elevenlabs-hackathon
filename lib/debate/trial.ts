@@ -24,13 +24,14 @@ import type {
 } from '@/types';
 import { SIDE_SPEAKER } from '@/types';
 import { claude, hasClaudeKey, MODEL } from './claude';
+import { askGemini, hasGeminiKey } from './gemini';
 import { uid, withFallback } from './fallback';
 import { TIMEOUTS } from './timeouts';
 import { mergeProfile, mockAgenda, mockArgue, mockJudgeInterrupt, mockPersonas, mockProfile, mockScoreArgument, mockScoreTopic, mockVerdict, onboardingText } from './mock';
 import * as P from './prompts';
 import { computeSpectrum, MAX_TOPICS, normalise, orderAgenda } from './spectrum';
 
-/** One structured Claude call → parsed object, or `fallback()` if no key / error / timeout. */
+/** One structured Claude call (or Gemini without a Claude key) → parsed object, or `fallback()` if no key / error / timeout. */
 async function ask<S extends z.ZodType, R>(
   task: string,
   content: string,
@@ -40,7 +41,10 @@ async function ask<S extends z.ZodType, R>(
   build: (out: z.infer<S>) => R,
   fallback: () => R,
 ): Promise<{ value: R; fallback: boolean }> {
-  if (!hasClaudeKey()) return { value: fallback(), fallback: true };
+  if (!hasClaudeKey()) {
+    if (!hasGeminiKey()) return { value: fallback(), fallback: true };
+    return withFallback(async (signal) => build(await askGemini(`${P.COURT}\n\n${task}`, content, schema, signal)), fallback, ms, label);
+  }
   return withFallback(
     async (signal) => {
       const res = await claude().messages.parse(
