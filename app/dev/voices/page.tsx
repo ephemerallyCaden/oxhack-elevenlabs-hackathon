@@ -5,6 +5,7 @@ import type { VoiceSettings } from "@elevenlabs/elevenlabs-js/api";
 import type { SttResponse } from "@/types";
 import { TAG_PALETTE, VOICE_SETTINGS, type VoiceRole } from "@/lib/voice/configs";
 import type { TtsResult } from "@/lib/voice/tts";
+import HoldToTalk from "@/components/HoldToTalk";
 
 // B4 voice lab: hear one line as all three future selves, tune settings, blind-test, and check audio tags.
 const ROLES: VoiceRole[] = ["prosecution", "defense", "judge"];
@@ -88,6 +89,8 @@ export default function VoiceLab() {
     setTagResults((r) => ({ ...r, [tag]: `${leaked ? "✗ READ ALOUD" : "✓ acted"} — "${stt.transcript}"` }));
   }
 
+  const [heard, setHeard] = useState<string[]>([]);
+
   const setOne = (role: VoiceRole, k: keyof VoiceSettings, v: number) =>
     setSettings((s) => ({ ...s, [role]: { ...s[role], [k]: v } }));
 
@@ -147,6 +150,12 @@ export default function VoiceLab() {
           </>
         )}
         {blind?.total === 9 && <p>{blind.last}</p>}
+      </section>
+
+      <section className="flex flex-col items-center gap-3 rounded bg-zinc-900 p-4">
+        <h2 className="self-start text-xl font-bold">Speech input (HoldToTalk)</h2>
+        <HoldToTalk spacebar={false} editable onTranscript={(t) => setHeard((h) => [t, ...h])} />
+        <ul className="self-start text-sm text-zinc-300">{heard.map((t, i) => <li key={i}>“{t}”</li>)}</ul>
       </section>
 
       <section className="flex flex-col gap-2 rounded bg-zinc-900 p-4">
