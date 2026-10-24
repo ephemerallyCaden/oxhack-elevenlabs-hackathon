@@ -39,3 +39,8 @@ npm-debug.log*
 
 # Script output (test audio)
 scripts/out/
+
+# Voice recordings (real people) - never commit
+voice-sample*
+*.m4a
+*.wav
