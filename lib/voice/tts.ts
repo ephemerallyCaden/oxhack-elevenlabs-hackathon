@@ -1,5 +1,6 @@
 import type { VoiceSettings } from "@elevenlabs/elevenlabs-js/api";
 import type { TtsResponse } from "@/types";
+import { accentFor, withAccent } from "./accent";
 import { elevenlabs, TTS_MODEL, voiceIdFor } from "./client";
 import { VOICE_SETTINGS, type VoiceRole } from "./configs";
 
@@ -15,7 +16,7 @@ export async function synthesize(text: string, role: VoiceRole, voiceId?: string
   if (!elevenlabs) return mockSpeech(text);
 
   const res = await elevenlabs.textToSpeech.convertWithTimestamps(voiceIdFor(voiceId), {
-    text,
+    text: withAccent(text, accentFor(voiceId)),
     modelId: TTS_MODEL,
     voiceSettings: settings ?? VOICE_SETTINGS[role],
     outputFormat: "mp3_44100_128",
