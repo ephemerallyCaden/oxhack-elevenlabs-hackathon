@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { UserProfile } from '@/types';
 import { TrialOrchestrator, type TrialState } from './orchestrator';
 import { computeSpectrum } from './spectrum';
 
@@ -10,8 +11,8 @@ afterEach(() => vi.clearAllTimers());
 type Plan = (s: TrialState, orch: TrialOrchestrator) => string | null | undefined;
 
 /** Plays the trial like the UI would: ends every line, and fires interrupts from `plan`. */
-function play(question: string, plan: Plan = () => undefined): Promise<TrialState> {
-  const orch = new TrialOrchestrator();
+function play(question: string, plan: Plan = () => undefined, profile?: UserProfile): Promise<TrialState> {
+  const orch = new TrialOrchestrator({ profile });
   let lastId = '';
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`stuck in phase ${orch.getState().phase}`)), 4000);
@@ -61,6 +62,30 @@ describe('TrialOrchestrator', () => {
   /** Speakers on a topic in order, including the user (YES → you → YES answering you is fine). */
   const sides = (s: TrialState, topicId: string) =>
     s.transcript.filter((l) => l.topic_id === topicId && l.kind !== 'intro' && l.kind !== 'score').map((l) => l.speaker);
+
+  it('casts best (YES) and worst (NO) future you from the profile, and each argues from its own moment', async () => {
+    const s = await play('Should I take a gap year?', undefined, { age: 18, situation: 'finishing sixth form', location: 'Leeds' });
+    expect(s.profile?.age).toBe(18);
+    const { yes, no } = s.personas!;
+    expect(yes.side).toBe('yes');
+    expect(no.side).toBe('no');
+    // Ages follow the user's age + how far in the future each self is.
+    expect(yes.age).toBe(Math.round(18 + yes.years_from_now));
+    expect(no.age).toBe(Math.round(18 + no.years_from_now));
+    expect(yes.snapshot.length).toBeGreaterThan(20);
+
+    // Each side's first line on a topic speaks from its own moment in time.
+    const first = s.agenda.find((t) => t.status === 'done')!;
+    const opening = (who: string) => s.transcript.find((l) => l.topic_id === first.id && l.speaker === who && l.kind === 'argument')!;
+    expect(opening('prosecution').text).toContain(yes.when);
+    expect(opening('defense').text).toContain(no.when);
+  });
+
+  it('works without a profile: personas exist, ages are unknown', async () => {
+    const s = await play('Should I buy a bike?');
+    expect(s.personas?.yes.age).toBeUndefined();
+    expect(s.personas?.no.when).toBeTruthy();
+  });
 
   it('interrupting a side: that side answers the user first, the other side replies next, and the topic gets one more cycle', async () => {
     let done = false;

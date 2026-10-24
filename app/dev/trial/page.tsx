@@ -71,6 +71,13 @@ export default function TrialHarness() {
   // Ref mirror: pointer/key handlers must see a press immediately, before React re-renders.
   const held = useRef(false);
   const [typed, setTyped] = useState('');
+  // Stand-in for the onboarding form (C): who is asking.
+  const [profile, setProfile] = useState({ age: '', situation: '', location: '' });
+  const toProfile = () => ({
+    age: profile.age ? Number(profile.age) : undefined,
+    situation: profile.situation || undefined,
+    location: profile.location || undefined,
+  });
   const [needTyping, setNeedTyping] = useState(false);
   const audio = useRef<HTMLAudioElement | null>(null);
 
@@ -121,7 +128,7 @@ export default function TrialHarness() {
     const phase = orch.getState().phase;
     if (phase === 'ask') {
       const q = blob ? await transcribe(blob) : '';
-      if (q) orch.start(q);
+      if (q) orch.start(q, toProfile());
       else setNeedTyping(true);
     } else if (phase === 'listening') {
       if (blob) orch.endInterrupt(blob);
@@ -135,7 +142,7 @@ export default function TrialHarness() {
     setTyped('');
     setNeedTyping(false);
     const phase = orch.getState().phase;
-    if (phase === 'ask') orch.start(text);
+    if (phase === 'ask') orch.start(text, toProfile());
     else if (phase === 'listening') orch.endInterrupt(text);
   }
 
@@ -225,6 +232,40 @@ export default function TrialHarness() {
 
         {/* Judge's board */}
         <aside className="flex flex-[1_1_300px] flex-col gap-4">
+          {s.phase === 'ask' && (
+            <fieldset className="flex flex-col gap-2 rounded-xl border border-zinc-700 bg-zinc-900 p-4 text-sm">
+              <legend className="px-1 text-xs font-bold uppercase tracking-widest text-zinc-400">You (onboarding stand-in)</legend>
+              {(['age', 'situation', 'location'] as const).map((k) => (
+                <label key={k} htmlFor={`profile-${k}`} className="flex flex-col gap-1">
+                  <span className="text-zinc-400">{k === 'age' ? 'Age' : k === 'situation' ? 'Situation' : 'Location'}</span>
+                  <input
+                    id={`profile-${k}`}
+                    value={profile[k]}
+                    inputMode={k === 'age' ? 'numeric' : undefined}
+                    placeholder={k === 'age' ? '18' : k === 'situation' ? 'finishing sixth form' : 'Leeds'}
+                    onChange={(e) => setProfile({ ...profile, [k]: e.target.value })}
+                    className="min-h-10 rounded-lg border border-zinc-700 bg-zinc-950 px-3"
+                  />
+                </label>
+              ))}
+            </fieldset>
+          )}
+          {s.personas && (
+            <div className="flex flex-col gap-3 rounded-xl border border-zinc-700 bg-zinc-900 p-4 text-sm">
+              <h2 className="text-xs font-bold uppercase tracking-widest text-zinc-400">Your two futures</h2>
+              {(['yes', 'no'] as const).map((side) => {
+                const p = s.personas![side];
+                return (
+                  <div key={side} className="flex flex-col gap-1">
+                    <span className="font-bold" style={{ color: WHO[side === 'yes' ? 'prosecution' : 'defense'].color }}>
+                      {side === 'yes' ? 'Best you' : 'Worst you'} · {p.when}{p.age != null ? ` · age ${p.age}` : ''} · {p.mood}
+                    </span>
+                    <span className="text-zinc-300">{p.snapshot}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4">
             <h2 className="mb-2 text-xs font-bold uppercase tracking-widest text-amber-500">Where the court stands</h2>
             <div className="relative h-3 rounded-full bg-gradient-to-r from-blue-600 via-zinc-600 to-orange-600">

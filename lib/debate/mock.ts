@@ -9,6 +9,8 @@ import type {
   JudgeInterruptResponse,
   LedgerEntry,
   Line,
+  PersonasRequest,
+  PersonasResponse,
   ResearchRequest,
   ScoreArgumentRequest,
   ScoreTopicRequest,
@@ -53,6 +55,25 @@ export function mockAgenda(question: string): AgendaResponse {
   };
 }
 
+export function mockPersonas(req: PersonasRequest): PersonasResponse {
+  const act = actionOf(req.question);
+  const age = req.profile?.age;
+  const at = (years: number) => (age != null ? Math.round(age + years) : undefined);
+  return {
+    personas: {
+      yes: {
+        side: 'yes', years_from_now: 1, when: '1 year from now', age: at(1), mood: 'thriving',
+        snapshot: `A year after deciding to ${act}, things are going well. The early doubts have faded and the choice feels like it was made for the right reasons.`,
+      },
+      no: {
+        side: 'no', years_from_now: 4, when: '4 years from now', age: at(4), mood: 'worn down',
+        snapshot: `Four years after deciding to ${act}, the costs have piled up. Some of the things that were given up turned out to matter more than expected.`,
+      },
+    },
+    fallback: true,
+  };
+}
+
 export function mockCards(req: ResearchRequest): EvidenceCard[] {
   const lean = req.side === 'yes' ? 'in favour of it' : 'against it';
   return [1, 2].map((i) => ({
@@ -76,7 +97,7 @@ const OPENERS = {
 export function mockArgue(req: ArgueRequest): ArgueResponse {
   const own = req.cards.filter((c) => c.side === req.side);
   const card = own[(req.cycle - 1) % Math.max(1, own.length)];
-  const point = card ? card.claim : `${req.topic.title} ${req.side === 'yes' ? 'favours' : 'argues against'} it`;
+  const point = card ? card.claim : `the evidence ${req.side === 'yes' ? 'favours' : 'argues against'} it`;
   const opener = OPENERS[req.side][(req.cycle - 1) % 3];
   // Offline, YES gets cut off once per topic (cycle 2) so the cut-in path is exercised.
   const cut = req.cutInAllowed && !req.userPoint && req.side === 'yes' && req.cycle === 2;
@@ -84,7 +105,9 @@ export function mockArgue(req: ArgueRequest): ArgueResponse {
     ? `You say "${req.userPoint}". A fair point, and I'll answer it: ${point.toLowerCase()}.`
     : cut
       ? `${opener} On ${req.topic.title.toLowerCase()}, the best case is simply—`
-      : `${opener} On ${req.topic.title.toLowerCase()}: ${point.toLowerCase()}.`;
+      : req.cycle === 1 && req.persona
+        ? `It's ${req.persona.when}, and here's what I know about ${req.topic.title.toLowerCase()}: ${point.toLowerCase()}.`
+        : `${opener} On ${req.topic.title.toLowerCase()}: ${point.toLowerCase()}.`;
   const base = { topic_id: req.topic.id, cycle: req.cycle, cites: [] as string[] };
   return {
     line: { id: uid('line'), speaker: SIDE_SPEAKER[req.side], kind: req.userPoint ? 'answer' : 'argument', text, cites: card ? [card.id] : [], topic_id: req.topic.id, cycle: req.cycle },

@@ -46,6 +46,11 @@ The mechanic is always `interrupt`. The presentation varies. This avoids confusi
        - Judge: stern/thoughtful pose, gold tint
      • Expression states via CSS transforms on the base image
        (shake=sweating, scale-bounce=shocked, desaturate=breakdown)
+     • **Lip detection** runs immediately after photo capture:
+       - MediaPipe Face Mesh (browser-only, ~3MB model, one-shot)
+       - Detects landmark 13 (upper lip top) → lip Y% stored with profile
+       - Used to split face into upper + jaw for talking animation
+       - Fallback: 70/30 split if no face detected
    → voice_id + user profile + avatar saved to Supabase
    → "What decision are you wrestling with?" (hold-to-talk)
 
