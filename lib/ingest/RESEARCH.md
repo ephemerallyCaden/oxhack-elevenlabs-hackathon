@@ -1,8 +1,8 @@
 # Bounded topic research
 
 This service extends `collection.ts` and `collection-fetch.ts`; its bounded JSON
-reader and provider transport are shared in `model-client.ts`. It adds no runtime
-dependencies. It feeds D's existing profile/debate engine through the shared
+reader and provider transport are shared in `model-client.ts`. Community adapters
+use pinned Cheerio 1.2.0 for HTML parsing without executing page scripts. It feeds D's existing profile/debate engine through the shared
 research contract and does not require a preview UI.
 
 ## Contract and execution
@@ -46,7 +46,7 @@ See the team's [engine handoff](../../docs/engine-handoff.md) for the surroundin
 
 - Quick: relevant UK CPI through the existing ONS API, plus explicitly registered
   public captures. Cold search is excluded; unsupported quick topics return empty.
-- Deep: the same paths plus optional Thunderbit Search for five English decision
+- Deep: the same paths plus optional Thunderbit Search for five decision
   categories: gap year, moving, dog ownership, leaving a job and buying a car.
   The overall question selects the category first; the topic is a fallback.
   Query dimensions use fixed vocabulary for costs, employment, wellbeing or
@@ -56,12 +56,54 @@ See the team's [engine handoff](../../docs/engine-handoff.md) for the surroundin
 - Search accepts successful Markdown results only. Snippets, failed rows and
   unsafe links are excluded; omitted counts/sample limits remain visible. The
   provider's per-result timeout is not an end-to-end promise: our acquisition is
-  independently capped at five seconds. Real provider quality/latency is untested.
-- EasySpider/MediaCrawler remain export importers. `publicCaptures` registers
+  independently capped at five seconds. Thunderbit provider quality/latency is untested. All records, including search
+  results and imported captures, must pass the exact source-host registry in
+  `source-policy.ts`; general search cannot promote arbitrary returned sites.
+- EasySpider remains an export importer. `publicCaptures` registers
   trusted server-side readers of fixed public captures; it is not an HTTP upload,
   arbitrary filesystem reader, browser launcher or private-user document cache.
 - The bounded question/topic text DOES reach the selected model provider for passage relevance. Public
   search minimization does not imply local-only AI processing.
+
+## Community acquisition
+
+Deep requests also select up to three matching, configured community adapters.
+Public queries use a separate short fixed vocabulary for gap years, relocation,
+pets, career changes, cars, travel, parenting, education, housing, fitness and
+hobbies. This is bounded category matching, not general semantic understanding;
+some community adapters intentionally cover only a subset of those categories.
+
+| ID | Source | Collection boundary |
+|---|---|---|
+| stackexchange | Life-topic Stack Exchange communities | One question, up to three answers and two comments |
+| discourse | Nomad Gate | One international relocation topic and sampled replies |
+| wordpress | Nomadic Matt | One travel article and up to five comments |
+| telegram | Public Telegram previews discovered through Exa | Up to two channel previews; no discussion replies |
+| youtube | YouTube Data API | One video, ten comment threads and up to two reply pages |
+| x | X recent search API | Initial posts and up to two conversation searches |
+| wikipedia | Wikipedia | Up to two introductory extracts |
+| crossref | Crossref | Up to three supplied publication abstracts; no full-paper claim |
+
+`RESEARCH_COMMUNITY_SOURCES=all` is the default: prefer up to two matching forum
+adapters, one configured social adapter (YouTube/X before Telegram), then fill
+remaining slots with reference adapters. An ordered comma-separated list chooses
+source priority explicitly; `none` disables community acquisition. Unknown IDs
+are not enabled. `GET /api/research/sources` lists community capabilities and
+configuration flags without credentials. API configuration is not proof of access.
+
+YouTube requires `YOUTUBE_API_KEY`; X requires `X_BEARER_TOKEN`. Telegram discovery
+uses Exa REST with `EXA_API_KEY`, otherwise the public Exa MCP service; provider
+access or discovery can still fail. It is not native global Telegram search.
+The current allowlist is intentionally narrow; adding another site requires code
+and access verification, not a user-supplied URL. EasySpider imports are checked
+against the same source registry when used for evidence cards.
+
+Round-robin source records enter the shared ten-record normalization cap so one
+source cannot fill every slot. HTML is parsed once; already-plain text is preserved.
+Recognizable quoted-parent HTML is removed from a reply's selectable text. Parent
+context stays separate and is labelled in the final evidence card. A reply without
+available parent context is omitted. This does not detect all plain-text quotation
+conventions or establish independent factual truth. Source language is not gated.
 
 ## Budgets and sharing
 
@@ -73,7 +115,16 @@ selection and card IDs remain request-specific. A cancelled caller does not canc
 another subscriber's job. No generated cards or personal requests are cached.
 
 Collector success cache: up to 64 entries for one hour, preserving capture time;
-failure results are not success-cached. Sharing/cache/queues are process-local.
+failure results are not success-cached. Community success cache is separately
+bounded to 64 entries for ten minutes, preserving capture time. Failed identical
+collections have a separate 64-entry retry throttle (one minute); API backoff and
+HTTP 429 cooldowns persist across jobs. Already fetched records remain usable when
+later collection is rate-limited, with the rate-limit diagnostics retained.
+
+Each community job has at most four HTTP calls, each bounded to four seconds and
+512 KB; total collection is capped at 16 seconds and acquisition including queue
+wait at 20 seconds. HTTP redirects and unregistered endpoint hosts are rejected.
+The global quick/deep deadlines still apply. Sharing/cache/queues are process-local.
 Vercel cold starts and separate instances do not share them. A timeout limits the
 response and signals cancellation; JavaScript cannot forcibly stop a transport
 that ignores cancellation. Browser/platform workers belong outside this route.
@@ -82,7 +133,7 @@ that ignores cancellation. Browser/platform workers belong outside this route.
 
 - Node 24.x is declared in package/lock metadata. Use the existing scoped Node
   24.15 toolchain for local tests/build; system Node 22.14 has known test dependency
-  issues. No dependency package was added by this slice.
+  issues. Cheerio is the sole added direct runtime dependency.
 - Next 16.4.3 with Cache Components uses Node by default. Do not add a route
   `runtime` export: this installed version rejects it with Cache Components.
 - The route exports `maxDuration = 60`; internal deadlines remain shorter.
@@ -122,13 +173,18 @@ provider isolation, exact quotations, malformed sources and missing-key results.
 They require no preview UI or live provider credentials.
 
 To use HTTP, run `npm run dev` and POST the JSON example above to `/api/research`.
-Configure `THUNDERBIT_API_KEY` and the chosen model key for supported deep search.
+Configure the chosen model key for evidence selection. `THUNDERBIT_API_KEY` adds
+optional search; public community adapters do not require that key.
 Missing keys or insufficient evidence return an explicit empty/partial result.
 The two-stage prose helper `generateCollectedResponse` remains a server-library
 export; the courtroom owns the final answer and does not call that helper twice.
 
-The Mac research handoff proposes Exa highlights as an additional acquisition
-adapter. That remains a separate coverage/latency trial, not an active fallback.
-No Gemini Google Search grounding, arbitrary page fetching or numeric-only fact
-verification is used here. Exact source quotations are retained, and raw profile
-fields are not added to the current research request.
+Exa currently provides Telegram discovery; generic Exa page/highlight acquisition
+is not implemented. No Gemini Google Search grounding or arbitrary page fetching
+is used. The research request does not include raw profile fields.
+
+Fixture tests cover orchestration, HTTP limits, cooldowns, source selection,
+quoted-parent separation, opaque comment IDs, language-neutral content handling,
+and the real POST handler with external network/model transports replaced.
+Live runtime evidence is recorded separately from fixtures. Keyed provider access,
+quotas and protected cloud previews require their own acceptance checks.

@@ -4,6 +4,8 @@ import { createCollectionFetcher, isPublicSourceUrl, type CollectionReport } fro
 import { planPublicResearch, passageSelectionsSchema, researchRequestSchema, type ResearchEvidenceCard, type TopicResearchRequest } from "./research-contract";
 import { createResearchQueue, ResearchDeadlineError, withinDeadline } from "./research-control";
 import { createPassageSelector, type PassageSelector } from "./research-selection";
+import { createCommunityFetcher, interleaveRecords } from "./community-fetch";
+import { allowedSourceRecord } from "./source-policy";
 
 export type PublicCaptureTool = {
   /** Unique identifier for one fixed public capture and extraction settings. */
@@ -15,8 +17,9 @@ export type ResearchDiagnostics = { status: "ok" | "partial" | "unsupported" | "
   tools: { id: string; status: CollectionReport["status"] }[]; warnings: string[]; acceptedCards: number };
 export type TopicResearchResponse = { cards: ResearchEvidenceCard[]; fallback: boolean; diagnostics: ResearchDiagnostics };
 type Options = { fetcher?: ReturnType<typeof createCollectionFetcher>; selector?: PassageSelector;
-  publicCaptures?: PublicCaptureTool[]; quickMs?: number; deepMs?: number };
-type Action = { id: string; key: string; read: PublicCaptureTool["read"] };
+  publicCaptures?: PublicCaptureTool[]; quickMs?: number; deepMs?: number;
+  community?: ReturnType<typeof createCommunityFetcher> | false };
+type Action = { id: string; key: string; read: PublicCaptureTool["read"]; budgetMs?: number };
 const budget = (value: number | undefined, max: number) => Number.isFinite(value) ? Math.max(1, Math.min(value!, max)) : max;
 const digest = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 20);
 
@@ -25,6 +28,7 @@ const digest = (text: string) => createHash("sha256").update(text).digest("hex")
 export function createResearchAgent(options: Options = {}) {
   const fetcher = options.fetcher ?? createCollectionFetcher();
   const select = options.selector ?? createPassageSelector();
+  const community = options.community === false ? undefined : options.community ?? createCommunityFetcher();
   const captures = options.publicCaptures ?? [];
   if (captures.length > 8 || new Set(captures.map(tool => tool.id)).size !== captures.length) throw new Error("Invalid public capture registry");
   const acquisitionQueue = createResearchQueue(3);
@@ -39,7 +43,7 @@ export function createResearchAgent(options: Options = {}) {
       const scheduled = acquisitionQueue.schedule(() => action.read(signal), job.tier, signal);
       job.promote = scheduled.promote;
       return scheduled.promise;
-    }, 5000).catch((): CollectionReport => ({ status: "unavailable", records: [], warnings: ["Shared acquisition deadline/capacity exceeded."] }))
+    }, action.budgetMs ?? 5000).catch((): CollectionReport => ({ status: "unavailable", records: [], warnings: ["Shared acquisition deadline/capacity exceeded."] }))
       .finally(() => { if (inFlight.get(action.key) === job) inFlight.delete(action.key); });
     inFlight.set(action.key, job);
     return job.promise;
@@ -62,13 +66,20 @@ export function createResearchAgent(options: Options = {}) {
             const query = plan.query;
             actions.push({ id: "thunderbit-search", key: `search:${query}`, read: () => fetcher.search(query) });
           }
+          for (const action of community?.plan(req) ?? []) {
+            actions.push({ id: action.id, key: `community:${action.id}:${action.query}`, budgetMs: 20000,
+              read: signal => community!.collect(action, signal) });
+          }
           if (!actions.length) { diagnostics.status = "unsupported"; diagnostics.warnings.push("No approved source plan or public capture covers this topic/tier."); return finish([]); }
           // Sharing applies only to acquisition. Each request selects its own side and cards.
           const reports = await Promise.all(actions.map(action => acquire(action, req.tier)));
           signal.throwIfAborted();
           diagnostics.tools = actions.map((action, i) => ({ id: action.id, status: reports[i].status }));
           diagnostics.warnings.push(...reports.flatMap(report => report.warnings));
-          const normalized = normalizeRecords(reports.filter(report => ["live", "cached"].includes(report.status)).flatMap(report => report.records));
+          const eligible = interleaveRecords(reports.filter(report => ["live", "cached", "rate_limited"].includes(report.status)));
+          const allowed = eligible.filter(allowedSourceRecord);
+          if (allowed.length !== eligible.length) diagnostics.warnings.push("Some source records failed source or discussion-context checks.");
+          const normalized = normalizeRecords(allowed);
           diagnostics.warnings.push(...normalized.warnings);
           const records = normalized.records.filter(record => isPublicSourceUrl(record.sourceUrl));
           if (!records.length) {
@@ -116,7 +127,7 @@ function makeCard(req: TopicResearchRequest, record: CollectionRecord, quote: st
   return { id: `${req.topic.id}:${req.side}:${req.tier}:${digest(`${req.question}\n${req.topic.question}\n${record.id}\n${quote}`)}`,
     topic_id: req.topic.id, side: req.side, tier: req.tier,
     // Extractive first slice: the model cannot invent a separate claim or source URL.
-    claim: quote, evidence: `${quote}\nScope: ${record.limitations.join(" ")} Independent verification has not been performed.`,
+    claim: quote, evidence: `${quote}\nSource publication date: ${record.publishedAt ?? "not provided"}. Collected: ${record.capturedAt}. Collection time does not establish currentness.${record.discussion ? `\nDiscussion coverage: ${record.discussion.coverage}${record.discussion.kind === "reply" ? `\nParent context (not the quoted reply): ${record.discussion.parentText}` : ""}` : ""}\nScope: ${record.limitations.join(" ")} Independent verification has not been performed.`,
     source_name: record.collector === "ons" ? "Office for National Statistics" : `${source.hostname} — ${record.title}`,
     source_url: record.sourceUrl, strength: 1, // conservative until source/claim quality is independently reviewed
   };

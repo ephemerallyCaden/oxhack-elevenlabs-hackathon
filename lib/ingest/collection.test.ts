@@ -66,29 +66,15 @@ test("EasySpider custom mapping retains import time and refuses to coerce numeri
   assert.ok(!report.records.some(record => record.text === "0"));
 });
 
-test("MediaCrawler imports use explicit export timestamps and retain truncation caveats", () => {
-  const createTime = 1761242400;
-  const modifiedTime = 1761300000000;
+test("unsupported collector identifiers cannot import or normalize records", () => {
   const report = importCollectorExport({
-    collector: "mediacrawler",
-    payload: [{
-      video_id: "123456789",
-      video_type: "video",
-      title: "Poker stream discussion",
-      desc: "d".repeat(4500),
-      create_time: createTime,
-      last_modify_ts: modifiedTime,
-    }],
+    collector: "unsupported" as never,
+    payload: [{ url: "https://example.org/story", title: "A public story", text: "Source text." }],
   });
-  const [record] = report.records;
-
-  assert.equal(report.rejected, 0);
-  assert.equal(record.sourceUrl, "https://www.bilibili.com/video/av123456789");
-  assert.equal(record.publishedAt, new Date(createTime * 1000).toISOString());
-  assert.equal(record.capturedAt, new Date(modifiedTime).toISOString());
-  assert.equal(record.text.length, 4000);
-  assert.ok(record.limitations.some(limitation => /title and desc to 500 characters/i.test(limitation)));
-  assert.ok(record.limitations.some(limitation => /truncated to 4000/i.test(limitation)));
-  assert.ok(report.warnings.some(warning => /truncated to 4000/i.test(warning)));
-  assert.equal(record.verified, false);
+  assert.equal(report.records.length, 0);
+  assert.equal(report.rejected, 1);
+  assert.match(report.warnings.join(" "), /Unsupported collector/);
+  const normalized = normalizeRecords([capture({ collector: "unsupported" as never })]);
+  assert.equal(normalized.records.length, 0);
+  assert.equal(normalized.rejected, 1);
 });

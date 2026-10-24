@@ -37,13 +37,12 @@ and valid evidence; create a task folder only when persistence will help.
 ## Operate
 
 `loop.mjs` needs Node 22+. Its GitHub collector also needs the existing `gh` CLI
-and whatever read access that task requires. Bilibili uses public HTTP endpoints.
+and whatever read access that task requires.
 
 ```text
 node <skill-directory>/loop.mjs start <task-directory> "problem and useful result"
 node <skill-directory>/loop.mjs search <task-or-library-directory> "relevant words"
 node <skill-directory>/loop.mjs collect <task-directory> github <issue-URL>
-node <skill-directory>/loop.mjs collect <task-directory> bilibili <BV-ID>
 node <skill-directory>/loop.mjs import <task-directory> <saved-collector-JSON>
 node <skill-directory>/loop.mjs read <task-directory> <evidence-ID> [text-filter]
 node <skill-directory>/loop.mjs resume <task-directory>
@@ -53,7 +52,7 @@ node <skill-directory>/loop.mjs resume <task-directory>
    three lanes: video descriptions/discussion; direct original repositories,
    registries and community sources; links/citations from either lane. Use available
    search/browser/CLI/MCP tools. The bundled collector supports only GitHub issue
-   conversations and one public Bilibili sample. For installed Telegram and RSS/Atom
+   conversations. For installed Telegram and RSS/Atom
    MCP tools, read [source tools](references/source-tools.md). Feeds discover topics;
    inspect original comments and correction replies before accepting a solution.
 2. Read the actual relevant discussion, including correction replies and dates.
@@ -112,7 +111,7 @@ a transferred file is not evidence of remote execution.
 ## Limits
 
 This package has no background scheduler, remote runner, automatic source promotion,
-vector database, full Bilibili pagination or PR inline-review collector. Search scans
+vector database or PR inline-review collector. Search scans
 one task or immediate child tasks in an explicitly named local library. Add a missing
 connector only when a real task needs it. Preserve observations; import reuses the
 same source/timestamp while explicit collection creates a new observation.

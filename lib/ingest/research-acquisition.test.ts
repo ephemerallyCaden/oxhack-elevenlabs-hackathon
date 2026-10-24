@@ -175,7 +175,7 @@ test("unsupported quick research returns without search or provider traffic", as
   });
 
   assert.deepEqual(planPublicResearch(input), { source: "none" });
-  const result = await createResearchAgent({ fetcher }).run(input);
+  const result = await createResearchAgent({ community: false, fetcher }).run(input);
   assert.equal(result.diagnostics.status, "unsupported");
   assert.deepEqual(result.cards, []);
   assert.equal(calls, 0);

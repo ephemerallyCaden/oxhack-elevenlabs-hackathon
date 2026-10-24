@@ -26,7 +26,7 @@ test("deep planning uses the topic when the overall question is generic", async 
       searchQuery = JSON.parse(String(init?.body)).query;
       return Response.json({ success: true, data: { results: [{
         success: true,
-        url: "https://research.example.org/gap-year",
+        url: "https://www.nomadicmatt.com/fixture-gap-year",
         title: "Gap year wellbeing study",
         markdown: `${quote} The sample was limited to survey respondents.`,
       }] } });
@@ -42,7 +42,7 @@ test("deep planning uses the topic when the overall question is generic", async 
       side: selectionInput.request.side,
     }] }) } }] });
   } });
-  const agent = createResearchAgent({ fetcher, selector });
+  const agent = createResearchAgent({ community: false, fetcher, selector });
   const result = await agent.run(request);
 
   assert.equal(searchQuery, "gap year outcomes wellbeing outcomes primary research official statistics");

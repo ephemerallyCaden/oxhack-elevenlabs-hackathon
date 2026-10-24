@@ -8,6 +8,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 test("the HTTP route uses the selected provider for source-backed cards and reports a missing key without fallback", async () => {
   vi.resetModules();
+  vi.stubEnv("RESEARCH_COMMUNITY_SOURCES", "none");
   vi.stubEnv("RESEARCH_MODEL_PROVIDER", "gemini");
   vi.stubEnv("RESEARCH_MODEL", "synthetic-gemini-model");
   vi.stubEnv("GEMINI_API_KEY", "synthetic-gemini-key");
@@ -16,7 +17,7 @@ test("the HTTP route uses the selected provider for source-backed cards and repo
   vi.stubEnv("THUNDERBIT_API_KEY", "synthetic-search-key");
 
   const passage = "Students who defer an accepted place may enter the following academic year, subject to confirmation.";
-  const sourceUrl = "https://university.example.org/gap-year-policy";
+  const sourceUrl = "https://travel.stackexchange.com/fixture-gap-year-policy";
   const requests: { url: string; body?: Record<string, unknown> }[] = [];
   const fakeFetch: typeof fetch = async (input, init) => {
     const url = String(input);
@@ -78,7 +79,7 @@ test("the HTTP route uses the selected provider for source-backed cards and repo
     source_url: card.source_url, strength: card.strength,
   })), [{ side: "no", topic_id: "topic-gap-year", tier: "deep", claim: passage,
     source_url: sourceUrl, strength: 1 }]);
-  assert.match(live.cards[0].source_name, /university\.example\.org.*Gap year admissions policy/i);
+  assert.match(live.cards[0].source_name, /travel\.stackexchange\.com.*Gap year admissions policy/i);
   assert.match(live.cards[0].evidence, /verification has not been performed/i);
   assert.equal(requests.length, 2);
 

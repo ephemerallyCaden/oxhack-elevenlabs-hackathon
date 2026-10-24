@@ -93,7 +93,6 @@ for this task: [problem or existing task folder].
 | Follow the procedure and use available research tools | A working coding client with access to this checkout |
 | Save, search, read and resume evidence with the bundled helpers | Node.js 22+; no npm install needed |
 | Collect GitHub issue conversations | Node.js and the `gh` CLI with the required read access |
-| Collect a public Bilibili sample | Node.js and access to its public HTTP endpoints |
 | Add public Telegram previews and RSS/Atom tools | Optional setup below, separately on each device/client |
 
 Existing search/browser tools remain useful. A committed skill cannot supply

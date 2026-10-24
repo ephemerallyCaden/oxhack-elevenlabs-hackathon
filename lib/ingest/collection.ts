@@ -3,13 +3,15 @@ import { z } from "zod";
 
 export type CollectionRecord = {
   id: string; sourceUrl: string; title: string; text: string;
-  collector: "ons" | "easyspider" | "mediacrawler" | "thunderbit";
+  collector: "ons" | "easyspider" | "thunderbit" | "stackexchange" | "discourse" | "wordpress" | "telegram" | "youtube" | "x" | "wikipedia" | "crossref";
   capturedAt: string; captureMode: "live" | "import"; publishedAt?: string;
   limitations: string[]; verified: false;
+  discussion?: { threadUrl: string; postId: string; parentId?: string; parentText?: string;
+    kind: "post" | "reply"; coverage: string };
 };
 export type NormalizationReport = { records: CollectionRecord[]; warnings: string[]; rejected: number; duplicates: number };
 export type CollectorImport = {
-  collector: "easyspider" | "mediacrawler"; payload: unknown;
+  collector: "easyspider"; payload: unknown;
   mapping?: { url: string; title: string; text: string }; capturedAt?: string;
 };
 const MAX_ROWS = 50;
@@ -21,19 +23,23 @@ const truncatedText = "Source text was truncated to 4000 characters during norma
 const recordSchema = z.object({
   id: z.string().optional(), sourceUrl: z.string().trim().min(1).max(4096),
   title: z.string().trim().min(1), text: z.string().trim().min(1),
-  collector: z.enum(["ons", "easyspider", "mediacrawler", "thunderbit"]),
+  collector: z.enum(["ons", "easyspider", "thunderbit", "stackexchange", "discourse", "wordpress", "telegram", "youtube", "x", "wikipedia", "crossref"]),
   capturedAt: z.iso.datetime({ offset: true }), captureMode: z.enum(["live", "import"]),
   publishedAt: z.string().max(100).refine(value => Number.isFinite(Date.parse(value))).optional(),
   limitations: z.array(z.string().trim().max(800)).max(20).default([]),
+  discussion: z.object({ threadUrl: z.string().url().max(4096), postId: z.string().min(1).max(200),
+    parentId: z.string().max(200).optional(), parentText: z.string().max(1500).optional(),
+    kind: z.enum(["post", "reply"]), coverage: z.string().min(1).max(500) }).optional(),
 });
 const cleanText = (text: string) => text.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").trim();
 const emptyReport = (): NormalizationReport => ({ records: [], warnings: [], rejected: 0, duplicates: 0 });
 
-function canonicalUrl(value: string): string | undefined {
+function canonicalUrl(value: string, discussion = false): string | undefined {
   try {
     const url = new URL(value);
     if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return;
-    url.hash = "";
+    // Comment anchors identify distinct contributions; unrelated tracking fragments do not.
+    if (!discussion || !/^#(?:comment-\d+|comment\d+_\d+|\d+)$/.test(url.hash)) url.hash = "";
     url.searchParams.sort();
     return url.toString();
   } catch { return; }
@@ -92,7 +98,7 @@ export function normalizeRecords(inputs: unknown[]): NormalizationReport {
     const parsed = recordSchema.safeParse(raw);
     if (!parsed.success) { report.rejected++; report.warnings.push("A record with missing or invalid capture fields was rejected."); continue; }
     const item = parsed.data;
-    const sourceUrl = canonicalUrl(item.sourceUrl);
+    const sourceUrl = canonicalUrl(item.sourceUrl, !!item.discussion);
     const fullText = cleanText(item.text);
     if (!sourceUrl || !fullText) { report.rejected++; report.warnings.push("A record needs nonempty text and an HTTP(S) URL without credentials."); continue; }
     const fingerprint = createHash("sha256").update(`${sourceUrl}\n${fullText}`).digest("hex");
@@ -120,20 +126,14 @@ export function normalizeRecords(inputs: unknown[]): NormalizationReport {
     if (item.title.length > 300) { limitations.push("Title was truncated to 300 characters during normalization."); report.warnings.push("An overlong title was truncated."); }
     report.records.push({ id, sourceUrl, title: item.title.slice(0, 300), text: fullText.slice(0, MAX_TEXT),
       collector: item.collector, capturedAt: item.capturedAt, captureMode: item.captureMode,
-      ...(item.publishedAt ? { publishedAt: item.publishedAt } : {}), limitations: [...new Set(limitations)], verified: false });
+      ...(item.publishedAt ? { publishedAt: item.publishedAt } : {}),
+      ...(item.discussion ? { discussion: item.discussion } : {}), limitations: [...new Set(limitations)], verified: false });
   }
   report.warnings = [...new Set(report.warnings)];
   return report;
 }
 
-function unixTime(value: unknown, milliseconds: boolean): string | undefined {
-  if (!(typeof value === "number" || typeof value === "string" && /^\d+$/.test(value))) return;
-  const timestamp = Number(value) * (milliseconds ? 1 : 1000);
-  if (!Number.isFinite(timestamp) || timestamp <= 0 || timestamp > 8640000000000000) return;
-  return new Date(timestamp).toISOString();
-}
-
-/** Import exports only. No EasySpider/MediaCrawler code, worker, cookies or login is executed. */
+/** Import exports only. No EasySpider code, worker, cookies or login is executed. */
 export function importCollectorExport(options: CollectorImport): NormalizationReport {
   const bounded = boundedRows(options.payload);
   const warnings = [...bounded.warnings];
@@ -149,36 +149,16 @@ export function importCollectorExport(options: CollectorImport): NormalizationRe
   for (const raw of bounded.rows) {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) { rejected++; warnings.push("A non-object export row was rejected."); continue; }
     const row = raw as Record<string, unknown>;
-    let sourceUrl: unknown, title: unknown, text: unknown, publishedAt: string | undefined;
-    let capturedAt = suppliedTime ?? importedAt;
+    let sourceUrl: unknown, title: unknown, text: unknown;
+    const capturedAt = suppliedTime ?? importedAt;
     const limitations = ["Imported export; the original page was not fetched or independently verified by this importer."];
     if (options.collector === "easyspider") {
       sourceUrl = row[mapping.url]; title = row[mapping.title]; text = row[mapping.text];
       limitations.push("Coverage depends on the EasySpider task's selected fields, selectors, pages and stopping conditions.");
       limitations.push("EasySpider numeric export can coerce a failed number parse to 0; exported numbers require checking against the source.");
       if (!suppliedTime) limitations.push("capturedAt is the import time; source capture time was not provided.");
-    } else if (options.collector === "mediacrawler") {
-      title = row.title;
-      const id = typeof row.bvid === "string" && /^BV[A-Za-z0-9]+$/.test(row.bvid) ? row.bvid
-        : /^(?:\d+)$/.test(String(row.video_id ?? "")) ? `av${row.video_id}` : undefined;
-      sourceUrl = row.video_url ?? (id ? `https://www.bilibili.com/video/${id}` : undefined);
-      const url = typeof sourceUrl === "string" ? canonicalUrl(sourceUrl) : undefined;
-      if (!url || !["bilibili.com", "www.bilibili.com"].includes(new URL(url).hostname)
-        || !/^\/video\/(?:BV[A-Za-z0-9]+|av\d+)\/?$/.test(new URL(url).pathname)
-        || row.video_type !== undefined && row.video_type !== "video" || typeof title !== "string" || typeof row.desc !== "string") {
-        rejected++; warnings.push("Only MediaCrawler Bilibili video exports with title and desc are supported; comments and other platforms were rejected."); continue;
-      }
-      text = `${title}\n\n${row.desc}`.trim();
-      limitations.push("MediaCrawler Bilibili export truncates title and desc to 500 characters each; this record does not establish full-page or comment coverage.");
-      if (!row.desc.trim()) limitations.push("The export has no description; only its video title is available.");
-      const exportTime = unixTime(row.last_modify_ts, true);
-      if (!suppliedTime && exportTime) {
-        capturedAt = exportTime;
-        limitations.push("capturedAt comes from last_modify_ts: export-normalization time, not a verified network retrieval instant.");
-      } else if (!suppliedTime) limitations.push("capturedAt is the import time; source capture time was not provided.");
-      publishedAt = unixTime(row.create_time, false);
     } else { rejected++; warnings.push("Unsupported collector export."); continue; }
-    mapped.push({ sourceUrl, title, text, collector: options.collector, capturedAt, captureMode: "import", publishedAt, limitations, verified: false });
+    mapped.push({ sourceUrl, title, text, collector: options.collector, capturedAt, captureMode: "import", limitations, verified: false });
   }
   const normalized = normalizeRecords(mapped);
   return { ...normalized, rejected: normalized.rejected + rejected, warnings: [...new Set([...warnings, ...normalized.warnings])] };
