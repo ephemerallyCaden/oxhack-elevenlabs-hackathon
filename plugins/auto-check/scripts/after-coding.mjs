@@ -4,10 +4,11 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 if (process.env.AUTOCHECK_CHILD) process.exit(0); // the tester's own session must not re-trigger us
 
-const here = path.dirname(new URL(import.meta.url).pathname);
+const here = path.dirname(fileURLToPath(import.meta.url)); // not URL.pathname: that gives /C:/... on Windows
 const input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
 const git = (...a) => spawnSync('git', a, { cwd: input.cwd || process.cwd(), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 const root = git('rev-parse', '--show-toplevel').stdout.trim();
@@ -75,16 +76,19 @@ if (!problems.length && t.enabled && t.testCommand && source.length && !input.st
   const diff = git('diff', 'HEAD', '--', ...source).stdout.slice(0, 20000);
   const allowed = ['Read', 'Grep', 'Glob', `Bash(${t.testCommand} *)`, `Bash(${t.testCommand})`,
     ...(config.testGlobs || []).map(g => `Edit(${g})`)]; // Edit rules cover every file-writing tool
-  const r = spawnSync('claude', ['-p',
-    `Changed source files: ${source.join(', ')}\nTest files must match: ${(config.testGlobs || []).join(', ')}\n` +
+  const prompt = `Changed source files: ${source.join(', ')}\nTest files must match: ${(config.testGlobs || []).join(', ')}\n` +
     `Run tests with exactly: ${t.testCommand}\n(no cd, pipes or other shell commands: they are blocked. Use Read/Grep/Glob to look at files.)\n\n` +
-    `Diff (new files are listed above but not shown here):\n${diff}`,
-    '--append-system-prompt', fs.readFileSync(path.join(here, '..', 'prompts', 'tester.md'), 'utf8'),
+    `Diff (new files are listed above but not shown here):\n${diff}`;
+  const args = ['-p', '--append-system-prompt-file', path.join(here, '..', 'prompts', 'tester.md'),
     // --safe-mode: no plugins/hooks/CLAUDE.md in the child (keeps login). dontAsk denies anything not allowed below.
     '--safe-mode', '--tools', 'Read,Grep,Glob,Edit,Write,Bash',
     '--permission-mode', 'dontAsk', '--allowedTools', allowed.join(' '),
-    '--model', t.model || 'sonnet', '--max-budget-usd', String(t.maxBudgetUsd ?? 1), '--no-session-persistence'],
-    { cwd: root, encoding: 'utf8', env: { ...process.env, AUTOCHECK_CHILD: '1' }, timeout: (t.timeoutSec || 300) * 1000, maxBuffer: 64 * 1024 * 1024 });
+    '--model', t.model || 'sonnet', '--max-budget-usd', String(t.maxBudgetUsd ?? 1), '--no-session-persistence'];
+  // Prompt goes via stdin (cmd.exe caps command lines at 8191 chars). On Windows `claude` may be a .cmd shim,
+  // which Node can only start through a shell, so quote every argument there.
+  const win = process.platform === 'win32';
+  const r = spawnSync(win ? `claude ${args.map(a => `"${a}"`).join(' ')}` : 'claude', win ? [] : args,
+    { input: prompt, shell: win, cwd: root, encoding: 'utf8', env: { ...process.env, AUTOCHECK_CHILD: '1' }, timeout: (t.timeoutSec || 300) * 1000, maxBuffer: 64 * 1024 * 1024 });
   const last = (r.stdout || '').trim().split('\n').filter(Boolean).pop() || '';
   tester = r.status === 0 && /^(TESTS ADDED|NO TESTS NEEDED)/.test(last) ? last : `did not finish (${r.error?.code || `exit ${r.status}`})`;
   if (!tester.startsWith('TESTS') && !tester.startsWith('NO TESTS')) warnings.push(`Tester ${tester}. Tests for this change may be missing.`);
