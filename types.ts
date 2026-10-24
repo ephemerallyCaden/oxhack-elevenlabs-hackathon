@@ -1,305 +1,241 @@
-// Shared contracts for Roulette. Owner: D (awckiu). Everyone builds against this file.
-// Change it only by agreement in the group chat — every part of the app imports it.
+// Shared contracts for the Court of Future Selves. Owner: D (awckiu). Design: docs/design-core-loop.md
+// Change only by agreement in the group chat — every part of the app imports this file.
 //
-// Conventions
-// - Option A = the CHANGE ("become a poker player"), option B = the STATUS QUO ("stay in quant").
-//   Prosecution argues FOR A, Defense argues FOR B (against the change).
-// - Money is in whole units of `SimResult.currency` (GBP for the demo).
-// - Probabilities are 0-1 floats. Format as % only at display time.
+// The game: the user asks "Should I …?". The Judge sets an agenda of weighted topics; for each topic
+// YES (prosecution) and NO (defense) argue up to 3 cycles; the Judge scores each topic and moves a
+// spectrum from −100 (definitely no) to +100 (definitely yes); the verdict explains where it landed.
 
-// ─── Courtroom events ───────────────────────────────────────────────────────
+// ─── Characters & scenes ────────────────────────────────────────────────────
 
-export type Role = 'prosecution' | 'defense' | 'judge' | 'user';
+export type Side = 'yes' | 'no';
+export type Speaker = 'prosecution' | 'defense' | 'judge' | 'user';
 
-export type DebateEventType =
-  | 'speech'
-  | 'interrupt'
-  | 'effect'
-  | 'music_change'
-  | 'expression_change'
+/** Which 2D scene is on screen. yes/no/judge = close-ups; witness = zoom-out with all three facing the user. */
+export type Scene = 'yes' | 'no' | 'judge' | 'witness' | 'cutscene';
+
+export const SIDE_SPEAKER: Record<Side, Speaker> = { yes: 'prosecution', no: 'defense' };
+export const SPEAKER_SCENE: Record<Speaker, Scene> = { prosecution: 'yes', defense: 'no', judge: 'judge', user: 'witness' };
+
+// ─── Agenda (outer loop) ────────────────────────────────────────────────────
+
+export interface Topic {
+  id: string;
+  title: string;
+  /** The sub-question this topic settles: "Can you afford a gap year?" */
+  question: string;
+  /** 0-1. All non-removed topics sum to 1. */
+  importance: number;
+  /** How fast facts can be found. Quick topics go first. */
+  research_speed: 'quick' | 'deep';
+  status: 'pending' | 'active' | 'done' | 'removed';
+  /** Who put it on the agenda. */
+  added_by: 'judge' | 'user';
+  score?: TopicScore;
+}
+
+export interface TopicScore {
+  /** −1 (clearly NO) … +1 (clearly YES) */
+  t: number;
+  /** 0-1 */
+  confidence: number;
+  reasoning: string;
+  /** The single argument that decided it. */
+  deciding_argument: string;
+}
+
+// ─── Research (A — Dust-OP builds the agents) ──────────────────────────────
+
+/** One fact, shaped to drop straight into an argument. Debaters may only state facts from cards. */
+export interface EvidenceCard {
+  id: string;
+  topic_id: string;
+  side: Side;
+  /** The point it supports: "A gap year spent working can pay for itself" */
+  claim: string;
+  /** The fact or stat itself: "UK gap-year workers earn a median £9,400 in 6 months" */
+  evidence: string;
+  source_name: string;
+  source_url: string;
+  /** 1-5 */
+  strength: number;
+  tier: 'quick' | 'deep';
+}
+
+/** POST /api/research (A). quick: ≤ 5s, 2-3 cards. deep: ≤ 45s, 3-6 better-sourced cards. */
+export interface ResearchRequest {
+  question: string;
+  topic: Pick<Topic, 'id' | 'title' | 'question'>;
+  side: Side;
+  tier: 'quick' | 'deep';
+}
+export interface ResearchResponse {
+  cards: EvidenceCard[];
+  fallback: boolean;
+}
+
+// ─── Inner loop: lines & ledger ─────────────────────────────────────────────
+
+export type LineKind =
+  | 'opening' // Judge reads the agenda
+  | 'intro' // Judge introduces a topic
+  | 'argument' // YES/NO normal turn
+  | 'answer' // YES/NO answering the user's interrupt
+  | 'user' // the user's interrupt (transcribed)
+  | 'agenda_change' // Judge confirms a topic added/removed
+  | 'score' // Judge scores a topic
   | 'verdict';
 
-export type InterruptType = 'user_challenge' | 'elaborate' | 'skip' | 'ai_interject';
-
-export type Effect = 'flash_white' | 'flash_red' | 'flash_blue' | 'shake' | 'gavel';
-
-export type Expression = 'idle' | 'talking' | 'sweating' | 'shocked' | 'confident' | 'breakdown';
-
-/** Maps to the BGM entries in lib/audio/assets.ts (C3). 'none' = stop music. */
-export type MusicTrack = 'calm' | 'tension' | 'pursuit' | 'verdict' | 'none';
-
-/**
- * The universal event — ALL courtroom state flows through a queue of these
- * (live debate, cached demo fallback and replay use the same player, C4).
- * Shape from DESIGN.md "Event-Driven Architecture" plus the fields marked NEW.
- */
-export interface DebateEvent {
+/** One line of dialogue. The UI shows `text`, voices `tts ?? text`, and picks the scene from `speaker`. */
+export interface Line {
   id: string;
-  /** ms since debate start. Scripts may leave 0; the player stamps real times. */
-  timestamp: number;
-  type: DebateEventType;
-  speaker?: Role;
-  /** What the text box shows. No audio tags, numbers as digits ("61%"). */
-  text?: string;
-  /** NEW. What TTS reads: audio tags + spoken numbers ("[concerned] sixty-one percent"). B5 uses `tts ?? text`. */
+  speaker: Speaker;
+  kind: LineKind;
+  text: string;
+  /** TTS input: may contain ElevenLabs audio tags and numbers spelled out. */
   tts?: string;
-  /** Filled by B5 (batch TTS) or the D6 cache. */
+  /** EvidenceCard ids this line relies on (→ transcript footnotes). */
+  cites: string[];
+  topic_id?: string;
+  /** Inner-loop cycle (1-3) for arguments. */
+  cycle?: number;
   audioUrl?: string;
-  /** NEW. Audio length in ms (from B5). Before audio exists, C4 estimates from text length. */
   durationMs?: number;
-  /** NEW. 1-3. Undefined for pre-debate/verdict housekeeping events. */
-  round?: number;
-  interrupt_type?: InterruptType;
-  /** "OBJECTION!", "STOP RIGHT THERE!", "HOLD IT!", "MOVE ON!" … */
-  interrupt_flavor?: string;
-  effect?: Effect;
-  /** For expression_change: whose face changes is `speaker`. */
-  expression?: Expression;
-  /** NEW. For music_change. */
-  music?: MusicTrack;
-  /** NEW. For verdict events. */
-  verdict?: Verdict;
-  /** NEW. KeyFinding ids this line cites (lets C7 highlight sources). */
-  cites?: string[];
+}
+
+/** Background pros/cons tally — the Judge scores topics from this. */
+export interface LedgerEntry {
+  id: string;
+  line_id: string;
+  topic_id: string;
+  /** Who said it. */
+  by: Speaker;
+  /** Which way it pushes. A user point can support either side. */
+  supports: Side | 'neutral';
+  claim: string;
+  /** 1-5 */
+  strength: number;
+  card_ids: string[];
+}
+
+// ─── Spectrum & verdict ─────────────────────────────────────────────────────
+
+export type SpectrumLabel = 'Strong no' | 'Lean no' | 'Toss-up' | 'Lean yes' | 'Strong yes';
+
+export interface Spectrum {
+  /** −100 … +100, importance-weighted average of scored topics. Computed in code, never by Claude. */
+  value: number;
+  label: SpectrumLabel;
 }
 
 export interface Verdict {
-  /** Which option the court rules for. */
-  winner: 'change' | 'status_quo';
-  winner_label: string;
-  /** 0-1, taken from the simulation (SimResult.p_change_ahead), never invented by Claude. */
-  confidence: number;
-  /** 2-3 sentences, display form. */
-  reasoning: string;
-  /** "If your win rate were above 6.5bb/100, this court would rule for poker." */
-  flip_line: string;
+  spectrum: Spectrum;
+  /** 2-4 sentences. */
+  explanation: string;
+  breakdown: { topic_id: string; title: string; weight: number; t: number; deciding_argument: string; added_by: Topic['added_by'] }[];
+  line: Line;
 }
 
-// ─── Decision parsing (D2) ──────────────────────────────────────────────────
-
-export interface BetaParams {
-  alpha: number;
-  beta: number;
+export interface Transcript {
+  question: string;
+  lines: Line[];
+  /** Cited cards in first-cited order; footnote n = index + 1. */
+  sources: EvidenceCard[];
+  verdict?: Verdict;
 }
 
-export interface ParsedDecision {
-  /** e.g. 'career_gambling', 'location', 'career', 'education', 'business', 'financial', 'relationship', 'health' */
-  type: string;
-  /** [A = change, B = status quo] */
-  options: [string, string];
-  factors: string[];
-  time_horizon_years: number;
-  /** Happiness Beta(α, β) per option, judged by Claude from context (review #16) — not hardcoded. */
-  happiness_params: { change: BetaParams; status_quo: BetaParams };
-  /** One-line restatement for the Judge's opening ("quit a London quant job to play poker"). */
-  summary: string;
-  /** Numbers the user actually said, if any. The sim fills gaps with data/defaults. */
-  stated?: {
-    current_salary?: number;
-    starting_savings?: number;
-    age?: number;
-    city?: string;
-  };
-  risk_tolerance: 'conservative' | 'moderate' | 'aggressive';
+// ─── API shapes (all POST, JSON). Every response carries `fallback: true` when it used mock data. ──
+
+/** POST /api/trial/agenda */
+export interface AgendaRequest {
+  question: string;
 }
-
-// ─── Data ingestion (A3) ────────────────────────────────────────────────────
-
-export interface DataPoint {
-  /** e.g. 'quant_salary_london_median' */
-  key: string;
-  value: number;
-  /** e.g. 'GBP/year', '%', 'bb/100' */
-  unit: string;
-  source_name: string;
-  source_url: string;
-  year: number;
-  confidence: 'high' | 'medium' | 'low';
-  retrieved_via: 'gemini' | 'manual';
-  verified: boolean;
-}
-
-// ─── Simulation (A1/A2/A4/A5/A6) ────────────────────────────────────────────
-
-export interface SimInput {
-  /** [A = change, B = status quo] */
-  options: [string, string];
-  time_horizon_years: number;
-  starting_savings: number;
-  current_salary: number;
-  poker_win_rate_bb100: number;
-  hours_per_week: number;
-  risk_tolerance: 'conservative' | 'moderate' | 'aggressive';
-  happiness_params: { change: BetaParams; status_quo: BetaParams };
-  /** default 5000 */
-  iterations?: number;
-}
-
-/** Per-year percentile band. Arrays have length time_horizon_years (index 0 = end of year 1). */
-export interface Band {
-  p10: number[];
-  median: number[];
-  p90: number[];
-}
-
-export interface TimelineStats {
-  option: string;
-  net_worth: Band;
-  annual_income: Band;
-  /** P(savings < 0 at any point) */
-  p_bust: number;
-  /** P(net worth ≥ 1,000,000 at horizon) */
-  p_millionaire: number;
-  /** Median month savings hit zero, among busted runs. null if nobody busts. */
-  median_months_until_broke: number | null;
-  /** 0-1 */
-  happiness_median: number;
-}
-
-export interface ChartData {
-  /** Final net-worth distribution, ~30 bins per timeline (C5 loading animation). */
-  histogram: { change: HistogramBin[]; status_quo: HistogramBin[] };
-  /** Per-year p10/p25/p50/p75/p90, years 0..horizon (C7 fan chart). */
-  fan: { change: FanPoint[]; status_quo: FanPoint[] };
-  /** ~50 individual net-worth paths per timeline, years 0..horizon. */
-  samplePaths: { change: number[][]; status_quo: number[][] };
-}
-
-export interface HistogramBin {
-  x0: number;
-  x1: number;
-  count: number;
-}
-
-export interface FanPoint {
-  year: number;
-  p10: number;
-  p25: number;
-  p50: number;
-  p75: number;
-  p90: number;
-}
-
-export interface SimResult {
-  input: SimInput;
-  currency: 'GBP' | 'USD' | 'AUD' | 'EUR';
-  iterations: number;
-  runtime_ms: number;
-  timelines: { change: TimelineStats; status_quo: TimelineStats };
-  /** Share of paired futures where the CHANGE ends with higher net worth. Verdict confidence comes from this. */
-  p_change_ahead: number;
-  charts?: ChartData;
-}
-
-export interface KeyFinding {
-  id: string;
-  /** Display form: "61% chance poker-you goes broke" */
-  statement: string;
-  /** TTS form: "sixty-one percent chance you go broke" */
-  spoken: string;
-  value: number;
-  unit: string;
-  side: 'for_change' | 'against_change' | 'neutral';
-  source_name: string;
-  source_url: string;
-  confidence: 'high' | 'medium' | 'low';
-  /** 1-5, how punchy it is on stage */
-  drama: 1 | 2 | 3 | 4 | 5;
-}
-
-export interface Sensitivity {
-  tornado: { input: string; low_outcome: number; high_outcome: number }[];
-  flip_point: { input: string; value: number; statement: string; spoken: string };
-}
-
-// ─── API shapes (all POST, JSON unless noted) ───────────────────────────────
-// Every route returns mock/cached data when its key is missing or the call takes > 5s,
-// and says so with `fallback: true`.
-
-/** POST /api/ingest (A3) */
-export interface IngestRequest {
-  decision: ParsedDecision;
-}
-export interface IngestResponse {
-  dataPoints: DataPoint[];
+export interface AgendaResponse {
+  /** 1-4 topics, quick-to-research first, importance normalised. */
+  topics: Topic[];
+  /** Judge's opening: names the question and the agenda. */
+  opening: Line;
+  /** One intro line per topic id. */
+  intros: Record<string, Line>;
   fallback: boolean;
 }
 
-/** POST /api/simulate (A2/A4/A5/A6) */
-export interface SimulateRequest {
-  input: SimInput;
-  dataPoints?: DataPoint[];
+/** POST /api/trial/argue */
+export interface ArgueRequest {
+  question: string;
+  topic: Topic;
+  side: Side;
+  cycle: number;
+  /** All lines so far on this topic, oldest first. */
+  history: Line[];
+  /** Cards for this topic (both sides; the speaker should use its own). */
+  cards: EvidenceCard[];
+  /** Set when answering the user's interrupt: the speaker must address it first. */
+  userPoint?: string;
 }
-export interface SimulateResponse {
-  result: SimResult;
-  findings: KeyFinding[];
-  sensitivity?: Sensitivity;
+export interface ArgueResponse {
+  line: Line;
+  /** The side has nothing new to add on this topic (lets the Judge close early). */
+  exhausted: boolean;
   fallback: boolean;
 }
 
-/** POST /api/debate/parse (D2) */
-export interface ParseRequest {
-  transcript: string;
+/** POST /api/trial/score-argument (background) */
+export interface ScoreArgumentRequest {
+  question: string;
+  topic: Topic;
+  line: Line;
+  cards: EvidenceCard[];
 }
-export interface ParseResponse {
-  decision: ParsedDecision;
+export interface ScoreArgumentResponse {
+  entry: LedgerEntry;
   fallback: boolean;
 }
 
-/** POST /api/debate/script (D3) */
-export interface ScriptRequest {
-  decision: ParsedDecision;
-  result: SimResult;
-  findings: KeyFinding[];
-  sensitivity?: Sensitivity;
+/** POST /api/trial/score-topic */
+export interface ScoreTopicRequest {
+  question: string;
+  topic: Topic;
+  ledger: LedgerEntry[];
+  history: Line[];
 }
-export interface ScriptResponse {
-  /** Full 3-round debate including the verdict, text only (no audioUrl yet — B5 adds audio). */
-  events: DebateEvent[];
-  /** HOLD IT lines, pre-generated: key = `${speaker}-${round}` e.g. 'prosecution-2'. */
-  elaborations: Record<string, DebateEvent[]>;
+export interface ScoreTopicResponse {
+  score: TopicScore;
+  line: Line;
   fallback: boolean;
 }
 
-/** POST /api/debate/interrupt (D5) */
-export interface InterruptRequest {
-  /** What the user said (from /api/voice/stt). */
-  transcript: string;
-  context: {
-    decision: ParsedDecision;
-    /** Last ~3 speech events, oldest first. */
-    recentLines: DebateEvent[];
-    findings: KeyFinding[];
-    round: number;
-  };
+/** POST /api/trial/judge-interrupt — the user interrupted the Judge = agenda change. */
+export interface JudgeInterruptRequest {
+  question: string;
+  agenda: Topic[];
+  text: string;
 }
-export interface InterruptResponse {
-  relevant: boolean;
-  responder: Exclude<Role, 'user'>;
-  /** Ready-to-play events (speech has audioUrl when TTS succeeded). */
-  events: DebateEvent[];
+export interface JudgeInterruptResponse {
+  action: 'add' | 'remove' | 'none';
+  /** For add: the new topic (importance = its share AFTER re-normalising). */
+  topic?: Topic;
+  /** For remove. */
+  remove_id?: string;
+  line: Line;
   fallback: boolean;
 }
 
-/** POST /api/debate/verdict (D9) — re-rules after the user's interrupt; the script already has a default verdict. */
+/** POST /api/trial/verdict */
 export interface VerdictRequest {
-  decision: ParsedDecision;
-  result: SimResult;
-  findings: KeyFinding[];
-  sensitivity?: Sensitivity;
-  /** The user's challenges that landed (relevant: true). */
-  userChallenges: string[];
+  question: string;
+  agenda: Topic[];
+  /** User interrupts, so the Judge can say how they were weighed. */
+  userLines: Line[];
 }
 export interface VerdictResponse {
-  events: DebateEvent[];
+  verdict: Verdict;
   fallback: boolean;
 }
 
-/** POST /api/voice/tts (B2) */
+/** POST /api/voice/tts (B) */
 export interface TtsRequest {
-  /** Text with audio tags (use DebateEvent.tts ?? text). */
   text: string;
-  role: Exclude<Role, 'user'>;
+  speaker: Exclude<Speaker, 'user'>;
   voiceId?: string;
 }
 export interface TtsResponse {
@@ -308,58 +244,8 @@ export interface TtsResponse {
   fallback: boolean;
 }
 
-/** POST /api/voice/debate (B5) — voice a whole script in parallel during the loading screen. */
-export interface VoiceDebateRequest {
-  events: DebateEvent[];
-  elaborations: Record<string, DebateEvent[]>;
-  voiceId?: string;
-}
-/** Same events back with audioUrl + durationMs filled on every speech/interrupt event that has text. */
-export interface VoiceDebateResponse {
-  events: DebateEvent[];
-  elaborations: Record<string, DebateEvent[]>;
-  fallback: boolean;
-}
-
-/** POST /api/voice/stt (B2) — body is multipart/form-data with an `audio` file field. */
+/** POST /api/voice/stt (B) — multipart/form-data with an `audio` file field. */
 export interface SttResponse {
   transcript: string;
   fallback: boolean;
-}
-
-// ─── Orchestrator ↔ player (D4 ↔ C4) ────────────────────────────────────────
-
-export type DebatePhase =
-  | 'input'
-  | 'parsing'
-  | 'simulating'
-  | 'scripting'
-  | 'voicing'
-  | 'debate'
-  | 'interrupt_window'
-  | 'user_speaking'
-  | 'responding'
-  | 'verdict'
-  | 'done';
-
-/**
- * What C4's useDebatePlayer exposes so the orchestrator (D4) can drive it.
- * The orchestrator owns the event list; it only ever calls load() with "what to play next".
- */
-export interface DebatePlayerControls {
-  /** Stop whatever is playing (abort audio), replace the queue and start playing from the first event. */
-  load(events: DebateEvent[]): void;
-  pause(): void;
-  play(): void;
-}
-
-/**
- * Callbacks C4's player must fire so the orchestrator knows where playback is.
- * Wire them as: useDebatePlayer({ onEventStart: orch.onEventStart, onQueueEnd: orch.onQueueEnd })
- */
-export interface DebatePlayerCallbacks {
-  /** Fired when an event begins playing. */
-  onEventStart(event: DebateEvent): void;
-  /** Fired when the last event in the loaded queue has finished. */
-  onQueueEnd(): void;
 }
