@@ -1,0 +1,100 @@
+{
+  "_note": "Hand-written stand-in for /api/simulate on the demo scenario so D can build before A2/A4/A5 land. Sim-derived numbers are plausible, not real output. Replace with a real run once A2 works. Sources marked MOCK are placeholders for A9.",
+  "decision": {
+    "type": "career_gambling",
+    "options": ["become a professional poker player", "stay in my quant job"],
+    "factors": ["income_volatility", "savings_runway", "lifestyle", "career_growth", "happiness"],
+    "time_horizon_years": 5,
+    "happiness_params": {
+      "change": { "alpha": 6.5, "beta": 3.5 },
+      "status_quo": { "alpha": 5.5, "beta": 4.5 }
+    },
+    "summary": "quit a six-figure quant job in London to play poker full time",
+    "stated": { "current_salary": 150000, "city": "London" },
+    "risk_tolerance": "aggressive"
+  },
+  "result": {
+    "input": {
+      "options": ["become a professional poker player", "stay in my quant job"],
+      "time_horizon_years": 5,
+      "starting_savings": 60000,
+      "current_salary": 150000,
+      "poker_win_rate_bb100": 2.0,
+      "hours_per_week": 25,
+      "risk_tolerance": "aggressive",
+      "happiness_params": {
+        "change": { "alpha": 6.5, "beta": 3.5 },
+        "status_quo": { "alpha": 5.5, "beta": 4.5 }
+      },
+      "iterations": 5000
+    },
+    "currency": "GBP",
+    "iterations": 5000,
+    "runtime_ms": 14,
+    "timelines": {
+      "change": {
+        "option": "become a professional poker player",
+        "net_worth": {
+          "p10": [5000, -8000, -12000, -6000, 4000],
+          "median": [42000, 31000, 24000, 26000, 38000],
+          "p90": [110000, 190000, 280000, 390000, 520000]
+        },
+        "annual_income": {
+          "p10": [-30000, -22000, 15000, 22000, 26000],
+          "median": [12000, 12000, 18000, 24000, 30000],
+          "p90": [140000, 180000, 220000, 260000, 280000]
+        },
+        "p_bust": 0.61,
+        "p_millionaire": 0.04,
+        "median_months_until_broke": 18,
+        "happiness_median": 0.64
+      },
+      "status_quo": {
+        "option": "stay in my quant job",
+        "net_worth": {
+          "p10": [100000, 150000, 205000, 265000, 330000],
+          "median": [115000, 180000, 255000, 335000, 420000],
+          "p90": [130000, 215000, 310000, 420000, 540000]
+        },
+        "annual_income": {
+          "p10": [130000, 138000, 146000, 155000, 164000],
+          "median": [150000, 162000, 175000, 189000, 204000],
+          "p90": [185000, 205000, 228000, 252000, 280000]
+        },
+        "p_bust": 0.0,
+        "p_millionaire": 0.0,
+        "median_months_until_broke": null,
+        "happiness_median": 0.55
+      }
+    },
+    "p_change_ahead": 0.09
+  },
+  "findings": [
+    { "id": "f1", "statement": "4% chance poker-you is a millionaire by year 5", "spoken": "a one in twenty-five chance you're a millionaire by year five", "value": 0.04, "unit": "probability", "side": "for_change", "source_name": "Roulette simulation (5,000 futures)", "source_url": "", "confidence": "medium", "drama": 5 },
+    { "id": "f2", "statement": "In the best 10% of futures, poker income overtakes the quant salary in year 3 (£220K vs £175K)", "spoken": "in the best ten percent of futures, poker overtakes the quant salary by year three", "value": 220000, "unit": "GBP/year", "side": "for_change", "source_name": "Roulette simulation (5,000 futures)", "source_url": "", "confidence": "medium", "drama": 4 },
+    { "id": "f3", "statement": "Median happiness: 0.64 as a poker player vs 0.55 as a quant", "spoken": "a happiness score of zero point six four versus zero point five five", "value": 0.64, "unit": "score", "side": "for_change", "source_name": "Roulette simulation (happiness model)", "source_url": "", "confidence": "low", "drama": 3 },
+    { "id": "f4", "statement": "Pro poker: ~25 hours a week vs ~60 on a quant desk", "spoken": "twenty-five hours a week instead of sixty", "value": 25, "unit": "hours/week", "side": "for_change", "source_name": "MOCK — A9 replaces", "source_url": "", "confidence": "low", "drama": 3 },
+    { "id": "f5", "statement": "Best-10% poker net worth at year 5 (£520K) beats the median quant (£420K)", "spoken": "in the top ten percent, poker-you is worth five hundred and twenty thousand pounds", "value": 520000, "unit": "GBP", "side": "for_change", "source_name": "Roulette simulation (5,000 futures)", "source_url": "", "confidence": "medium", "drama": 4 },
+    { "id": "f6", "statement": "61% chance poker-you goes broke", "spoken": "a sixty-one percent chance you go broke", "value": 0.61, "unit": "probability", "side": "against_change", "source_name": "Roulette simulation (5,000 futures)", "source_url": "", "confidence": "medium", "drama": 5 },
+    { "id": "f7", "statement": "In busted futures, savings run out at month 18 (median)", "spoken": "your savings run out at month eighteen", "value": 18, "unit": "months", "side": "against_change", "source_name": "Roulette simulation (5,000 futures)", "source_url": "", "confidence": "medium", "drama": 5 },
+    { "id": "f8", "statement": "Median poker income in year 1: £12K vs £150K as a quant", "spoken": "twelve thousand pounds a year, against a hundred and fifty thousand", "value": 12000, "unit": "GBP/year", "side": "against_change", "source_name": "Roulette simulation (5,000 futures)", "source_url": "", "confidence": "medium", "drama": 5 },
+    { "id": "f9", "statement": "Median quant net worth by year 5: £420K", "spoken": "four hundred and twenty thousand pounds by year five", "value": 420000, "unit": "GBP", "side": "against_change", "source_name": "Roulette simulation (5,000 futures)", "source_url": "", "confidence": "medium", "drama": 4 },
+    { "id": "f10", "statement": "Poker ends ahead in only 9% of futures", "spoken": "poker comes out ahead in only nine percent of futures", "value": 0.09, "unit": "probability", "side": "against_change", "source_name": "Roulette simulation (5,000 futures)", "source_url": "", "confidence": "medium", "drama": 4 },
+    { "id": "f11", "statement": "Only ~10-15% of professional poker players are profitable long-term", "spoken": "only about one in eight professional players is profitable long term", "value": 0.125, "unit": "probability", "side": "neutral", "source_name": "MOCK — A9 replaces", "source_url": "", "confidence": "low", "drama": 3 },
+    { "id": "f12", "statement": "5,000 simulated futures over 5 years", "spoken": "five thousand simulated futures", "value": 5000, "unit": "runs", "side": "neutral", "source_name": "Roulette simulation", "source_url": "", "confidence": "high", "drama": 2 }
+  ],
+  "sensitivity": {
+    "tornado": [
+      { "input": "poker_win_rate_bb100", "low_outcome": -15000, "high_outcome": 610000 },
+      { "input": "starting_savings", "low_outcome": 9000, "high_outcome": 95000 },
+      { "input": "hours_per_week", "low_outcome": 21000, "high_outcome": 74000 },
+      { "input": "quant_salary_growth", "low_outcome": 360000, "high_outcome": 490000 }
+    ],
+    "flip_point": {
+      "input": "poker_win_rate_bb100",
+      "value": 6.5,
+      "statement": "If your win rate were above 6.5bb/100, poker beats quant in the median future.",
+      "spoken": "if your win rate were above six and a half big blinds per hundred hands, poker would beat quant in the median future"
+    }
+  }
+}
