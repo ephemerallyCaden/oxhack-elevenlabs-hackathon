@@ -11,6 +11,15 @@ import { saveOnboarding } from "@/lib/onboarding/session";
 
 type Step = "welcome" | "voice" | "selfie" | "thinking" | "confirm";
 
+/** Forget the last person's clone / selfie / profile (their clone may already be deleted). */
+function clearSession() {
+  try {
+    for (const k of Object.keys(sessionStorage)) if (k.startsWith("roulette.")) sessionStorage.removeItem(k);
+  } catch {
+    // private mode
+  }
+}
+
 // Onboarding: read the script aloud (voice clone + transcript) → selfie → profile + question → the trial.
 export default function Home() {
   const router = useRouter();
@@ -54,17 +63,24 @@ export default function Home() {
             Read one short paragraph out loud. Three future versions of you, in your own voice, will argue your decision in court.
           </p>
           <div className="flex flex-col items-center gap-3">
-            <button className="rounded-full bg-red-600 px-10 py-4 text-xl font-bold text-white hover:bg-red-500" onClick={() => setStep("voice")}>
+            <button className="rounded-full bg-red-600 px-10 py-4 text-xl font-bold text-white hover:bg-red-500" onClick={() => { clearSession(); setStep("voice"); }}>
               Begin
             </button>
-            <button className="text-sm text-zinc-500 underline-offset-4 hover:underline" onClick={() => router.push("/trial")}>
-              Skip — use the default voice
+            <button className="text-sm text-zinc-500 underline-offset-4 hover:underline" onClick={() => { clearSession(); router.push("/trial"); }}>
+              Skip setup — go straight to court
             </button>
           </div>
         </>
       )}
 
-      {step === "voice" && <VoiceStep onDone={onVoice} />}
+      {step === "voice" && (
+        <>
+          <VoiceStep onDone={onVoice} />
+          <button className="text-sm text-zinc-500 underline-offset-4 hover:underline" onClick={() => setStep("selfie")}>
+            Skip — use the default voice
+          </button>
+        </>
+      )}
 
       {step === "selfie" && <SelfieStep onDone={onSelfie} />}
 

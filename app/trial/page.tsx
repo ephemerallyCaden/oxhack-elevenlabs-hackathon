@@ -14,6 +14,7 @@ import type { Line, Scene, Speaker, SttResponse } from '@/types';
 import { TrialOrchestrator } from '@/lib/debate/orchestrator';
 import { sessionVoiceId } from '@/components/onboarding/VoiceStep';
 import { sessionSelfie } from '@/components/onboarding/SelfieStep';
+import SharePanel from '@/components/share/SharePanel';
 import { sessionProfile, takeSessionQuestion } from '@/lib/onboarding/session';
 import { useTrialState } from '@/lib/debate/useTrial';
 import { footnotes } from '@/lib/debate/transcript';
@@ -428,6 +429,7 @@ export default function TrialPage() {
             {s.spectrum.value})
           </h2>
           <p className="text-zinc-300">{s.result.verdict?.explanation}</p>
+          <SharePanel transcript={s.result} />
           <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-400">Transcript</h3>
           <ol className="flex flex-col gap-1 text-sm">
             {s.result.lines.map((l) => (
