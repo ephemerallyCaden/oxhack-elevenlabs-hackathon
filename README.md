@@ -44,6 +44,12 @@ HACKATHON.md               Timeline, tactics, ElevenLabs reference
 /spec -> build features -> /fix when broken -> /verify before merge -> /ship -> /demo for the pitch
 ```
 
+When a development problem needs outside evidence or reusable code, use
+`/reference-loop <problem>` in Claude Code or `$reference-loop <problem>` in
+Codex. It connects relevant sources and community replies to a bounded trial
+and a saved decision, then returns to the feature or fix. See the
+[team setup and usage guide](docs/reference-loop.md).
+
 ## Agent auto-routing
 
 Claude uses agents proactively without being asked:
