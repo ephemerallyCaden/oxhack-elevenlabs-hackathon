@@ -19,10 +19,11 @@ Fast bug squashing. Paste an error, stack trace, or describe what's wrong.
    - Type mismatch between frontend and backend
    - Async/await missing
    - CORS / network error
-4. Fix the root cause. Change the minimum number of lines.
-5. Read CLAUDE.md for the build/test commands. Run them.
-6. If build passes, report what was wrong and what you changed.
-7. If build fails with a new error, repeat from step 1. Max 3 cycles.
+4. If the bug is in logic a test can reach in seconds, add one test that reproduces it and run it. It must fail. Skip this for config, env, styling or dependency issues.
+5. Fix the root cause. Change the minimum number of lines. Fix the code, not the test; if the test itself looks wrong, stop and say so.
+6. Run `node plugins/auto-check/scripts/check.mjs` (or the commands in CLAUDE.md). The new test must now pass.
+7. Report what was wrong, what you changed, and the test that guards it (or why there is none).
+8. If checks fail with a new error, repeat from step 1. Max 3 cycles. Still failing: stop, report, and suggest `/reference-loop` for the specific error.
 
 If the error is in a dependency or environment issue (not our code), say so and suggest the manual fix.
 

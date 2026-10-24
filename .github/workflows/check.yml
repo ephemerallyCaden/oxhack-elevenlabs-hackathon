@@ -1,0 +1,19 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # Same runner the auto-check plugin uses (static + dynamic from .claude/auto-check.json).
+      # No tester here: CI only runs checks. --ci also runs the `setup` commands first.
+      - run: node plugins/auto-check/scripts/check.mjs --ci

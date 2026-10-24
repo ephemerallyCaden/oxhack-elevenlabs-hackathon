@@ -88,7 +88,9 @@ Build what judges will see, in this order:
 3. ElevenLabs integration on the demo path
 4. Polish: loading states, transitions, error handling on demo path only
 
-Things that don't matter for the demo: auth, CRUD for non-demo entities, error handling on non-demo paths, caching, tests, CI, responsive design on screen sizes judges won't see.
+Things that don't matter for the demo: auth, CRUD for non-demo entities, error handling on non-demo paths, caching, coverage targets, tests for non-demo paths, responsive design on screen sizes judges won't see.
+
+Tests that DO matter: the demo-path test, tests for logic with branches or parsing, and a regression test for each bug fix. The auto-check plugin's tester writes the first two automatically after each coding turn (see CLAUDE.md "Automatic checks"). Skipping these isn't saving time; it's how the demo breaks on stage.
 
 ## ElevenLabs quick reference
 

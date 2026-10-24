@@ -1,0 +1,13 @@
+{
+  "static": [],
+  "dynamic": [],
+  "setup": [],
+  "testGlobs": ["tests/**", "test/**", "**/__tests__/**", "**/*.test.*", "**/*.spec.*", "**/test_*.py", "**/*_test.py"],
+  "tester": {
+    "enabled": true,
+    "testCommand": "",
+    "model": "sonnet",
+    "maxBudgetUsd": 1,
+    "timeoutSec": 300
+  }
+}
