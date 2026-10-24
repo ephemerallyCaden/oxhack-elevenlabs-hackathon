@@ -28,8 +28,8 @@
 | Folder | Owner | What |
 |---|---|---|
 | `lib/sim/`, `lib/ingest/` | A — Dust-OP | Monte Carlo engine, Gemini data ingestion, data tables |
-| `lib/voice/`, `lib/audio/` | B — ephemerallyCaden | ElevenLabs TTS/STT/clone, Web Audio engine |
-| `app/` pages, `components/` | C — randodeh | Courtroom UI, loading screen, verdict, demo mode |
+| `lib/voice/`, `lib/audio/` | B — randodeh | ElevenLabs TTS/STT/clone, Web Audio engine |
+| `app/` pages, `components/` | C — ephemerallyCaden | Courtroom UI, loading screen, verdict, demo mode |
 | `lib/debate/`, `types.ts` | D — awckiu | Claude prompts, orchestrator, interrupts, fallback |
 
 ## Mock-first rule (we may not have API keys yet)
