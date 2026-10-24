@@ -17,7 +17,22 @@
 - `npm run dev` to start dev server (http://localhost:3000; use `127.0.0.1:3000` for any ElevenLabs allowlist)
 - `npm run build` to build
 - `npm run lint` to lint
-- No test runner yet — use small `npx tsx scripts/<name>.ts` scripts for sim/ingest checks
+- `npm test` to run tests once (Vitest + Testing Library, jsdom; `npx vitest` to watch). Tests live next to code as `*.test.ts(x)` or in `__tests__/`
+- Put the same commands in `.claude/auto-check.json` (`static`, `dynamic`, `tester.testCommand`).
+
+## Automatic checks (auto-check plugin)
+The `auto-check` plugin in `plugins/auto-check/` runs by itself when Claude finishes a turn that changed files:
+1. Static: our diff checks (deleted or edited tests, API keys in code), then `static` commands (build/types/lint).
+2. Tester: a separate Claude session that may only write test files adds the tests the change is missing.
+3. Dynamic: `dynamic` commands (tests, smoke).
+The first failure is handed back to you once; after that it is only reported. GitHub Actions runs static + dynamic on every push and PR to `main`. You don't need to write tests or run the full check before stopping: the plugin does both.
+
+## Testing
+- Fix the code, not the tests. Tests may come from the tester, written from the intended behaviour. If one looks wrong, stop and say so.
+- Never weaken, skip or delete a test to get green.
+- Bug fixes: reproduce the bug with a test first (see `/fix`).
+- The tester's rules (what to test, what to skip, no fake tests) live in `plugins/auto-check/prompts/tester.md`.
+- Before calling a demo feature done, make one real ElevenLabs call by hand and listen to it. No automated check can hear audio.
 
 ## Architecture
 - Entry point: `app/page.tsx` (decision input) → `app/court/page.tsx` (courtroom) 
@@ -28,8 +43,8 @@
 | Folder | Owner | What |
 |---|---|---|
 | `lib/sim/`, `lib/ingest/` | A — Dust-OP | Monte Carlo engine, Gemini data ingestion, data tables |
-| `lib/voice/`, `lib/audio/` | B — ephemerallyCaden | ElevenLabs TTS/STT/clone, Web Audio engine |
-| `app/` pages, `components/` | C — randodeh | Courtroom UI, loading screen, verdict, demo mode |
+| `lib/voice/`, `lib/audio/` | B — randodeh | ElevenLabs TTS/STT/clone, Web Audio engine |
+| `app/` pages, `components/` | C — ephemerallyCaden | Courtroom UI, loading screen, verdict, demo mode |
 | `lib/debate/`, `types.ts` | D — awckiu | Claude prompts, orchestrator, interrupts, fallback |
 
 ## Mock-first rule (we may not have API keys yet)
@@ -49,7 +64,7 @@
 - Read files before editing. Don't guess what exists.
 - No features beyond what was asked. Hackathon scope is tight.
 - Match existing patterns. Don't refactor adjacent code.
-- Run build/test after changes. Fix what you break.
+- Fix what you break: fix the code, not the tests (see "Testing").
 - Commit after every working feature. Small commits, clear messages.
 - If unsure, ask. Don't assume and build the wrong thing.
 - No abstractions for one-time code. Inline is fine for 24 hours.
@@ -63,7 +78,7 @@
 
 ## Agent auto-routing
 Use these agents and skills proactively without being asked:
-- After writing code that changes behavior: run `/verify` to check build/types/lint/tests
+- Before merging: run `/verify` (the auto-check plugin already covers routine checks)
 - When a build or test fails: run `/fix` with the error output
 - Before committing: run `git diff` and scan for debug code, hardcoded secrets, console.logs
 - When starting a new feature: read the GitHub issue for it (`gh issue view <n>`) and DESIGN.md to check scope and team ownership
