@@ -25,8 +25,34 @@ export interface UserProfile {
   /** "first-year CS student", "nurse with two kids" */
   situation?: string;
   location?: string;
+  /** Who their decisions affect: "partner, two kids, mum nearby" */
+  people?: string;
+  risk_tolerance?: 'cautious' | 'balanced' | 'bold';
+  /** "comfortable", "stretched, paying off a loan" (no exact figures needed) */
+  money?: string;
+  /** What they want, in their words. */
+  goals?: string;
+  fears?: string;
+  /** What matters most to them: "freedom", "family", "security"… */
+  values?: string[];
   /** Anything else they said that matters. */
   notes?: string;
+}
+
+/** POST /api/trial/profile — onboarding answers (B8) + form (C) → profile. */
+export interface ProfileRequest {
+  /** The whole onboarding recording, transcribed (what VoiceStep returns today). */
+  transcript?: string;
+  /** Per-question answers, if onboarding records them separately. */
+  answers?: { question: string; transcript: string }[];
+  /** Fields typed into the onboarding form. These win over anything extracted. */
+  form?: UserProfile;
+}
+export interface ProfileResponse {
+  profile: UserProfile;
+  /** The decision they described, as a yes/no question ("Should I …?"), if they described one. */
+  question?: string;
+  fallback: boolean;
 }
 
 /**
