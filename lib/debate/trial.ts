@@ -46,8 +46,8 @@ async function ask<S extends z.ZodType, R>(
           model: MODEL,
           max_tokens: 4000,
           system: `${P.COURT}\n\n${task}`,
-          output_config: { effort: 'low', format: zodOutputFormat(schema) },
           messages: [{ role: 'user', content }],
+          output_config: { effort: 'low', format: zodOutputFormat(schema) },
         },
         { signal },
       );

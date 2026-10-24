@@ -10,7 +10,7 @@ export const TIMEOUTS = {
   scoreTopic: { server: 7000, client: 8000 },
   judgeInterrupt: { server: 6000, client: 7000 },
   verdict: { server: 8000, client: 9000 },
-  tts: { client: 7000 },
+  tts: { client: 15000 }, // eleven_v4 takes 1.5-5.7s per line (measured), longer with the accent hint; 7s cut long lines to silence
   stt: { client: 8000 },
   quickResearch: { client: 6000 },
   deepResearch: { client: 50000 },

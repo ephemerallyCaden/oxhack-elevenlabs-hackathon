@@ -22,16 +22,36 @@ The mechanic is always `interrupt`. The presentation varies. This avoids confusi
 ## The Experience (User Flow)
 
 ```
-1. ONBOARD
+1. ONBOARD (voice clone + profile in one step)
    → Sign up (Supabase auth)
-   → Record voice (30s script) → IVC clone → voice_id saved to profile
-   → "Now take a selfie" — webcam capture becomes the courtroom avatars
+   → "Read this script aloud" — the script IS the onboarding questions:
+
+     "My name is [say your name]. I'm [your age] years old
+      and I live in [your city]. I work as a [your job] and
+      I'd say I'm the kind of person who [values freedom /
+      plays it safe / chases the big win / follows their gut].
+      If I had to describe my life philosophy in one sentence,
+      it would be..."
+
+   → This gives us:
+     • 90+ seconds of varied speech → high quality IVC clone
+     • Structured data via Scribe STT → Claude extracts name, age, city, job, personality
+     • Unscripted final sentence → most natural speech sample for clone
+     • Personality signal → shapes debate tone (risk-tolerant = bolder Prosecution)
+   → "Now take a selfie" — webcam capture of user's face
+     • Face cutout used as base for all 3 courtroom avatars
+     • Edited into AA-style poses per character:
+       - Prosecution: confident pointing pose, red tint
+       - Defense: arms crossed skeptical pose, blue tint
+       - Judge: stern/thoughtful pose, gold tint
+     • Expression states via CSS transforms on the base image
+       (shake=sweating, scale-bounce=shocked, desaturate=breakdown)
      • **Lip detection** runs immediately after photo capture:
        - MediaPipe Face Mesh (browser-only, ~3MB model, one-shot)
        - Detects landmark 13 (upper lip top) → lip Y% stored with profile
        - Used to split face into upper + jaw for talking animation
        - Fallback: 70/30 split if no face detected
-       - Value saved to Supabase alongside voice_id and avatar
+   → voice_id + user profile + avatar saved to Supabase
    → "What decision are you wrestling with?" (hold-to-talk)
 
 2. SIMULATE
@@ -143,10 +163,11 @@ For the demo, pre-script the user's interrupt text and the AI response as a dete
 
 ### Visual Style
 - **Static courtroom layout** — prosecution/defense desks + judge bench (no camera panning)
-- **Colored silhouettes** with CSS expression states (no sprite sheets, no AI avatar generation)
-  - Prosecution: red tint, left side
-  - Defense: blue tint, right side
-  - Judge: gold tint, center-top
+- **User's selfie cutout** edited into AA-style poses per character
+  - Prosecution: confident/pointing, red tint, left side
+  - Defense: arms crossed/skeptical, blue tint, right side
+  - Judge: stern/thoughtful, gold tint, center-top
+  - Expression states via CSS transforms on the base image
 - Speech text box at bottom (AA-style) with character name
 - Audio waveform or talking animation synced to TTS playback
 
@@ -320,7 +341,7 @@ interface DebateEvent {
 2. **Verdict:** Always shows probability split.
 3. **Session replay:** Event log JSON + audio in Supabase Storage. Replay via same component. Stretch goal.
 4. **SFX:** Pre-recorded CC0 from Freesound + OpenGameArt. Downloaded before hackathon.
-5. **Avatars:** Colored silhouettes with CSS expression states. No AI generation, no sprite sheets.
+5. **Avatars:** User's selfie captured during onboarding, cutout into AA-style poses per character. CSS transforms for expression states.
 6. **Backend:** Next.js API routes only. Monte Carlo via Python subprocess. No separate FastAPI server.
 7. **Interrupt naming:** Backend always uses `interrupt`. Frontend varies flavor text per context.
 

@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roulette — Courtroom Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  /*
+   * PALETTE — 12 colors, no gradients, no alpha, no glow.
+   * Every color on screen comes from this list.
+   *
+   * --bg:       #0f0f1b    dark navy
+   * --wall:     #1e1a14    wood
+   * --wall-hi:  #3a3020    wood highlight
+   * --floor:    #12100c    dark floor
+   * --bench:    #2c2418    bench wood
+   * --bench-hi: #4a3e2a    bench top edge
+   * --panel:    #08080e    textbox / UI bg
+   * --border:   #222028    general border
+   * --red:      #e84040    prosecution
+   * --blue:     #4a9eff    defense
+   * --gold:     #f0b830    judge / accent
+   * --white:    #e0e0e0    text
+   * --dim:      #555060    muted text
+   */
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #000;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .courtroom {
+    width: 960px;
+    height: 540px;
+    position: relative;
+    overflow: hidden;
+    image-rendering: pixelated;
+    border: 3px solid #222028;
+  }
+
+  /* ═══════════════════════════════════════════
+     BACKGROUND — flat colors, hard edges only
+     ═══════════════════════════════════════════ */
+  .bg {
+    position: absolute;
+    inset: 0;
+    background: #0f0f1b;
+    z-index: 0;
+  }
+
+  /* Courtroom back wall — flat color, hard panel lines */
+  .wall {
+    position: absolute;
+    top: 0; left: 0; right: 0; height: 55%;
+    z-index: 1;
+    background: #1e1a14;
+    border-bottom: 4px solid #3a3020;
+  }
+  /* Vertical panel dividers — hard 2px lines */
+  .wall::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(90deg,
+      transparent 0px, transparent 118px,
+      #161210 118px, #161210 120px
+    );
+  }
+  /* Horizontal trim — single flat line, not a gradient */
+  .wall::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0; height: 4px;
+    background: #3a3020;
+  }
+
+  /* Floor — flat */
+  .floor {
+    position: absolute;
+    bottom: 0; left: 0; right: 0; height: 22%;
+    z-index: 1;
+    background: #12100c;
+  }
+  /* Floor tile lines */
+  .floor::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(90deg,
+      transparent 0px, transparent 78px,
+      #0e0c08 78px, #0e0c08 80px
+    );
+  }
+
+  /* Bench — flat color, hard edges */
+  .bench {
+    position: absolute;
+    bottom: 22%; left: 0; right: 0; height: 48px;
+    z-index: 5;
+    background: #2c2418;
+    border-top: 3px solid #4a3e2a;
+    border-bottom: 2px solid #161210;
+  }
+
+  /* Judge bench — flat */
+  .judge-bench {
+    position: absolute;
+    top: 30%; left: 50%; transform: translateX(-50%);
+    width: 240px; height: 60px;
+    z-index: 4;
+    background: #2c2418;
+    border: 2px solid #4a3e2a;
+  }
+
+  /* Scanlines — kept, this IS a retro game thing */
+  .scanlines {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent 0px, transparent 2px,
+      rgba(0,0,0,0.12) 2px, rgba(0,0,0,0.12) 4px
+    );
+  }
+
+  /* Vignette — HARD stepped edge, not a smooth radial gradient */
+  .vignette {
+    position: absolute;
+    inset: 0;
+    z-index: 51;
+    pointer-events: none;
+    border: 24px solid #000;
+    box-shadow: inset 0 0 0 24px rgba(0,0,0,0.3);
+  }
+
+  /* ═══════════════════════════════════════════
+     CHARACTERS
+     ═══════════════════════════════════════════ */
+  .character {
+    position: absolute;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .char-body {
+    position: relative;
+    width: 160px;
+  }
+  .char-body img {
+    width: 100%;
+    display: block;
+  }
+
+  /* Face overlay */
+  .char-face {
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 62px;
+    height: 68px;
+    z-index: 2;
+    overflow: hidden;
+    border: 2px solid #222028;
+  }
+  .char-face img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* Name tags — hard pixel shadow, no glow */
+  .char-tag {
+    margin-top: 8px;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 9px;
+    letter-spacing: 2px;
+    padding: 4px 10px;
+    border: 2px solid;
+    background: #08080e;
+  }
+
+  /* ── PROSECUTION (left) ── */
+  .prosecution {
+    bottom: calc(22% + 48px + 10px);
+    left: 10%;
+  }
+  .prosecution .char-body img {
+    filter: sepia(1) saturate(2.5) hue-rotate(-10deg) brightness(0.6) contrast(1.4);
+    transform: scaleX(-1);
+  }
+  .prosecution .char-face {
+    transform: translateX(-50%) scaleX(-1);
+  }
+  .prosecution .char-tag {
+    color: #e84040;
+    border-color: #e84040;
+    text-shadow: 2px 2px 0 #400808;
+  }
+
+  /* ── DEFENSE (right) ── */
+  .defense {
+    bottom: calc(22% + 48px + 10px);
+    right: 10%;
+  }
+  .defense .char-body img {
+    filter: sepia(1) saturate(2) hue-rotate(180deg) brightness(0.6) contrast(1.4);
+  }
+  .defense .char-tag {
+    color: #4a9eff;
+    border-color: #4a9eff;
+    text-shadow: 2px 2px 0 #081840;
+  }
+
+  /* ── JUDGE (center, behind bench) ── */
+  .judge {
+    top: 6%;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .judge .char-body {
+    width: 120px;
+  }
+  .judge .char-body img {
+    filter: sepia(1) saturate(1.8) hue-rotate(20deg) brightness(0.65) contrast(1.3);
+  }
+  .judge .char-face {
+    width: 44px;
+    height: 48px;
+  }
+  .judge .char-tag {
+    color: #f0b830;
+    border-color: #f0b830;
+    text-shadow: 2px 2px 0 #402800;
+  }
+
+  /* ═══════════════════════════════════════════
+     TEXT BOX
+     ═══════════════════════════════════════════ */
+  .textbox {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 22%;
+    z-index: 30;
+    background: #08080e;
+    border-top: 3px solid #2a3050;
+    padding: 12px 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .textbox-speaker {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+  }
+  .textbox-text {
+    font-family: 'VT323', monospace;
+    font-size: 22px;
+    color: #e0e0e0;
+    line-height: 1.4;
+    overflow: hidden;
+  }
+  .textbox-text em {
+    color: #f0b830;
+    font-style: normal;
+  }
+
+  /* Blinking cursor — step animation, not smooth */
+  .cursor {
+    display: inline-block;
+    width: 12px;
+    height: 20px;
+    background: #e0e0e0;
+    vertical-align: text-bottom;
+    animation: blink 0.5s steps(1) infinite;
+    margin-left: 2px;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ═══════════════════════════════════════════
+     OBJECTION — hard edges, no rotation, no scale, step animation
+     ═══════════════════════════════════════════ */
+  .objection {
+    position: absolute;
+    top: 35%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 40;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 32px;
+    color: #e84040;
+    letter-spacing: 4px;
+    padding: 8px 20px;
+    border: 4px solid #e84040;
+    background: #08080e;
+    text-shadow: 3px 3px 0 #400808;
+    opacity: 0;
+    animation: objFlash 6s steps(1) infinite;
+  }
+  @keyframes objFlash {
+    0%  { opacity: 0; }
+    10% { opacity: 1; }
+    25% { opacity: 0; }
+  }
+
+  /* Interrupt flash — instant on/off, not faded */
+  .flash {
+    position: absolute;
+    inset: 0;
+    z-index: 35;
+    pointer-events: none;
+    background: #e84040;
+    opacity: 0;
+    animation: flashPulse 6s steps(1) infinite;
+  }
+  @keyframes flashPulse {
+    0%  { opacity: 0; }
+    10% { opacity: 0.5; }
+    12% { opacity: 0; }
+  }
+
+  /* Screen shake — pixel-snapped, no easing */
+  .courtroom {
+    animation: shake 6s steps(1) infinite;
+  }
+  @keyframes shake {
+    0%, 9%, 16%, 100% { transform: translate(0); }
+    10% { transform: translate(-4px, 3px); }
+    11% { transform: translate(4px, -3px); }
+    12% { transform: translate(-3px, 2px); }
+    13% { transform: translate(3px, -2px); }
+    14% { transform: translate(-2px, 1px); }
+    15% { transform: translate(0); }
+  }
+
+  /* ═══════════════════════════════════════════
+     HP BARS — flat fills, hard edges
+     ═══════════════════════════════════════════ */
+  .status-bar {
+    position: absolute;
+    top: 8px;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    background: #08080e;
+    border: 2px solid #222028;
+  }
+  .status-bar.left { left: 10px; }
+  .status-bar.right { right: 10px; }
+
+  .status-name {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 7px;
+    letter-spacing: 1px;
+  }
+  .hp-bar {
+    width: 80px;
+    height: 8px;
+    background: #0f0f1b;
+    border: 2px solid #222028;
+    overflow: hidden;
+    position: relative;
+  }
+  .hp-fill {
+    height: 100%;
+  }
+  .hp-fill.red { background: #e84040; }
+  .hp-fill.blue { background: #4a9eff; }
+
+  /* Round indicator */
+  .round-indicator {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 8px;
+    color: #f0b830;
+    letter-spacing: 2px;
+    padding: 4px 12px;
+    background: #08080e;
+    border: 2px solid #f0b830;
+  }
+
+  /* Interrupt tokens — flat, no alpha */
+  .tokens {
+    position: absolute;
+    bottom: calc(22% + 8px);
+    right: 16px;
+    z-index: 20;
+    display: flex;
+    gap: 6px;
+  }
+  .token {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #f0b830;
+    background: #1a1408;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 6px;
+    color: #f0b830;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .token.used {
+    border-color: #222028;
+    background: #08080e;
+    color: #222028;
+  }
+</style>
+</head>
+<body>
+
+<div class="courtroom">
+  <div class="bg"></div>
+  <div class="wall"></div>
+  <div class="floor"></div>
+  <div class="bench"></div>
+  <div class="judge-bench"></div>
+
+  <div class="status-bar left">
+    <span class="status-name" style="color:#e84040;">PROSECUTION</span>
+    <div class="hp-bar"><div class="hp-fill red" style="width:85%;"></div></div>
+  </div>
+  <div class="round-indicator">ROUND 2</div>
+  <div class="status-bar right">
+    <span class="status-name" style="color:#4a9eff;">DEFENSE</span>
+    <div class="hp-bar"><div class="hp-fill blue" style="width:62%;"></div></div>
+  </div>
+
+  <div class="character judge">
+    <div class="char-body">
+      <div class="char-face"><img src="assets/face.png" alt="face"></div>
+      <img src="assets/suit_tpose_nobg.png" alt="judge">
+    </div>
+    <span class="char-tag">JUDGE</span>
+  </div>
+
+  <div class="character prosecution">
+    <div class="char-body">
+      <div class="char-face"><img src="assets/face.png" alt="face"></div>
+      <img src="assets/suit_tpose_nobg.png" alt="prosecution">
+    </div>
+    <span class="char-tag">PROSECUTION</span>
+  </div>
+
+  <div class="character defense">
+    <div class="char-body">
+      <div class="char-face"><img src="assets/face.png" alt="face"></div>
+      <img src="assets/suit_tpose_nobg.png" alt="defense">
+    </div>
+    <span class="char-tag">DEFENSE</span>
+  </div>
+
+  <div class="tokens">
+    <div class="token">!</div>
+    <div class="token">!</div>
+    <div class="token used">!</div>
+  </div>
+
+  <div class="flash"></div>
+  <div class="objection">OBJECTION!</div>
+
+  <div class="textbox">
+    <div class="textbox-speaker" style="color:#e84040;">PROSECUTION</div>
+    <div class="textbox-text">
+      "Your <em>Monte Carlo</em> simulation — ironic name by the way — shows a 23% chance I'm a millionaire in 5 years."<span class="cursor"></span>
+    </div>
+  </div>
+
+  <div class="scanlines"></div>
+  <div class="vignette"></div>
+</div>
+
+</body>
+</html>
