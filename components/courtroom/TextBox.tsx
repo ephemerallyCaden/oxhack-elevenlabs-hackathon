@@ -1,22 +1,30 @@
-import { ROLE_STYLE, type CourtRole } from "./roles";
-
-// Ace Attorney-style dialogue box. C4 adds the typewriter effect.
-export default function TextBox({ speaker, name, text }: { speaker: CourtRole; name?: string; text: string }) {
-  const { label, color } = ROLE_STYLE[speaker];
+// Ace Attorney-style dialogue box pinned to the bottom 22% of the 960×540 scene.
+// Sits OUTSIDE the camera wrapper so it stays fixed during camera moves.
+export default function TextBox({
+  name,
+  color,
+  text,
+  controls,
+}: {
+  name?: string;
+  color: string;
+  text?: string;
+  controls?: React.ReactNode;
+}) {
   return (
-    <div className="absolute inset-x-[3cqw] bottom-[3cqh] h-[24cqh]">
-      <div
-        className="absolute -top-[4.5cqh] left-[2cqw] rounded-t-[1cqh] px-[1.5cqw] py-[0.6cqh] text-[2.6cqh] font-bold uppercase tracking-wide text-white"
-        style={{ backgroundColor: color }}
-      >
-        {name ?? label}
+    <div
+      className="absolute inset-x-0 bottom-0 z-30 flex items-center gap-4 px-6 py-3"
+      style={{ height: '22%', background: '#08080e', borderTop: '3px solid #2a3050' }}
+    >
+      <div className="min-w-0 flex-1">
+        {name && (
+          <div className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color }}>
+            {name}
+          </div>
+        )}
+        {text && <p className="font-mono text-[18px] leading-snug text-[#e0e0e0]">{text}</p>}
       </div>
-      <div
-        className="h-full rounded-[1.5cqh] border-[0.5cqh] bg-black/85 px-[2.5cqw] py-[2.5cqh] text-[3.4cqh] leading-snug text-white"
-        style={{ borderColor: color }}
-      >
-        {text}
-      </div>
+      {controls && <div className="w-[300px] shrink-0">{controls}</div>}
     </div>
   );
 }

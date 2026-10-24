@@ -1,61 +1,100 @@
-import Character from "./Character";
-import Stage from "./Stage";
-import TextBox from "./TextBox";
-import TopBar from "./TopBar";
-import { ROLE_STYLE, type CourtRole } from "./roles";
+'use client';
+// Manga-noir courtroom scene (960×540). Background, camera, characters + expressions.
+// Camera transforms precomputed with the validated formula from
+// research/courtroom-manga-camera.html against the marker positions below.
+import './expressions.css';
+import type { Scene } from '@/types';
+import Character, { type Facing } from './Character';
+import Stage from './Stage';
+import TextBox from './TextBox';
+import type { CharacterMood, CourtActor } from './expressions';
 
-type Props = {
-  speaker: CourtRole;
-  text: string;
-  round: number;
-  tokens: number;
-  names?: Partial<Record<CourtRole, string>>;
+/* Character torso centers — the #ff0000 markers measured in courtroom-bg.png,
+   adjusted for `background-size: cover` crop (image 5:3 → container 16:9). */
+const MARKER: Record<CourtActor, { x: string; y: string }> = {
+  prosecution: { x: '23.3%', y: '78%' },
+  defense: { x: '76.5%', y: '78%' },
+  judge: { x: '50%', y: '62.5%' },
 };
 
-// Static courtroom: prosecution left, defense right, judge centre-top. No camera panning.
-export default function Courtroom({ speaker, text, round, tokens, names = {} }: Props) {
-  return (
-    <Stage>
-      {/* Wall + floor */}
-      <div className="absolute inset-0 bg-[linear-gradient(#3b2414_0%,#24160c_62%,#140c06_62%,#0a0603_100%)]" />
-      <div className="absolute inset-x-0 top-0 h-[62cqh] bg-[repeating-linear-gradient(90deg,transparent_0_9cqw,rgba(0,0,0,0.25)_9cqw_9.4cqw)]" />
+/* Precomputed from face centers at the markers:
+   prosecution face (223.7, 343.7), defense (734.4, 343.7), judge (480, 283).
+   Lawyers framed 11% off-center ("facing each other"), judge centered,
+   faces at the effective-viewport vertical center (210.6px, textbox excluded).
+   Zoomed out: 1.4×, lawyers' midpoint pulled up, clamped to image bounds. */
+const CAMERA: Record<Scene, string> = {
+  yes: 'scale(2.2) translate(21.7%, -18.6%)',
+  no: 'scale(2.2) translate(-21.5%, -18.6%)',
+  judge: 'scale(2.0) translate(0%, -7.9%)',
+  witness: 'scale(1.4) translate(0.1%, -14.3%)',
+  cutscene: 'scale(1.4) translate(0.1%, -14.3%)',
+};
 
-      {/* Judge behind the bench */}
-      <div className="absolute left-1/2 top-[8cqh] h-[26cqh] -translate-x-1/2">
-        <Character role="judge" speaking={speaker === "judge"} />
-      </div>
-      <Desk role="judge" name={names.judge} className="left-1/2 top-[28cqh] h-[14cqh] w-[34cqw] -translate-x-1/2" />
-
-      {/* Prosecution (left) and defense (right) behind their desks */}
-      <div className="absolute bottom-[42cqh] left-[9cqw] h-[30cqh]">
-        <Character role="prosecution" speaking={speaker === "prosecution"} />
-      </div>
-      <Desk role="prosecution" name={names.prosecution} className="bottom-[34cqh] left-[4cqw] h-[13cqh] w-[30cqw]" />
-
-      <div className="absolute bottom-[42cqh] right-[9cqw] h-[30cqh]">
-        <Character role="defense" speaking={speaker === "defense"} />
-      </div>
-      <Desk role="defense" name={names.defense} className="bottom-[34cqh] right-[4cqw] h-[13cqh] w-[30cqw]" />
-
-      <TopBar round={round} totalRounds={3} tokens={tokens} />
-      <TextBox speaker={speaker} name={names[speaker]} text={text} />
-    </Stage>
-  );
+/* Side profiles in close-ups (facing courtroom center), front otherwise. */
+function facingFor(role: CourtActor, scene: Scene): Facing {
+  if (scene === 'yes' && role === 'prosecution') return 'right';
+  if (scene === 'no' && role === 'defense') return 'left';
+  return 'front';
 }
 
-function Desk({ role, name, className }: { role: CourtRole; name?: string; className: string }) {
-  const { label, color } = ROLE_STYLE[role];
+export default function Courtroom({
+  scene,
+  moods,
+  speakerName,
+  speakerColor,
+  text,
+  objection,
+  status,
+  controls,
+}: {
+  scene: Scene;
+  moods: Record<CourtActor, CharacterMood>;
+  speakerName?: string;
+  speakerColor?: string;
+  text?: string;
+  objection?: boolean;
+  status?: string;
+  /** Rendered inside the textbox (right side) so it scales with the stage. */
+  controls?: React.ReactNode;
+}) {
   return (
-    <div
-      className={`absolute flex items-center justify-center rounded-t-[1cqh] border-t-[0.8cqh] bg-[linear-gradient(#6b3f1f,#3d2210)] shadow-[0_1cqh_3cqh_rgba(0,0,0,0.6)] ${className}`}
-      style={{ borderColor: color }}
-    >
-      <span
-        className="rounded-[0.6cqh] px-[1cqw] py-[0.4cqh] text-[2cqh] font-bold uppercase tracking-wider text-white"
-        style={{ backgroundColor: color }}
-      >
-        {name ?? label}
-      </span>
-    </div>
+    <Stage>
+      <div className="manga-stage">
+        <div className="manga-camera" style={{ transform: CAMERA[scene] }}>
+          <div className="manga-bg" />
+          <div className="manga-speedlines" />
+          <div className="manga-halftone" />
+          <div className="manga-ink" />
+          {(['prosecution', 'judge', 'defense'] as const).map((role) => (
+            <div
+              key={role}
+              className="absolute z-10"
+              style={{ left: MARKER[role].x, top: MARKER[role].y, transform: 'translate(-50%, -50%)' }}
+            >
+              <Character role={role} mood={moods[role]} facing={facingFor(role, scene)} />
+            </div>
+          ))}
+        </div>
+
+        {/* Viewport-fixed overlays (not affected by camera) */}
+        <div className="manga-scanlines" />
+        <div className="manga-vignette" />
+        {objection && (
+          <div
+            className="absolute left-1/2 top-[30%] z-40 -translate-x-1/2 -rotate-3 border-4 border-white bg-[#08080e] px-6 py-2 font-mono text-4xl font-black tracking-widest text-white"
+          >
+            OBJECTION!
+          </div>
+        )}
+        {status && (
+          <div className="absolute inset-x-0 top-[8%] z-40 text-center font-mono text-lg text-zinc-200 [text-shadow:0_2px_8px_#000]">
+            {status}
+          </div>
+        )}
+        {(text || controls) && (
+          <TextBox name={speakerName} color={speakerColor ?? '#e0e0e0'} text={text} controls={controls} />
+        )}
+      </div>
+    </Stage>
   );
 }
