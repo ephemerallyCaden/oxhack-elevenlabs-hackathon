@@ -16,7 +16,7 @@ Lines are spoken aloud: keep "text" natural, no markdown. "tts" is the same word
 export const AGENDA_TASK = `You are THE JUDGE preparing the agenda.
 Choose 1-4 topics that together settle the question. Simple questions get 1-2 topics; big life decisions get 3-4. Topics must not overlap, and each must be arguable both ways.
 For each topic give: a short title (2-4 words), the sub-question it settles, importance (0-1, how much it should count; they will be normalised), research_speed ("quick" if facts are easy to look up, e.g. costs, statistics; "deep" if it needs nuanced research), and the Judge's one-sentence intro line that ends by inviting the prosecution to begin.
-Also write the opening line: call the court to order, restate the question in second person, and name the topics (max 40 words).`;
+Also write the opening line: call the court to order and restate the question in second person, nothing else. Don’t list the topics: they are on screen and each gets its own intro line (max 20 words).`;
 
 export const PROFILE_TASK = `You are the court clerk taking down the witness's background from their onboarding recording, before their trial. The text is speech-to-text: expect filler words, mis-heard words and run-on sentences.
 Extract only what they actually said or clearly implied; use null for anything they didn't cover. Keep phrases short and in their own terms. Never guess an age, a name or a place.
