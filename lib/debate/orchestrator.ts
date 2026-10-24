@@ -36,6 +36,7 @@ import { estimateMs, postJson, uid, withFallback } from './fallback';
 import { mockAgenda, mockArgue, mockCards, mockJudgeInterrupt, mockPersonas, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
 import { addTopic, computeSpectrum, removeTopic } from './spectrum';
 import { buildTranscript } from './transcript';
+import { TIMEOUTS } from './timeouts';
 
 /** YES → NO cycles per topic before user interrupts add more. */
 export const BASE_CYCLES = 2;
@@ -166,7 +167,7 @@ export class TrialOrchestrator {
     const r = await withFallback<TtsResponse | null>(
       (signal) => postJson<TtsResponse>('/api/voice/tts', { text: line.tts || line.text, speaker: line.speaker, voiceId: this.opts.voiceId }, signal),
       null,
-      7000,
+      TIMEOUTS.tts.client,
       'tts',
     );
     return r.value && !r.value.fallback ? { ...line, audioUrl: r.value.audioUrl, durationMs: r.value.durationMs } : { ...line, durationMs: estimateMs(line.text) };
@@ -208,7 +209,7 @@ export class TrialOrchestrator {
           '/api/research',
           { question: this.state.question, topic: { id: topic.id, title: topic.title, question: topic.question }, side, tier: 'quick' },
           () => ({ cards: mockCards({ question: this.state.question, topic, side, tier: 'quick' }), fallback: true }),
-          6000,
+          TIMEOUTS.quickResearch.client,
         ).then(add);
       this.quickResearch.set(topic.id, Promise.all([q('yes'), q('no')]).then(() => undefined));
       // Deep search lands later and is used by later cycles/topics. No mock: quick cards already cover it.
@@ -216,7 +217,7 @@ export class TrialOrchestrator {
         withFallback(
           (signal) => postJson<ResearchResponse>('/api/research', { question: this.state.question, topic, side, tier: 'deep' }, signal),
           { cards: [], fallback: true },
-          50000,
+          TIMEOUTS.deepResearch.client,
           'deep research',
         ).then((r) => {
           if (!r.fallback) add(r.value);
@@ -230,8 +231,8 @@ export class TrialOrchestrator {
     const { question, profile } = this.state;
     // Agenda and the two future selves are independent: build both during the cut-scene.
     const [agenda, cast] = await Promise.all([
-      this.call<AgendaResponse>('/api/trial/agenda', { question, profile }, () => mockAgenda(question), 10000),
-      this.call<PersonasResponse>('/api/trial/personas', { question, profile }, () => mockPersonas({ question, profile }), 10000),
+      this.call<AgendaResponse>('/api/trial/agenda', { question, profile }, () => mockAgenda(question), TIMEOUTS.agenda.client),
+      this.call<PersonasResponse>('/api/trial/personas', { question, profile }, () => mockPersonas({ question, profile }), TIMEOUTS.personas.client),
     ]);
     this.intros = agenda.intros;
     this.set({ agenda: agenda.topics, personas: cast.personas });
@@ -260,7 +261,7 @@ export class TrialOrchestrator {
       '/api/trial/verdict',
       { question, agenda: this.state.agenda, userLines },
       () => mockVerdict({ question, agenda: this.state.agenda, userLines }),
-      10000,
+      TIMEOUTS.verdict.client,
     );
     this.set({ verdict: v.verdict, spectrum: v.verdict.spectrum });
     await this.say(v.verdict.line);
@@ -292,7 +293,7 @@ export class TrialOrchestrator {
   }
 
   private argue(req: ArgueRequest) {
-    return this.call<ArgueResponse>('/api/trial/argue', req, () => mockArgue(req), 9000);
+    return this.call<ArgueResponse>('/api/trial/argue', req, () => mockArgue(req), TIMEOUTS.argue.client);
   }
 
   /**
@@ -358,7 +359,7 @@ export class TrialOrchestrator {
     if (!topic) return;
     const req = { question: this.state.question, topic, line, cards: this.state.cards.filter((c) => c.topic_id === topicId) };
     this.ledgerPending.push(
-      this.call<ScoreArgumentResponse>('/api/trial/score-argument', req, () => ({ entry: mockScoreArgument(req), fallback: true }), 8000).then((r) =>
+      this.call<ScoreArgumentResponse>('/api/trial/score-argument', req, () => ({ entry: mockScoreArgument(req), fallback: true }), TIMEOUTS.scoreArgument.client).then((r) =>
         this.set({ ledger: [...this.state.ledger, r.entry] }),
       ),
     );
@@ -371,7 +372,7 @@ export class TrialOrchestrator {
     this.ledgerPending = [];
     const topic = this.topic(topicId)!;
     const req = { question: this.state.question, topic, ledger: this.state.ledger.filter((e) => e.topic_id === topicId), history: this.topicLines(topicId) };
-    const r = await this.call<ScoreTopicResponse>('/api/trial/score-topic', req, () => mockScoreTopic(req), 9000);
+    const r = await this.call<ScoreTopicResponse>('/api/trial/score-topic', req, () => mockScoreTopic(req), TIMEOUTS.scoreTopic.client);
     this.patchTopic(topicId, { status: 'done', score: r.score });
     this.set({ spectrum: computeSpectrum(this.state.agenda) });
     await this.sayHandled(r.line);
@@ -389,7 +390,7 @@ export class TrialOrchestrator {
         return ((await res.json()) as SttResponse).transcript;
       },
       '',
-      8000,
+      TIMEOUTS.stt.client,
       'stt',
     );
     if (r.fallback) this.set({ fallbacks: [...this.state.fallbacks, 'voice/stt'] });
@@ -429,7 +430,7 @@ export class TrialOrchestrator {
   /** User interrupted the Judge → add or remove a topic. */
   private async agendaChange(text: string) {
     const req = { question: this.state.question, agenda: this.state.agenda, text };
-    const r = await this.call<JudgeInterruptResponse>('/api/trial/judge-interrupt', req, () => mockJudgeInterrupt(req), 8000);
+    const r = await this.call<JudgeInterruptResponse>('/api/trial/judge-interrupt', req, () => mockJudgeInterrupt(req), TIMEOUTS.judgeInterrupt.client);
     if (r.action === 'add' && r.topic) {
       this.set({ agenda: addTopic(this.state.agenda, r.topic, r.topic.importance) });
       this.research([r.topic]);

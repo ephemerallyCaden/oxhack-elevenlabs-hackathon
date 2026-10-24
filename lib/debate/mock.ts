@@ -97,7 +97,7 @@ const OPENERS = {
 export function mockArgue(req: ArgueRequest): ArgueResponse {
   const own = req.cards.filter((c) => c.side === req.side);
   const card = own[(req.cycle - 1) % Math.max(1, own.length)];
-  const point = card ? card.claim : `${req.topic.title} ${req.side === 'yes' ? 'favours' : 'argues against'} it`;
+  const point = card ? card.claim : `the evidence ${req.side === 'yes' ? 'favours' : 'argues against'} it`;
   const opener = OPENERS[req.side][(req.cycle - 1) % 3];
   // Offline, YES gets cut off once per topic (cycle 2) so the cut-in path is exercised.
   const cut = req.cutInAllowed && !req.userPoint && req.side === 'yes' && req.cycle === 2;

@@ -23,6 +23,7 @@ import type {
 import { SIDE_SPEAKER } from '@/types';
 import { claude, hasClaudeKey, MODEL } from './claude';
 import { uid, withFallback } from './fallback';
+import { TIMEOUTS } from './timeouts';
 import { mockAgenda, mockArgue, mockJudgeInterrupt, mockPersonas, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
 import * as P from './prompts';
 import { computeSpectrum, MAX_TOPICS, normalise, orderAgenda } from './spectrum';
@@ -86,7 +87,7 @@ export async function buildAgenda(question: string, profile?: UserProfile): Prom
     `QUESTION: ${question}
 ${P.profileBlock(profile)}`,
     AgendaSchema,
-    9000,
+    TIMEOUTS.agenda.server,
     'agenda',
     (out): AgendaResponse => {
       if (!out.topics.length) throw new Error('empty agenda');
@@ -121,7 +122,7 @@ export async function buildPersonas(req: PersonasRequest): Promise<PersonasRespo
     `QUESTION: ${req.question}
 ${P.profileBlock(req.profile)}`,
     PersonasSchema,
-    9000,
+    TIMEOUTS.personas.server,
     'personas',
     (out): PersonasResponse => {
       const persona = (side: 'yes' | 'no', p: z.infer<typeof PersonaSchema>): Persona => {
@@ -161,7 +162,7 @@ CUT-IN ALLOWED: ${req.cutInAllowed && !req.userPoint ? 'yes' : 'no'}
 ${P.cardsBlock(own)}
 ${P.historyBlock(req.history)}${req.userPoint ? `\n\nUSER POINT (the witness just interrupted you): "${req.userPoint}"` : ''}`,
     ArgueSchema,
-    8000,
+    TIMEOUTS.argue.server,
     'argue',
     (out): ArgueResponse => {
       if (!out.text.trim()) throw new Error('empty argument'); // → mock fallback
@@ -210,7 +211,7 @@ export async function scoreArgument(req: ScoreArgumentRequest): Promise<ScoreArg
 ${P.cardsBlock(req.cards)}
 LINE (by ${req.line.speaker}): ${req.line.text}`,
     LedgerSchema,
-    7000,
+    TIMEOUTS.scoreArgument.server,
     'score-argument',
     (out) => ({
       id: uid('ledger'),
@@ -244,7 +245,7 @@ export async function scoreTopic(req: ScoreTopicRequest): Promise<ScoreTopicResp
 ${P.ledgerBlock(req.ledger)}
 ${P.historyBlock(req.history)}`,
     TopicScoreSchema,
-    8000,
+    TIMEOUTS.scoreTopic.server,
     'score-topic',
     (out): ScoreTopicResponse => ({
       score: {
@@ -283,7 +284,7 @@ ${req.agenda.map((t) => `- ${t.id} [${t.status}, ${Math.round(t.importance * 100
 
 THE WITNESS SAYS: "${req.text}"`,
     JudgeInterruptSchema,
-    7000,
+    TIMEOUTS.judgeInterrupt.server,
     'judge-interrupt',
     (out): JudgeInterruptResponse => {
       const line = judgeLine('agenda_change', out.line);
@@ -324,7 +325,7 @@ ${scored.map((t) => `- ${t.title} (${Math.round(t.importance * 100)}% weight${t.
 ${req.agenda.some((t) => t.status === 'removed') ? `REMOVED BY THE WITNESS: ${req.agenda.filter((t) => t.status === 'removed').map((t) => t.title).join(', ')}` : ''}
 WITNESS INTERRUPTS: ${req.userLines.length ? req.userLines.map((l) => `"${l.text}"`).join('; ') : '(none)'}`,
     VerdictSchema,
-    9000,
+    TIMEOUTS.verdict.server,
     'verdict',
     (out): VerdictResponse => ({
       verdict: { spectrum, explanation: out.explanation, breakdown, line: judgeLine('verdict', out.line) },
