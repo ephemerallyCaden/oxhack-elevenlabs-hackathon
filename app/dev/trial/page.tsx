@@ -21,26 +21,37 @@ const SCENE_LABEL: Record<Scene, string> = {
   cutscene: 'Cut-scene',
 };
 
-/** Hold-to-talk recorder. Resolves the recording on stop, or null if the mic is unavailable. */
+/**
+ * Hold-to-talk recorder. stop() waits for start() to finish, so a quick tap (or releasing while the
+ * permission prompt is open) can't leave the mic recording. Resolves null if the mic is unavailable.
+ */
 function useRecorder() {
   const rec = useRef<MediaRecorder | null>(null);
+  const starting = useRef<Promise<boolean> | null>(null);
   const chunks = useRef<Blob[]>([]);
   return {
-    async start() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        chunks.current = [];
-        rec.current = new MediaRecorder(stream);
-        rec.current.ondataavailable = (e) => chunks.current.push(e.data);
-        rec.current.start();
-        return true;
-      } catch {
-        return false;
-      }
+    start(): Promise<boolean> {
+      starting.current = (async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          chunks.current = [];
+          rec.current = new MediaRecorder(stream);
+          rec.current.ondataavailable = (e) => chunks.current.push(e.data);
+          rec.current.start();
+          return true;
+        } catch {
+          rec.current = null;
+          return false;
+        }
+      })();
+      return starting.current;
     },
-    stop(): Promise<Blob | null> {
+    async stop(): Promise<Blob | null> {
+      if (starting.current) await starting.current;
+      starting.current = null;
       const r = rec.current;
-      if (!r || r.state === 'inactive') return Promise.resolve(null);
+      rec.current = null;
+      if (!r || r.state === 'inactive') return null;
       return new Promise((resolve) => {
         r.onstop = () => {
           r.stream.getTracks().forEach((t) => t.stop());
@@ -57,6 +68,8 @@ export default function TrialHarness() {
   const s = useTrialState(orch);
   const recorder = useRecorder();
   const [holding, setHolding] = useState(false);
+  // Ref mirror: pointer/key handlers must see a press immediately, before React re-renders.
+  const held = useRef(false);
   const [typed, setTyped] = useState('');
   const [needTyping, setNeedTyping] = useState(false);
   const audio = useRef<HTMLAudioElement | null>(null);
@@ -89,24 +102,28 @@ export default function TrialHarness() {
   }
 
   async function down() {
-    if (holding) return;
-    if (s.phase === 'speaking') {
+    if (held.current) return;
+    const phase = orch.getState().phase; // live state, not this render's snapshot
+    if (phase === 'speaking') {
       if (!orch.beginInterrupt()) return;
       audio.current?.pause();
-    } else if (s.phase !== 'ask') return;
+    } else if (phase !== 'ask') return;
+    held.current = true;
     setHolding(true);
     if (!(await recorder.start())) setNeedTyping(true);
   }
 
   async function up() {
-    if (!holding) return;
+    if (!held.current) return;
+    held.current = false;
     setHolding(false);
     const blob = await recorder.stop();
-    if (s.phase === 'ask') {
+    const phase = orch.getState().phase;
+    if (phase === 'ask') {
       const q = blob ? await transcribe(blob) : '';
       if (q) orch.start(q);
       else setNeedTyping(true);
-    } else if (s.phase === 'listening') {
+    } else if (phase === 'listening') {
       if (blob) orch.endInterrupt(blob);
       else setNeedTyping(true);
     }
@@ -117,8 +134,9 @@ export default function TrialHarness() {
     if (!text) return;
     setTyped('');
     setNeedTyping(false);
-    if (s.phase === 'ask') orch.start(text);
-    else if (s.phase === 'listening') orch.endInterrupt(text);
+    const phase = orch.getState().phase;
+    if (phase === 'ask') orch.start(text);
+    else if (phase === 'listening') orch.endInterrupt(text);
   }
 
   useEffect(() => {
@@ -189,7 +207,7 @@ export default function TrialHarness() {
               disabled={!canTalk}
               onPointerDown={down}
               onPointerUp={up}
-              onPointerLeave={() => holding && up()}
+              onPointerLeave={() => held.current && up()}
               className="min-h-11 rounded-full bg-red-600 px-6 py-3 font-bold uppercase tracking-wide disabled:opacity-40"
             >
               {holding ? 'Listening… release to send' : s.phase === 'ask' ? 'Hold to ask' : 'Hold to interrupt'}

@@ -59,12 +59,16 @@ describe('TrialOrchestrator', () => {
     expect(s.result?.sources.length).toBeGreaterThan(0);
   });
 
-  it('interrupting a side: that side answers the user first, the other side replies, and no cycle is used up', async () => {
+  /** Speakers on a topic in order, including the user (YES → you → YES answering you is fine). */
+  const sides = (s: TrialState, topicId: string) =>
+    s.transcript.filter((l) => l.topic_id === topicId && l.kind !== 'intro' && l.kind !== 'score').map((l) => l.speaker);
+
+  it('interrupting a side: that side answers the user first, the other side replies next, and no cycle is used up', async () => {
     let done = false;
     const s = await play('Should I move to Berlin?', (st) => {
       if (!done && st.current?.speaker === 'defense' && st.current.kind === 'argument') {
         done = true;
-        return "But I already speak German";
+        return 'But I already speak German';
       }
     });
     const i = s.transcript.findIndex((l) => l.speaker === 'user');
@@ -75,9 +79,76 @@ describe('TrialOrchestrator', () => {
     expect(after[1]).toMatchObject({ speaker: 'prosecution', kind: 'argument' });
 
     const topicId = s.transcript[i].topic_id!;
-    const regular = s.transcript.filter((l) => l.topic_id === topicId && l.kind === 'argument' && l !== after[1]);
+    const regular = s.transcript.filter((l) => l.topic_id === topicId && l.kind === 'argument');
     expect(regular.length).toBe(6); // the full 3 cycles still happened
     expect(s.ledger.some((e) => e.line_id === s.transcript[i].id)).toBe(true);
+  });
+
+  it.each(['prosecution', 'defense'] as const)('after interrupting %s, nobody speaks twice in a row', async (target) => {
+    let done = false;
+    const s = await play('Should I adopt a dog?', (st) => {
+      if (!done && st.current?.speaker === target && st.current.kind === 'argument') {
+        done = true;
+        return 'What about my small flat?';
+      }
+    });
+    const topicId = s.transcript.find((l) => l.speaker === 'user')!.topic_id!;
+    const order = sides(s, topicId);
+    order.slice(1).forEach((who, k) => expect(who, `turn ${k + 2}: ${order.join(' → ')}`).not.toBe(order[k]));
+  });
+
+  it("interrupting the topic's last turn still gets a reply from the other side", async () => {
+    let args = 0;
+    let done = false;
+    const s = await play('Should I learn to code?', (st) => {
+      if (st.current?.kind === 'argument' && st.agenda[0]?.id === st.activeTopicId) args++;
+      if (!done && args === 6 && st.current?.kind === 'argument') {
+        done = true;
+        return 'I only have weekends free';
+      }
+    });
+    const i = s.transcript.findIndex((l) => l.speaker === 'user');
+    expect(s.transcript[i + 1]).toMatchObject({ speaker: 'defense', kind: 'answer' });
+    expect(s.transcript[i + 2]).toMatchObject({ speaker: 'prosecution' });
+  });
+
+  it('cannot interrupt a line that has already finished (nothing would pick the interrupt up)', async () => {
+    const orch = new TrialOrchestrator();
+    let refused = 0;
+    await new Promise<void>((resolve) => {
+      let last = '';
+      orch.subscribe(() => {
+        const s = orch.getState();
+        if (s.phase === 'done') return resolve();
+        if (s.phase !== 'speaking' || !s.current || s.current.id === last) return;
+        last = s.current.id;
+        const id = s.current.id;
+        setTimeout(() => {
+          orch.lineEnded(id);
+          if (orch.beginInterrupt() === null) refused++;
+        }, 0);
+      });
+      orch.start('Should I run a marathon?');
+    });
+    expect(refused).toBeGreaterThan(0);
+    expect(orch.getState().transcript.some((l) => l.speaker === 'user')).toBe(false);
+  });
+
+  it('ignores a second start() while a trial is running', async () => {
+    const orch = new TrialOrchestrator();
+    orch.subscribe(() => {
+      const s = orch.getState();
+      if (s.phase === 'speaking' && s.current) {
+        const id = s.current.id;
+        setTimeout(() => orch.lineEnded(id), 0);
+      }
+    });
+    const first = orch.start('Should I paint my room blue?');
+    orch.start('Should I paint my room red?');
+    await first;
+    const s = orch.getState();
+    expect(s.question).toBe('Should I paint my room blue?');
+    expect(s.transcript.filter((l) => l.kind === 'opening')).toHaveLength(1);
   });
 
   it('interrupting the Judge changes the agenda: adds a weighted topic that then gets debated', async () => {

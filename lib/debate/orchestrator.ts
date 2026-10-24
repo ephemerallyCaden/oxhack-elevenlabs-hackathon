@@ -80,6 +80,8 @@ export class TrialOrchestrator {
   private inputPromise?: Promise<Blob | string | null>;
   /** Bumped on every interrupt so stale prefetched lines are thrown away. */
   private epoch = 0;
+  /** Set when a side has just answered the user; the debate loop decides who replies. */
+  private answeredSide?: Side;
 
   constructor(private opts: { voiceId?: string } = {}) {}
 
@@ -113,6 +115,7 @@ export class TrialOrchestrator {
   // ── UI → orchestrator ─────────────────────────────────────────────────────
   /** The user asked their question (already transcribed). Runs the whole trial. */
   async start(question: string) {
+    if (this.state.phase !== 'ask') return; // already running (e.g. a double submit)
     this.state = { ...this.initial(), question };
     this.set({ phase: 'preparing', scene: 'cutscene', status: 'The court is preparing the case…' });
     try {
@@ -131,7 +134,8 @@ export class TrialOrchestrator {
   /** INTERRUPT pressed: stop the line, zoom out to the witness. Returns who is being interrupted, or null. */
   beginInterrupt(): Speaker | null {
     const cur = this.state.current;
-    if (!this.state.canInterrupt || !cur || cur.speaker === 'user') return null;
+    // Only while a line is actually playing: between lines nothing would pick the interrupt up.
+    if (!this.state.canInterrupt || !this.sayResolve || !cur || cur.speaker === 'user') return null;
     this.epoch++;
     this.inputPromise = new Promise((r) => (this.inputResolve = r));
     this.set({ phase: 'listening', scene: 'witness', interruptTarget: cur.speaker, canInterrupt: false });
@@ -150,7 +154,7 @@ export class TrialOrchestrator {
     if (line.durationMs != null) return line;
     if (line.speaker === 'user') return { ...line, durationMs: 0 };
     const r = await withFallback<TtsResponse | null>(
-      (signal) => postJson<TtsResponse>('/api/voice/tts', { text: line.tts ?? line.text, speaker: line.speaker, voiceId: this.opts.voiceId }, signal),
+      (signal) => postJson<TtsResponse>('/api/voice/tts', { text: line.tts || line.text, speaker: line.speaker, voiceId: this.opts.voiceId }, signal),
       null,
       7000,
       'tts',
@@ -171,6 +175,8 @@ export class TrialOrchestrator {
     });
     const result = await done;
     this.sayResolve = undefined;
+    // The line is over: no interrupting it while the next one is generated/voiced.
+    if (result === 'done') this.set({ canInterrupt: false });
     return result;
   }
 
@@ -295,7 +301,17 @@ export class TrialOrchestrator {
         prefetch = { epoch, p: this.argue(req).then(async (r) => ({ ...r, line: await this.prepare(r.line) })) };
       }
       this.scoreInBackground(topicId, res.line);
+      this.answeredSide = undefined;
       await this.sayHandled(res.line);
+      // The user interrupted and a side answered them. The next scheduled turn is normally the other
+      // side, which replies. Only on the topic's last turn does the other side need an extra reply.
+      const answered = this.answeredSide as Side | undefined;
+      this.answeredSide = undefined;
+      if (answered && !next && this.topic(topicId)?.status === 'active') {
+        const reply = await this.argue(this.argueReq(topicId, answered === 'yes' ? 'no' : 'yes', cycle));
+        this.scoreInBackground(topicId, reply.line);
+        await this.sayHandled(reply.line);
+      }
       // Both sides out of new points after a full cycle → the Judge closes the topic early.
       if (side === 'no' && exhausted.size === 2) return;
     }
@@ -364,17 +380,14 @@ export class TrialOrchestrator {
     if (target === 'judge') return this.agendaChange(text);
     if (!topicId) return;
 
-    // A side was interrupted: it must answer the user's point; then the other side may reply. Not a cycle.
+    // A side was interrupted: it must answer the user's point. The other side replies as the debate
+    // loop's next turn (see debate()), so nobody speaks twice in a row. Not a cycle.
     const side: Side = target === 'prosecution' ? 'yes' : 'no';
-    const other: Side = side === 'yes' ? 'no' : 'yes';
     this.scoreInBackground(topicId, userLine);
     const answer = await this.argue(this.argueReq(topicId, side, this.state.cycle, [], text));
     this.scoreInBackground(topicId, answer.line);
     await this.sayHandled(answer.line);
-    if (this.topic(topicId)?.status !== 'active') return;
-    const reply = await this.argue(this.argueReq(topicId, other, this.state.cycle));
-    this.scoreInBackground(topicId, reply.line);
-    await this.sayHandled(reply.line);
+    this.answeredSide = side;
   }
 
   /** User interrupted the Judge → add or remove a topic. */

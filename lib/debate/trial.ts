@@ -56,9 +56,10 @@ async function ask<S extends z.ZodType, R>(
 }
 
 const Spoken = z.object({ text: z.string(), tts: z.string() });
-const judgeLine = (kind: Line['kind'], s: { text: string; tts: string }, topic_id?: string): Line => ({
-  id: uid('line'), speaker: 'judge', kind, text: s.text, tts: s.tts, cites: [], topic_id,
-});
+const judgeLine = (kind: Line['kind'], s: { text: string; tts: string }, topic_id?: string): Line => {
+  if (!s.text.trim()) throw new Error(`empty ${kind} line`); // → mock fallback
+  return { id: uid('line'), speaker: 'judge', kind, text: s.text, tts: s.tts, cites: [], topic_id };
+};
 
 // ─── agenda ─────────────────────────────────────────────────────────────────
 
@@ -114,20 +115,23 @@ ${P.historyBlock(req.history)}${req.userPoint ? `\n\nUSER POINT (the witness jus
     ArgueSchema,
     8000,
     'argue',
-    (out): ArgueResponse => ({
-      line: {
-        id: uid('line'),
-        speaker: SIDE_SPEAKER[req.side],
-        kind: req.userPoint ? 'answer' : 'argument',
-        text: out.text,
-        tts: out.tts,
-        cites: out.cites.filter((c) => valid.has(c)),
-        topic_id: req.topic.id,
-        cycle: req.cycle,
-      },
-      exhausted: out.exhausted,
-      fallback: false,
-    }),
+    (out): ArgueResponse => {
+      if (!out.text.trim()) throw new Error('empty argument'); // → mock fallback
+      return {
+        line: {
+          id: uid('line'),
+          speaker: SIDE_SPEAKER[req.side],
+          kind: req.userPoint ? 'answer' : 'argument',
+          text: out.text,
+          tts: out.tts,
+          cites: out.cites.filter((c) => valid.has(c)),
+          topic_id: req.topic.id,
+          cycle: req.cycle,
+        },
+        exhausted: out.exhausted,
+        fallback: false,
+      };
+    },
     () => mockArgue(req),
   );
   return value;
