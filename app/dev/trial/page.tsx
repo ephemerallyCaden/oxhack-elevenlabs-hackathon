@@ -167,7 +167,7 @@ export default function TrialHarness() {
         <section className="flex min-w-0 flex-[999_1_560px] flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900">
           <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-2 text-xs uppercase tracking-widest text-zinc-400">
             <span>{SCENE_LABEL[s.scene]}</span>
-            <span>{active ? `${active.title} · cycle ${s.cycle}/3` : s.phase}</span>
+            <span>{active ? `${active.title} · cycle ${s.cycle}/${s.totalCycles}` : s.phase}</span>
           </div>
           <div className="relative flex h-72 items-end justify-center gap-10 p-6">
             {(['prosecution', 'judge', 'defense'] as const).map((who) => {

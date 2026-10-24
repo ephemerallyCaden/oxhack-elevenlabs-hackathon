@@ -101,7 +101,14 @@ export async function buildAgenda(question: string): Promise<AgendaResponse> {
 
 // ─── argue (inner loop) ─────────────────────────────────────────────────────
 
-const ArgueSchema = z.object({ text: z.string(), tts: z.string(), cites: z.array(z.string()), exhausted: z.boolean() });
+const ArgueSchema = z.object({
+  text: z.string(),
+  tts: z.string(),
+  cites: z.array(z.string()),
+  exhausted: z.boolean(),
+  cut_in: Spoken.describe('The other side cutting in; empty strings if none'),
+  resume: Spoken.describe('Your comeback after the cut-in; empty strings if none'),
+});
 
 export async function argue(req: ArgueRequest): Promise<ArgueResponse> {
   const valid = new Set(req.cards.map((c) => c.id));
@@ -109,7 +116,8 @@ export async function argue(req: ArgueRequest): Promise<ArgueResponse> {
   const { value } = await ask(
     P.ARGUE_TASK,
     `${P.topicBlock(req.question, req.topic)}
-YOU ARE: ${req.side === 'yes' ? 'PROSECUTION (YES)' : 'DEFENSE (NO)'} · cycle ${req.cycle} of 3
+YOU ARE: ${req.side === 'yes' ? 'PROSECUTION (YES)' : 'DEFENSE (NO)'} · cycle ${req.cycle}
+CUT-IN ALLOWED: ${req.cutInAllowed && !req.userPoint ? 'yes' : 'no'}
 ${P.cardsBlock(own)}
 ${P.historyBlock(req.history)}${req.userPoint ? `\n\nUSER POINT (the witness just interrupted you): "${req.userPoint}"` : ''}`,
     ArgueSchema,
@@ -117,7 +125,16 @@ ${P.historyBlock(req.history)}${req.userPoint ? `\n\nUSER POINT (the witness jus
     'argue',
     (out): ArgueResponse => {
       if (!out.text.trim()) throw new Error('empty argument'); // → mock fallback
+      const other = req.side === 'yes' ? 'no' : 'yes';
+      const cutIn =
+        req.cutInAllowed && !req.userPoint && out.cut_in.text.trim() && out.resume.text.trim()
+          ? {
+              line: { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in' as const, text: out.cut_in.text, tts: out.cut_in.tts, cites: [], topic_id: req.topic.id, cycle: req.cycle },
+              resume: { id: uid('line'), speaker: SIDE_SPEAKER[req.side], kind: 'resume' as const, text: out.resume.text, tts: out.resume.tts, cites: [], topic_id: req.topic.id, cycle: req.cycle },
+            }
+          : undefined;
       return {
+        cutIn,
         line: {
           id: uid('line'),
           speaker: SIDE_SPEAKER[req.side],

@@ -20,7 +20,8 @@ export const ARGUE_TASK = `You write the next line for one side in the inner deb
 - Respond to the opponent's last line if there is one, then make one new point.
 - Use your own side's evidence cards and cite the ones you use. Do not repeat a point already made.
 - If a USER POINT is given: you were interrupted by the witness. Address their point directly and first. Concede what is fair, then turn it toward your side.
-- Set exhausted=true only if your side genuinely has nothing new to add on this topic.`;
+- Set exhausted=true only if your side genuinely has nothing new to add on this topic.
+- CUT-IN (only when CUT-IN ALLOWED is yes, and only if your line says something the other side would genuinely jump on: a best-case number, an exaggeration): write "text" as what you say before being cut off, ending mid-thought with "—"; "cut_in" is the OTHER side interrupting you (max 12 words, opens with an exclamation like "Hold on!" or "Oh, come on!"); "resume" is your one-sentence comeback (max 20 words). Otherwise leave cut_in and resume as empty strings. Use it rarely: most lines have no cut-in.`;
 
 export const SCORE_ARGUMENT_TASK = `You are the court clerk keeping the pros/cons ledger. Given one line, record: the claim in under 20 words, which side it supports (yes / no / neutral; a witness's point can support either side, judged by its content), its strength 1-5 (5 = specific, sourced and directly relevant; 1 = vague or off-topic), and the evidence card ids it relies on.`;
 

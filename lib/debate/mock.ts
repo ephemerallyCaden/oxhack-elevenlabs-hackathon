@@ -78,11 +78,22 @@ export function mockArgue(req: ArgueRequest): ArgueResponse {
   const card = own[(req.cycle - 1) % Math.max(1, own.length)];
   const point = card ? card.claim : `${req.topic.title} ${req.side === 'yes' ? 'favours' : 'argues against'} it`;
   const opener = OPENERS[req.side][(req.cycle - 1) % 3];
+  // Offline, YES gets cut off once per topic (cycle 2) so the cut-in path is exercised.
+  const cut = req.cutInAllowed && !req.userPoint && req.side === 'yes' && req.cycle === 2;
   const text = req.userPoint
     ? `You say "${req.userPoint}". A fair point, and I'll answer it: ${point.toLowerCase()}.`
-    : `${opener} On ${req.topic.title.toLowerCase()}: ${point.toLowerCase()}.`;
+    : cut
+      ? `${opener} On ${req.topic.title.toLowerCase()}, the best case is simply—`
+      : `${opener} On ${req.topic.title.toLowerCase()}: ${point.toLowerCase()}.`;
+  const base = { topic_id: req.topic.id, cycle: req.cycle, cites: [] as string[] };
   return {
     line: { id: uid('line'), speaker: SIDE_SPEAKER[req.side], kind: req.userPoint ? 'answer' : 'argument', text, cites: card ? [card.id] : [], topic_id: req.topic.id, cycle: req.cycle },
+    cutIn: cut
+      ? {
+          line: { ...base, id: uid('line'), speaker: 'defense', kind: 'cut_in', text: "Hold on! That's the best case, not the likely one." },
+          resume: { ...base, id: uid('line'), speaker: 'prosecution', kind: 'resume', text: `Then let's talk likely: ${point.toLowerCase()}.` },
+        }
+      : undefined,
     exhausted: false,
     fallback: true,
   };

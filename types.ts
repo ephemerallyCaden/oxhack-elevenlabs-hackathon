@@ -78,7 +78,9 @@ export interface ResearchResponse {
 export type LineKind =
   | 'opening' // Judge reads the agenda
   | 'intro' // Judge introduces a topic
-  | 'argument' // YES/NO normal turn
+  | 'argument' // YES/NO normal turn (may end mid-sentence with "—" when the other side cuts in)
+  | 'cut_in' // AI interrupt: the other side cuts in ("Hold on, that's the best case!"). Doesn't change the cycle count.
+  | 'resume' // the cut-off side's short comeback after a cut_in
   | 'answer' // YES/NO answering the user's interrupt
   | 'user' // the user's interrupt (transcribed)
   | 'agenda_change' // Judge confirms a topic added/removed
@@ -96,7 +98,7 @@ export interface Line {
   /** EvidenceCard ids this line relies on (→ transcript footnotes). */
   cites: string[];
   topic_id?: string;
-  /** Inner-loop cycle (1-3) for arguments. */
+  /** Inner-loop cycle for arguments (1-based; 2 per topic + 1 per user interrupt). */
   cycle?: number;
   audioUrl?: string;
   durationMs?: number;
@@ -171,11 +173,15 @@ export interface ArgueRequest {
   cards: EvidenceCard[];
   /** Set when answering the user's interrupt: the speaker must address it first. */
   userPoint?: string;
+  /** The other side may cut into this line (at most one cut-in per topic). */
+  cutInAllowed?: boolean;
 }
 export interface ArgueResponse {
   line: Line;
   /** The side has nothing new to add on this topic (lets the Judge close early). */
   exhausted: boolean;
+  /** The other side cut in: play `line` (cut off), then `cutIn.line`, then `cutIn.resume`. */
+  cutIn?: { line: Line; resume: Line };
   fallback: boolean;
 }
 
