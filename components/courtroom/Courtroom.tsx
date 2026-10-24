@@ -46,6 +46,7 @@ export default function Courtroom({
   objection,
   status,
   controls,
+  faceSrc,
 }: {
   scene: Scene;
   moods: Record<CourtActor, CharacterMood>;
@@ -54,6 +55,8 @@ export default function Courtroom({
   text?: string;
   objection?: boolean;
   status?: string;
+  /** The user’s selfie (onboarding); default face when absent. */
+  faceSrc?: string;
   /** Rendered inside the textbox (right side) so it scales with the stage. */
   controls?: React.ReactNode;
 }) {
@@ -71,7 +74,7 @@ export default function Courtroom({
               className="absolute z-10"
               style={{ left: MARKER[role].x, top: MARKER[role].y, transform: 'translate(-50%, -50%)' }}
             >
-              <Character role={role} mood={moods[role]} facing={facingFor(role, scene)} />
+              <Character role={role} mood={moods[role]} facing={facingFor(role, scene)} faceSrc={faceSrc} />
             </div>
           ))}
         </div>
