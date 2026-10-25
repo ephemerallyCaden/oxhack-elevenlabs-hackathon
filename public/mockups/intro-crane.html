@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task 0 — Crane-up intro · 5 variations</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #050507; color: #ccc; font-family: system-ui, sans-serif; }
+  body { display: flex; overflow: hidden; }
+
+  /* ── layout: stage left, controls right ── */
+  #fit { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  #stageBox { width: 960px; height: 540px; flex: none; transform-origin: center center; }
+  #panel { width: 340px; flex: none; height: 100%; overflow-y: auto; background: #0d0d12; border-left: 1px solid #222; padding: 14px; font-size: 12px; }
+
+  /* ── stage ── */
+  .stage { position: relative; width: 960px; height: 540px; overflow: hidden; background: #000; }
+  .fill { position: absolute; inset: 0; }
+  .cam { position: absolute; inset: 0; transform-origin: center center; }
+  .plane {
+    position: absolute; inset: 0;
+    transform-origin: 480.6px 259.2px;           /* vanishing point (throne) */
+    transform:
+      translateY(calc(var(--P) * var(--w) * var(--Dp) * var(--r) * -1px))
+      scale(calc(1 - var(--P) * var(--w) * var(--Zp) * var(--r)));
+  }
+  .plane-img { position: absolute; display: block; max-width: none; user-select: none; pointer-events: none; }
+  .oldbg { position: absolute; left: 0; top: -18px; width: 960px; height: 576px; display: none; }
+
+  /* colour treatments (background planes only; characters keep their colour) */
+  [data-colour="greyscale"] .plane-img { filter: grayscale(1) contrast(1.3) brightness(0.7); }
+  [data-colour="colour"]    .plane-img { filter: contrast(1.15) brightness(0.82) saturate(1.05); }
+  [data-colour="darker"]    .plane-img { filter: grayscale(1) contrast(1.55) brightness(0.45); }
+  [data-colour="desat"]     .plane-img { filter: saturate(0.3) contrast(1.25) brightness(0.68); }
+  .draining .plane-img { transition: filter 0.35s ease-out; }
+  /* Edge treatment: past the photo's left/right edges the far+mid planes hold reflected
+     wall; "fade" hides it in darkness (floor bands keep their synthesized carpet).
+     Plane img is 1492 tall-px wide; the photo spans px 300..1192 of it (KX-scaled). */
+  [data-edges="fade"] .plane[data-plane="far"] .plane-img,
+  [data-edges="fade"] .plane[data-plane="mid"] .plane-img {
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, transparent 176px, #000 303px, #000 1157px, transparent 1284px);
+            mask-image: linear-gradient(90deg, transparent 0, transparent 176px, #000 303px, #000 1157px, transparent 1284px);
+  }
+
+  /* screen-space manga overlays (same look as today's courtroom) */
+  .fx-speed { pointer-events: none; z-index: 20; background: repeating-conic-gradient(from 0deg at 50% 45%, transparent 0deg 2.8deg, rgba(0,0,0,.04) 2.8deg 3deg); }
+  .fx-halftone { pointer-events: none; z-index: 21; background-image: radial-gradient(circle, rgba(0,0,0,.15) 1px, transparent 1px); background-size: 4px 4px; mix-blend-mode: multiply; }
+  .fx-ink { pointer-events: none; z-index: 22; background: linear-gradient(0deg, rgba(0,0,0,.5) 0%, rgba(0,0,0,.2) 25%, transparent 45%), radial-gradient(ellipse 80% 80% at 50% 45%, transparent 40%, rgba(0,0,0,.6) 100%); }
+  .fx-dark { pointer-events: none; z-index: 23; display: none; background: radial-gradient(ellipse 70% 70% at 50% 45%, transparent 25%, rgba(0,0,0,.85) 100%); }
+  [data-colour="darker"] .fx-dark { display: block; }
+  .fx-scan { pointer-events: none; z-index: 50; background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,.06) 2px 3px); }
+  .fx-vig { pointer-events: none; z-index: 51; border: 4px solid #000; box-shadow: inset 0 0 80px rgba(0,0,0,.5), inset 0 0 20px rgba(0,0,0,.3); }
+  /* radial zoom-blur speed lines, centred on the vanishing point */
+  #zoomLines { pointer-events: none; z-index: 24; opacity: 0;
+    background: repeating-conic-gradient(from 0deg at var(--vpx) var(--vpy), transparent 0deg 1.7deg, rgba(255,255,255,.55) 1.7deg 1.95deg, transparent 1.95deg 3.1deg, rgba(255,255,255,.3) 3.1deg 3.25deg);
+    -webkit-mask-image: radial-gradient(circle at var(--vpx) var(--vpy), transparent 0 14%, #000 60%);
+            mask-image: radial-gradient(circle at var(--vpx) var(--vpy), transparent 0 14%, #000 60%); }
+
+  /* characters (subset of components/courtroom/expressions.css) */
+  .char { position: absolute; transform: translate(-50%, -50%); }
+  .char-pose { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .face-container { position: absolute; left: 50%; transform: translateX(-50%); z-index: 2; }
+  .face-upper, .face-jaw { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+  .face-upper { clip-path: inset(0 0 13% 0); }
+  .face-jaw { clip-path: inset(85% 0 0 0); transform-origin: center 87%; }
+
+  /* UI (hidden through the hold + move; in when the Judge starts) */
+  .ui { transition: opacity .12s; }
+  .ui.hidden { opacity: 0; }
+  .corner { position: absolute; z-index: 60; background: rgba(0,0,0,.7); border-radius: 6px; padding: 6px 10px; font-size: 10px; }
+  .corner b { color: #fff; display: block; font-size: 11px; }
+  .textbox { position: absolute; left: 0; right: 0; bottom: 0; height: 22%; z-index: 60; background: #08080e; border-top: 3px solid #2a3050; padding: 12px 24px; display: flex; flex-direction: column; justify-content: center; }
+  .tb-name { font-family: 'Press Start 2P', monospace; font-size: 10px; letter-spacing: .2em; color: #a16207; margin-bottom: 8px; }
+  .tb-text { font-family: 'VT323', monospace; font-size: 22px; color: #e0e0e0; line-height: 1.3; }
+  #status { position: absolute; left: 0; right: 0; top: 8%; z-index: 70; text-align: center; font-family: 'VT323', monospace; font-size: 24px; color: #e4e4e7; text-shadow: 0 2px 8px #000; display: none; }
+  #phaseTag { position: absolute; right: 8px; bottom: 8px; z-index: 90; font: 10px monospace; color: #666; background: rgba(0,0,0,.6); padding: 2px 6px; border-radius: 3px; }
+
+  /* ── panel ── */
+  #panel h2 { font-size: 13px; color: #fff; margin: 12px 0 6px; letter-spacing: .05em; }
+  #panel h2:first-child { margin-top: 0; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 5px 0; }
+  .row label { width: 120px; flex: none; color: #999; }
+  .row input[type=range] { flex: 1; }
+  .row output { width: 46px; text-align: right; color: #f0b830; font-family: monospace; }
+  select, button { background: #16161d; color: #ddd; border: 1px solid #333; border-radius: 4px; padding: 5px 8px; font-size: 12px; cursor: pointer; }
+  button:hover { border-color: #777; }
+  button.on { border-color: #f0b830; color: #f0b830; }
+  .vars { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+  .vars button { padding: 7px 0; font-weight: 700; }
+  .desc { color: #777; font-size: 11px; margin: 4px 0 2px; min-height: 30px; }
+  .btns { display: flex; flex-wrap: wrap; gap: 4px; }
+  #play { background: #a11; border-color: #f44; color: #fff; font-weight: 700; padding: 8px 12px; }
+  textarea { width: 100%; height: 120px; background: #08080b; color: #8fd; border: 1px solid #222; font: 10px monospace; padding: 6px; }
+</style>
+</head>
+<body>
+<div id="fit"><div id="stageBox">
+<div class="stage" id="stage" data-colour="greyscale" data-edges="fade">
+  <div class="fill" id="shaker">
+    <div class="fill" id="scene">
+      <div class="cam" id="cam"></div>
+      <div class="fill" id="ghosts"></div>
+    </div>
+    <div class="fill fx-speed"></div>
+    <div class="fill" id="zoomLines"></div>
+    <div class="fill fx-halftone"></div>
+    <div class="fill fx-ink"></div>
+    <div class="fill fx-dark"></div>
+    <div class="fill fx-scan"></div>
+    <div class="fill fx-vig"></div>
+  </div>
+  <div id="status">The court is preparing the case…</div>
+  <div class="ui" id="ui">
+    <div class="corner" style="left:12px;top:12px;max-width:280px"><b>Court of Future Selves</b>"Should I quit my quant job to play poker?"</div>
+    <div class="corner" style="right:12px;top:12px;width:200px"><div style="height:6px;border-radius:3px;background:linear-gradient(90deg,#2563eb,#52525b,#ea580c);position:relative"><div style="position:absolute;left:50%;top:-3px;width:3px;height:12px;background:#fff"></div></div><div style="text-align:center;margin-top:3px;color:#fff;font-weight:700">0 · Toss-up</div></div>
+    <div class="textbox"><div class="tb-name">THE JUDGE</div><div class="tb-text">This court is now in session. The question before us: should you quit your quant job to play poker?</div></div>
+  </div>
+  <div id="phaseTag">base</div>
+</div>
+</div></div>
+
+<div id="panel">
+  <h2>Variation</h2>
+  <div class="vars" id="vars"></div>
+  <div class="desc" id="vdesc"></div>
+  <div class="btns" style="margin-top:6px">
+    <button id="play">▶ Ask (play intro)</button>
+    <button id="reset">Base scene</button>
+    <button id="slow">Slow-mo ×4</button>
+    <button id="skipHold">Skip hold</button>
+  </div>
+
+  <h2>Look</h2>
+  <div class="row"><label>Colour</label><select id="colour"><option value="greyscale">Greyscale</option><option value="colour">Coloured</option><option value="drain">Colour → drains on land</option><option value="darker">Darker</option><option value="desat">Desaturated</option></select></div>
+  <div class="row"><label>Easing (move)</label><select id="easing"><option value="linear">Linear</option><option value="outCubic">Fast start, decelerate</option><option value="inQuart">Slow start → slam</option><option value="inOutExpo">Expo in-out</option><option value="outExpo">Very fast start</option></select></div>
+  <div class="row"><label>Landing</label><select id="landing"><option value="shakeSmall">Hard stop + shake</option><option value="shakeBig">Hard stop + big shake</option><option value="overshoot">Overshoot + settle</option><option value="overshootShake">Overshoot + small shake</option><option value="freeze">Hard stop + 80ms freeze</option></select></div>
+
+  <h2>Motion</h2>
+  <div id="sliders"></div>
+
+  <h2>Checks</h2>
+  <div class="row"><label>Background</label><div class="btns"><button data-ab="new" class="on">New (tall)</button><button data-ab="old">Old</button><button data-ab="diff">Diff</button></div></div>
+  <div class="row"><label>Edges past photo</label><div class="btns"><button data-edge="fade" class="on">Fade to dark</button><button data-edge="mirror">Mirror</button></div></div>
+  <div class="row"><label>Character spots</label><div class="btns"><button data-mk="current" class="on">Current</button><button data-mk="tall">New dots</button></div></div>
+
+  <h2>Values (copy to share)</h2>
+  <textarea id="out" readonly></textarea>
+</div>
+
+<script>
+// ─── Calibration (scripts/make-intro-layers.py + template registration, score 0.994) ───
+// tall-image px → stage px:  x = KX·(X − OX),  y = KY·(Y − OY) − 18
+const KX = 0.978369, KY = 0.958622, OX = -45.18375, OY = 230.870625;
+const VP = { x: 480.6, y: 259.2 };                       // vanishing point (throne / centre window)
+const IMG_BOTTOM = 1024.14;                              // stage y of the tall image's bottom row
+const O = { x: 480, y: 270 };                            // camera transform-origin (stage centre)
+const WITNESS = { S: 1.4, tx: 0.96, ty: -77.22 };        // today's CAMERA.witness: scale(1.4) translate(0.1%, -14.3%)
+const JUDGE = 'scale(2) translate(0px, -42.66px)';       // today's CAMERA.judge:   scale(2.0) translate(0%, -7.9%)
+const MARKERS = {
+  current: { prosecution: [23.3, 78], defense: [76.5, 78], judge: [50, 62.5] },
+  tall:    { prosecution: [25.6, 77.46], defense: [74.52, 77.46], judge: [50.06, 62.91] },
+};
+const CHAR = { prosecution: { w: 160, h: 240, face: 65, top: 10, pose: 'prosecutor' },
+               defense:     { w: 160, h: 240, face: 65, top: 10, pose: 'defendant' },
+               judge:       { w: 120, h: 180, face: 55, top: 8,  pose: 'judge' } };
+
+// ─── Variations ───
+const VARIATIONS = [
+  { name: 'V1 Clean noir',   desc: 'Greyscale, subtle parallax, light blur, constant speed, hard stop + shake.',
+    p: { colour: 'greyscale', easing: 'linear',    landing: 'shakeSmall',     P: 0.6, Dp: 160, Zp: 0.05, blur: 0.35, ghosts: 5, dur: 800, S0: 1.33, dip: 0.0 } },
+  { name: 'V2 Colour drain', desc: 'Real colour (red carpet) during the move, drains to noir on landing. Medium parallax/blur, decelerates, overshoot + settle.',
+    p: { colour: 'drain',     easing: 'outCubic',  landing: 'overshoot',      P: 1.0, Dp: 160, Zp: 0.07, blur: 0.6,  ghosts: 6, dur: 800, S0: 1.33, dip: 0.05 } },
+  { name: 'V3 Warp punch',   desc: 'Greyscale, exaggerated parallax, heavy blur, slow start → slam, 80ms impact freeze.',
+    p: { colour: 'greyscale', easing: 'inQuart',   landing: 'freeze',         P: 1.6, Dp: 200, Zp: 0.06, blur: 1.0, ghosts: 8, dur: 800, S0: 1.33, dip: 0.08 } },
+  { name: 'V4 Dark descent', desc: 'Darker noir + heavy vignette, strong parallax, heavy blur, expo in-out, big shake.',
+    p: { colour: 'darker',    easing: 'inOutExpo', landing: 'shakeBig',       P: 1.3, Dp: 170, Zp: 0.07, blur: 0.9,  ghosts: 7, dur: 800, S0: 1.33, dip: 0.1 } },
+  { name: 'V5 Washed',       desc: 'Desaturated (~30% colour), medium-subtle parallax, medium blur, very fast start, overshoot + small shake.',
+    p: { colour: 'desat',     easing: 'outExpo',   landing: 'overshootShake', P: 0.8, Dp: 150, Zp: 0.06, blur: 0.6, ghosts: 6, dur: 800, S0: 1.33, dip: 0.04 } },
+  { name: '★ Your pick',     desc: 'Your tuned values (from V1): desaturated, extreme parallax, big mid-move pull-back that opens the room, 490ms constant-speed move, overshoot + small shake.',
+    p: { colour: 'desat',     easing: 'linear',    landing: 'overshootShake', P: 2.5, Dp: 105, Zp: 0.14, blur: 0.4, ghosts: 4, dur: 490, S0: 1.1, dip: 0.3, hold: 500, beat: 450 } },
+];
+const SLIDERS = [
+  ['P', 'Parallax depth', 0, 2.5, 0.05], ['Dp', 'Crane parallax px', 0, 320, 5], ['Zp', 'Push parallax', 0, 0.3, 0.005],
+  ['blur', 'Blur intensity', 0, 1.5, 0.05], ['ghosts', 'Blur copies', 0, 12, 1], ['dur', 'Move ms', 300, 2000, 10],
+  ['S0', 'Start zoom', 1.1, 1.9, 0.01], ['dip', 'Mid-move pull-back', 0, 0.3, 0.01],
+  ['hold', 'Loading hold ms', 0, 6000, 100], ['beat', 'Beat ms', 0, 1500, 50],
+];
+let params = { ...VARIATIONS[0].p, hold: 2000, beat: 500 };
+let variation = 0, slow = 1, skipHold = false, markers = 'current';
+
+const EASE = {
+  linear: t => t,
+  outCubic: t => 1 - (1 - t) ** 3,
+  inQuart: t => t ** 4,
+  inOutExpo: t => t <= 0 ? 0 : t >= 1 ? 1 : t < .5 ? 2 ** (20 * t - 10) / 2 : (2 - 2 ** (-20 * t + 10)) / 2,
+  outExpo: t => t >= 1 ? 1 : 1 - 2 ** (-10 * t),
+};
+
+const $ = id => document.getElementById(id);
+const stage = $('stage'), cam = $('cam'), shaker = $('shaker'), ghostsEl = $('ghosts'), lines = $('zoomLines');
+
+// ─── Build the scene ───
+let layers = [];
+function charHTML(role) {
+  const c = CHAR[role];
+  return `<div class="char" data-role="${role}" style="width:${c.w}px;height:${c.h}px">
+    <img class="char-pose" src="/assets/pose-bodies/${c.pose}-front.svg" alt="">
+    <div class="face-container" style="width:${c.face}px;height:${c.face}px;top:${c.top}px">
+      <img class="face-upper" src="/assets/face.png" alt=""><img class="face-jaw" src="/assets/face.png" alt="">
+    </div></div>`;
+}
+async function build() {
+  layers = (await (await fetch('/assets/intro-layers/layers.json')).json()).layers;
+  let html = `<img class="plane-img oldbg" id="oldbg" src="/assets/courtroom-bg.png" alt="">`;
+  for (const L of layers) {
+    const st = `left:${KX * (L.x - OX)}px;top:${KY * (L.y - OY) - 18}px;width:${KX * L.w}px;height:${KY * L.h}px`;
+    html += `<div class="plane" data-plane="${L.name}" style="--w:${L.weight}"><img class="plane-img" src="${L.file}" style="${st}" alt="">`;
+    if (L.name === 'far') html += charHTML('judge');
+    if (L.name === 'mid') html += charHTML('prosecution') + charHTML('defense');
+    html += `</div>`;
+  }
+  cam.innerHTML = html;
+  placeChars();
+  setCam(WITNESS.S, O.x - WITNESS.tx, O.y - WITNESS.ty);
+  setR(0);
+}
+function placeChars() {
+  for (const [role, [x, y]] of Object.entries(MARKERS[markers]))
+    for (const el of document.querySelectorAll(`.char[data-role="${role}"]`)) { el.style.left = x + '%'; el.style.top = y + '%'; }
+}
+
+// ─── Camera math ───
+// Flat camera: scale(S) translate(T) about the stage centre; the visible centre is C = O − T.
+function camTransform(S, cx, cy) { return `scale(${S}) translate(${O.x - cx}px, ${O.y - cy}px)`; }
+function setCam(S, cx, cy) { cam.style.transform = camTransform(S, cx, cy); return { S, cx, cy }; }
+function setR(r) { stage.style.setProperty('--r', r); }
+function applyParams() {
+  stage.style.setProperty('--P', params.P); stage.style.setProperty('--Dp', params.Dp); stage.style.setProperty('--Zp', params.Zp);
+}
+// e ∈ [0,1] (can exceed 1 during overshoot): position along the carpet → witness path.
+function pathAt(e) {
+  const S0 = params.S0, S1 = WITNESS.S;
+  const c0 = { x: 480.6, y: IMG_BOTTOM - O.y / S0 }, c1 = { x: O.x - WITNESS.tx, y: O.y - WITNESS.ty };
+  const dip = 1 - params.dip * Math.sin(Math.PI * Math.min(1, Math.max(0, e)));
+  const S = Math.exp(Math.log(S0) + (Math.log(S1) - Math.log(S0)) * e) * dip;
+  return { S, cx: c0.x + (c1.x - c0.x) * e, cy: c0.y + (c1.y - c0.y) * e };
+}
+// Render one frame of the move: e = eased progress, amount = blur strength 0..1.
+function renderFrame(e, amount) {
+  const { S, cx, cy } = pathAt(e);
+  setCam(S, cx, cy);
+  setR(1 - e);
+  const vpx = O.x + S * (VP.x - cx), vpy = O.y + S * (VP.y - cy);
+  stage.style.setProperty('--vpx', vpx + 'px'); stage.style.setProperty('--vpy', vpy + 'px');
+  lines.style.opacity = Math.min(1, amount * 0.9);
+  const tf = camTransform(S, cx, cy);
+  [...ghostsEl.children].forEach((g, i) => {
+    const j = i + 1, n = ghostsEl.children.length;
+    const g_s = 1 + j * 0.022 * amount;
+    g.style.transform = `translate(${vpx}px, ${vpy}px) scale(${g_s}) translate(${-vpx}px, ${-vpy}px)`;
+    g.style.opacity = amount * 0.5 * (1 - (j - 1) / n);
+    g.firstChild.style.transform = tf;
+  });
+  $('scene').style.filter = amount > 0.02 ? `blur(${amount * 1.4}px)` : 'none';
+}
+function makeGhosts(n) {
+  ghostsEl.innerHTML = '';
+  for (let i = 0; i < n; i++) {
+    const g = document.createElement('div'); g.className = 'fill'; g.style.transformOrigin = '0 0';
+    const c = cam.cloneNode(true); c.removeAttribute('id'); g.appendChild(c); ghostsEl.appendChild(g);
+  }
+}
+function clearGhosts() { ghostsEl.innerHTML = ''; lines.style.opacity = 0; $('scene').style.filter = 'none'; }
+
+// ─── Timeline ───
+let runId = 0, talkTimer = null;
+const sleep = (ms, id) => new Promise(r => setTimeout(() => r(id === runId), ms));
+const frame = () => new Promise(r => requestAnimationFrame(r));
+function phase(p) { stage.dataset.phase = p; $('phaseTag').textContent = `${VARIATIONS[variation].name} · ${p}${slow > 1 ? ' · slow ×4' : ''}`; }
+function colourStart() {
+  stage.classList.remove('draining');
+  stage.dataset.colour = params.colour === 'drain' ? 'colour' : params.colour;
+}
+function judgeTalk(on) {
+  clearInterval(talkTimer);
+  const jaw = cam.querySelector('.char[data-role="judge"] .face-jaw');
+  if (!jaw) return;
+  if (!on) { jaw.style.transform = ''; return; }
+  let open = false;
+  talkTimer = setInterval(() => { open = !open; jaw.style.transform = `translateY(${open ? 5 : 0}px) rotate(${(Math.random() * 40 - 20).toFixed(1)}deg)`; }, 120);
+}
+
+async function play() {
+  const id = ++runId;
+  applyParams(); judgeTalk(false); clearGhosts();
+  cam.style.transition = 'none'; shaker.style.transform = '';
+  $('ui').classList.add('hidden');
+  colourStart();
+  // 1. Loading hold: dead still on the carpet, status shown.
+  renderFrame(0, 0); clearGhosts();
+  phase('hold'); $('status').style.display = 'block';
+  if (!(await sleep(skipHold ? 150 : params.hold, id))) return;
+  $('status').style.display = 'none';
+  // 2. Crane: one fast move, rise + push together.
+  phase('crane'); makeGhosts(params.ghosts);
+  const dur = params.dur * slow, ease = EASE[params.easing];
+  let t0 = performance.now(), frozen = params.landing !== 'freeze';
+  let prevE = 0, prevT = 0;
+  for (;;) {
+    await frame(); if (id !== runId) return;
+    let t = Math.min(1, (performance.now() - t0) / dur);
+    if (!frozen && t >= 0.9) {                                   // 80ms impact freeze, blur held
+      frozen = true; phase('freeze'); const hold = 80 * slow;
+      await sleep(hold, id); if (id !== runId) return; t0 += hold; phase('crane');
+    }
+    const e = ease(t);
+    const v = t > prevT ? (e - prevE) / (t - prevT) : 0;         // velocity in path-lengths per move
+    prevE = e; prevT = t;
+    renderFrame(e, params.blur * Math.min(1, Math.abs(v) / 2.5));
+    if (t >= 1) break;
+  }
+  // 3. Landing.
+  clearGhosts(); renderFrame(1, 0); clearGhosts();
+  phase('landing');
+  if (params.colour === 'drain') { stage.classList.add('draining'); stage.dataset.colour = 'greyscale'; }
+  const L = params.landing;
+  const tasks = [];
+  if (L === 'overshoot' || L === 'overshootShake') tasks.push(spring(id));
+  if (L === 'shakeSmall' || L === 'overshootShake') tasks.push(shake(id, 6, 220, false));
+  if (L === 'shakeBig') tasks.push(shake(id, 14, 380, true));
+  await Promise.all(tasks); if (id !== runId) return;
+  renderFrame(1, 0); clearGhosts(); shaker.style.transform = '';
+  // 4. Beat on the witness view.
+  phase('beat');
+  if (!(await sleep(params.beat * slow, id))) return;
+  // 5. Judge: today's pan to the close-up, UI in, Judge talks.
+  phase('judge');
+  cam.style.transition = `transform ${800 * slow}ms ease-out`;
+  cam.style.transform = JUDGE;
+  $('ui').classList.remove('hidden');
+  judgeTalk(true);
+}
+async function spring(id) {                     // damped overshoot past the landing, ~300ms
+  const D = 300 * slow, t0 = performance.now();
+  for (;;) {
+    await frame(); if (id !== runId) return;
+    const tau = (performance.now() - t0) / slow;
+    if (tau >= 300) return;
+    renderFrame(1 + 0.06 * Math.exp(-tau / 80) * Math.sin(2 * Math.PI * tau / 220), 0);
+  }
+}
+async function shake(id, amp, dur, rot) {
+  const t0 = performance.now(), D = dur * slow;
+  for (;;) {
+    await frame(); if (id !== runId) return;
+    const k = Math.min(1, (performance.now() - t0) / D);
+    if (k >= 1) { shaker.style.transform = ''; return; }
+    const a = amp * (1 - k) ** 2, r = () => (Math.random() * 2 - 1) * a;
+    shaker.style.transform = `translate(${r()}px, ${r()}px)${rot ? ` rotate(${(r() / amp) * 0.8}deg)` : ''}`;
+  }
+}
+function base() {
+  runId++; judgeTalk(false); clearGhosts(); shaker.style.transform = '';
+  cam.style.transition = 'none'; applyParams(); setR(0);
+  stage.classList.remove('draining'); stage.dataset.colour = params.colour === 'drain' ? 'greyscale' : params.colour;
+  setCam(WITNESS.S, O.x - WITNESS.tx, O.y - WITNESS.ty);
+  $('status').style.display = 'none'; $('ui').classList.remove('hidden'); phase('base');
+}
+
+// ─── Panel ───
+function syncPanel() {
+  $('colour').value = params.colour; $('easing').value = params.easing; $('landing').value = params.landing;
+  for (const [k] of SLIDERS) { $('s_' + k).value = params[k]; $('o_' + k).value = params[k]; }
+  $('out').value = JSON.stringify({ variation: VARIATIONS[variation].name, ...params }, null, 1);
+  [...$('vars').children].forEach((b, i) => b.classList.toggle('on', i === variation));
+  $('vdesc').textContent = VARIATIONS[variation].desc;
+}
+function setVariation(i) { variation = i; params = { ...params, ...VARIATIONS[i].p }; syncPanel(); base(); }
+VARIATIONS.forEach((v, i) => { const b = document.createElement('button'); b.textContent = i < 5 ? 'V' + (i + 1) : '★'; b.title = v.name; b.onclick = () => setVariation(i); $('vars').appendChild(b); });
+$('sliders').innerHTML = SLIDERS.map(([k, label, min, max, step]) =>
+  `<div class="row"><label>${label}</label><input type="range" id="s_${k}" min="${min}" max="${max}" step="${step}"><output id="o_${k}"></output></div>`).join('');
+for (const [k] of SLIDERS) $('s_' + k).oninput = e => { params[k] = +e.target.value; applyParams(); syncPanel(); };
+for (const k of ['colour', 'easing', 'landing']) $(k).onchange = e => { params[k] = e.target.value; syncPanel(); if (k === 'colour') base(); };
+$('play').onclick = play;
+$('reset').onclick = base;
+$('slow').onclick = e => { slow = slow > 1 ? 1 : 4; e.target.classList.toggle('on', slow > 1); phase(stage.dataset.phase || 'base'); };
+$('skipHold').onclick = e => { skipHold = !skipHold; e.target.classList.toggle('on', skipHold); };
+document.querySelectorAll('[data-ab]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-ab]').forEach(x => x.classList.toggle('on', x === b));
+  const m = b.dataset.ab, old = $('oldbg');
+  old.style.display = m === 'new' ? 'none' : 'block';
+  old.style.mixBlendMode = m === 'diff' ? 'difference' : 'normal';
+  old.style.zIndex = m === 'diff' ? 40 : 0;
+  cam.querySelectorAll('.plane-img:not(.oldbg)').forEach(p => p.style.opacity = m === 'old' ? 0 : 1);
+  cam.querySelectorAll('.char').forEach(c => c.style.visibility = m === 'diff' ? 'hidden' : 'visible');
+  base();
+});
+document.querySelectorAll('[data-edge]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-edge]').forEach(x => x.classList.toggle('on', x === b));
+  stage.dataset.edges = b.dataset.edge;
+});
+document.querySelectorAll('[data-mk]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-mk]').forEach(x => x.classList.toggle('on', x === b));
+  markers = b.dataset.mk; placeChars();
+});
+document.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); play(); } if (/^Digit[1-6]$/.test(e.code)) setVariation(+e.code.slice(5) - 1); });
+
+// Fit the stage to the window.
+function fit() { const f = $('fit').getBoundingClientRect(); $('stageBox').style.transform = `scale(${Math.min(f.width / 960, f.height / 540) * 0.96})`; }
+addEventListener('resize', fit);
+
+// Hooks for automated screenshots: scrub(t) renders the move at raw progress t without timing.
+window.__intro = {
+  play, base, setVariation,
+  scrub(t, withBlur = true) {
+    runId++; applyParams(); cam.style.transition = 'none'; colourStart(); $('ui').classList.add('hidden');
+    const ease = EASE[params.easing], e = ease(t), dt = 0.01;
+    const v = (ease(Math.min(1, t + dt)) - ease(Math.max(0, t - dt))) / (Math.min(1, t + dt) - Math.max(0, t - dt));
+    if (withBlur && t > 0 && t < 1) makeGhosts(params.ghosts); else clearGhosts();
+    renderFrame(e, withBlur && t > 0 && t < 1 ? params.blur * Math.min(1, v / 2.5) : 0);
+    phase(`scrub ${Math.round(t * 100)}%`);
+  },
+  get phase() { return stage.dataset.phase; },
+};
+
+build().then(() => { fit(); setVariation(VARIATIONS.length - 1); document.body.dataset.ready = '1'; });
+</script>
+</body>
+</html>

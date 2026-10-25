@@ -1,0 +1,61 @@
+{
+  "source": "/assets/courtroom-bg-tall.png",
+  "width": 892,
+  "height": 1318,
+  "layers": [
+    {
+      "name": "far",
+      "file": "/assets/intro-layers/far.webp",
+      "weight": 0.0,
+      "x": -300,
+      "y": -150,
+      "w": 1492,
+      "h": 1768
+    },
+    {
+      "name": "mid",
+      "file": "/assets/intro-layers/mid.webp",
+      "weight": 0.3,
+      "x": -300,
+      "y": 595,
+      "w": 1492,
+      "h": 255
+    },
+    {
+      "name": "floor1",
+      "file": "/assets/intro-layers/floor1.webp",
+      "weight": 0.45,
+      "x": -300,
+      "y": 733,
+      "w": 1492,
+      "h": 211
+    },
+    {
+      "name": "floor2",
+      "file": "/assets/intro-layers/floor2.webp",
+      "weight": 0.62,
+      "x": -300,
+      "y": 873,
+      "w": 1492,
+      "h": 234
+    },
+    {
+      "name": "floor3",
+      "file": "/assets/intro-layers/floor3.webp",
+      "weight": 0.8,
+      "x": -300,
+      "y": 993,
+      "w": 1492,
+      "h": 254
+    },
+    {
+      "name": "floor4",
+      "file": "/assets/intro-layers/floor4.webp",
+      "weight": 1.0,
+      "x": -300,
+      "y": 1133,
+      "w": 1492,
+      "h": 1185
+    }
+  ]
+}
