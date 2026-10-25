@@ -35,6 +35,9 @@ const NUMBERISH = new RegExp(
     `|percent|pounds?|dollars?|euros?|pence|cents?|quid|grand|k|years?|months?|weeks?|days?|hours?|minutes?)$`,
   'u',
 );
+/** A number word itself (not a unit or time word that can follow one). */
+const NUMBER_WORD = (w: string) =>
+  NUMBERISH.test(w) && !/^(?:percent|pounds?|dollars?|euros?|pence|cents?|quid|grand|k|years?|months?|weeks?|days?|hours?|minutes?|times?|twice|double|half|am|pm|oclock)$/.test(w);
 /** Does `text` already end with `tail` (case, punctuation and audio tags ignored)? */
 function endsWithWords(text: string, tail: string): boolean {
   const a = words(text);
@@ -149,6 +152,9 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
     const said = all[all.length - k - 1] ?? '';
     if (!/^(?:thousand|k|grand)$/.test(said) && units.some((u) => u.test(said))) return false;
     const ov = all.slice(-k);
+    // A number said in several words ("twenty | thirty", "two thousand | eight"): the next number word is still it.
+    // (Scale words — "five | million" — follow the digits' suffix rule below instead.)
+    if (NUMBER_WORD(said) && NUMBER_WORD(ov[0] ?? '') && !/^(?:hundred|thousand|million|billion|trillion)$/.test(ov[0])) return true;
     const j = ov.findIndex((w) => units.some((u) => u.test(w)));
     // Number words before the unit only belong to the setup if its digits say them ("$5m" → million).
     return j >= 0 ? ov.slice(0, j).every((w) => scale?.test(w)) : !!scale?.test(ov[0] ?? '');
