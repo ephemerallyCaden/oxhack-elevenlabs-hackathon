@@ -12,15 +12,23 @@ export type TtsResult = TtsResponse & {
 
 // Server-only: generates one line of speech for a courtroom role. audioUrl is a data: URL, playable as-is.
 // `settings` overrides the role's voice settings (voice lab only).
+// A user's own clone that fails (e.g. ElevenLabs flags it "requires verification", or it was deleted)
+// falls back to the presenter voice instead of failing the line.
 export async function synthesize(text: string, role: VoiceRole, voiceId?: string, settings?: VoiceSettings): Promise<TtsResult> {
   if (!elevenlabs) return mockSpeech(text);
 
-  const res = await elevenlabs.textToSpeech.convertWithTimestamps(voiceIdFor(voiceId), {
-    text: withAccent(text, accentFor(voiceId)),
-    modelId: TTS_MODEL,
-    voiceSettings: settings ?? VOICE_SETTINGS[role],
-    outputFormat: "mp3_44100_128",
-  });
+  let res;
+  try {
+    res = await elevenlabs.textToSpeech.convertWithTimestamps(voiceIdFor(voiceId), {
+      text: withAccent(text, accentFor(voiceId)),
+      modelId: TTS_MODEL,
+      voiceSettings: settings ?? VOICE_SETTINGS[role],
+      outputFormat: "mp3_44100_128",
+    });
+  } catch (e) {
+    if (voiceId) return synthesize(text, role, undefined, settings);
+    throw e;
+  }
   const a = res.alignment;
   return {
     audioUrl: `data:audio/mpeg;base64,${res.audioBase64}`,
@@ -36,7 +44,7 @@ function estimateSeconds(text: string) {
 }
 
 // Silent WAV of the estimated length, so timing-dependent UI still works without a key.
-function mockSpeech(text: string): TtsResult {
+export function mockSpeech(text: string): TtsResult {
   const seconds = estimateSeconds(text);
   const sampleRate = 8000;
   const dataBytes = Math.round(seconds * sampleRate) * 2;

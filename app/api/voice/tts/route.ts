@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { synthesize } from "@/lib/voice/tts";
+import { mockSpeech, synthesize } from "@/lib/voice/tts";
 
 const VoiceRoleSchema = z.enum(["prosecution", "defense", "judge"]);
 
@@ -26,5 +26,10 @@ export async function POST(req: Request) {
   if (!parsed.success) return Response.json({ error: parsed.error.issues }, { status: 400 });
 
   const { text, speaker, role, voiceId, voiceSettings } = parsed.data;
-  return Response.json(await synthesize(text, (speaker ?? role)!, voiceId, voiceSettings));
+  try {
+    return Response.json(await synthesize(text, (speaker ?? role)!, voiceId, voiceSettings));
+  } catch {
+    // ElevenLabs down / out of credits: silent audio of the right length, so the trial keeps going.
+    return Response.json(mockSpeech(text));
+  }
 }

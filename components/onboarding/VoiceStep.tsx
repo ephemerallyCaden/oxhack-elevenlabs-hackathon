@@ -107,14 +107,19 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
 
     // The reveal: their future self speaks.
     setStatus("Meet your future self…");
-    const tts: TtsResponse = await fetch("/api/voice/tts", {
+    // A failed preview must never block onboarding: finish either way.
+    const tts: TtsResponse | null = await fetch("/api/voice/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ speaker: "judge", voiceId: res.voiceId ?? undefined, text: "[calm] Hello. I'm you, five years from now. Let's talk about this decision." }),
-    }).then((r) => r.json());
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
     finish(res, res.voiceId ? "That's your voice, from the future." : "Using the default voice for your future selves.");
-    preview.current = new Audio(tts.audioUrl);
-    preview.current.play().catch(() => {});
+    if (tts?.audioUrl) {
+      preview.current = new Audio(tts.audioUrl);
+      preview.current.play().catch(() => {});
+    }
   }
 
   function finish(r: VoiceStepResult, message: string) {

@@ -77,9 +77,11 @@ export default function Home() {
     setStep("welcome");
   }
 
+  const leaving = useRef(false);
   async function toCourt() {
     const q = question.trim();
-    if (!q) return;
+    if (!q || leaving.current) return; // Enter + click (or a double click) must not save twice
+    leaving.current = true;
     saveOnboarding({ profile, question: q });
     if (remember) {
       const r = await post("/api/users", {
@@ -124,17 +126,21 @@ export default function Home() {
           {returning.selfie && <img src={returning.selfie} alt="" className="h-32 rounded-full" />}
           <h1 className="text-4xl font-black sm:text-6xl">Welcome back{returning.profile.name ? `, ${returning.profile.name}` : ""}.</h1>
           <p className="text-zinc-400">The court remembers your voice and your face.</p>
-          <button className="rounded-full bg-red-600 px-10 py-4 text-xl font-bold text-white hover:bg-red-500" onClick={() => welcomeBack(returning)}>
-            Ask a new question
-          </button>
-          <div className="flex gap-6 text-sm text-zinc-500">
-            <button className="underline-offset-4 hover:underline" onClick={() => { setRememberedUserId(null); setReturning(null); setStep("welcome"); }}>
-              Not you? Start fresh
+          {/* Shared demo laptop: the next person must find "someone new" as easily as "that's me". */}
+          <div className="flex flex-wrap justify-center gap-3">
+            <button className="rounded-full bg-red-600 px-8 py-4 text-xl font-bold text-white hover:bg-red-500" onClick={() => welcomeBack(returning)}>
+              That’s me: ask a new question
             </button>
-            <button className="underline-offset-4 hover:text-red-400 hover:underline" onClick={forgetMe}>
-              Forget me (delete my voice &amp; face)
+            <button
+              className="rounded-full border-2 border-zinc-500 px-8 py-4 text-xl font-bold text-white hover:border-white"
+              onClick={() => { setRememberedUserId(null); setReturning(null); clearSession(); setStep("voice"); }}
+            >
+              I’m someone new
             </button>
           </div>
+          <button className="text-sm text-zinc-500 underline-offset-4 hover:text-red-400 hover:underline" onClick={forgetMe}>
+            Forget me (delete my voice &amp; face)
+          </button>
         </div>
       )}
 
