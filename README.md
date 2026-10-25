@@ -21,8 +21,6 @@ You read a short script, the app clones your voice with ElevenLabs and cuts out 
   </tr>
 </table>
 
-Watch a full run: [docs/media/demo-run.mp4](docs/media/demo-run.mp4)
-
 ## Built with
 
 - **ElevenLabs**: Instant Voice Clone, `eleven_v4` text-to-speech with audio tags and per-role voice settings, Scribe speech-to-text
