@@ -78,6 +78,8 @@ export default function Home() {
   }
 
   const leaving = useRef(false);
+  // Browser Back restores this page (Cache Components / Activity) with the guard still set: release it when hidden.
+  useEffect(() => () => void (leaving.current = false), []);
   async function toCourt() {
     const q = question.trim();
     if (!q || leaving.current) return; // Enter + click (or a double click) must not save twice
