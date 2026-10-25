@@ -236,7 +236,8 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
         if (!cutUsed && !turn.answer && plain(o.cut_in.text) && plain(o.resume.text)) {
           cutUsed = true;
           // The cut-in interrupts this line: it must end cut off (a punch on it is dropped by design).
-          const cutOff = (s: string) => (s.trim().endsWith('—') ? s.trim() : `${s.trim().replace(/[.!?…]+$/, '')} —`);
+          // End mark before any closing quote or trailing tags: "less. [sighs]" → "less [sighs] —".
+          const cutOff = (s: string) => (s.trim().endsWith('—') ? s.trim() : `${s.trim().replace(/[.!?…]+(?=["”’')»]*(?:\s*\[[^\]]*\])*$)/, '')} —`);
           line.text = cutOff(line.text);
           if (line.tts?.trim()) line.tts = cutOff(line.tts);
           const other = turn.side === 'yes' ? 'no' : 'yes';

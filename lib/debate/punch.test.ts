@@ -211,6 +211,18 @@ describe('attachPunch', () => {
     expect(r.tts).toBe('[concerned] In two years you will be two two years behind.');
   });
 
+  it('a setup ending in digits still has the clip’s run into the punch cut (spelled-out number)', () => {
+    const age = line('defense', 'You will be 30', { tts: '[sad] You will be thirty and' });
+    expect(attachPunch(age, { text: 'and still renting.', tts: '' }, new Set())).toBe(true);
+    expect(age.tts).toBe('[sad] You will be thirty');
+    const money = line('defense', 'You lose £12,000', { tts: '[sad] You lose twelve thousand pounds by' });
+    expect(attachPunch(money, { text: 'by next year.', tts: '' }, new Set())).toBe(true);
+    expect(money.tts).toBe('[sad] You lose twelve thousand pounds');
+    const refused = line('defense', 'You will be 30', { tts: '[sad] You will be thirty and' });
+    attachPunch(refused, { text: 'and still renting.', tts: '' }, new Set<Side>(['yes']));
+    expect(refused.tts).toBe('[sad] You will be thirty and still renting.');
+  });
+
   it('leaves a cut-off line alone (the cut-in finishes it)', () => {
     const l = line('defense', 'And the median is —');
     attachPunch(l, { text: 'nothing.', tts: '' }, new Set());

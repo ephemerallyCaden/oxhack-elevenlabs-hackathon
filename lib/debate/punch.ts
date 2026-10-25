@@ -24,6 +24,8 @@ const tokensOf = (s: string) => s.trim().replace(/\[[^\]]*\]/g, (t) => t.replace
 const norm = (tok: string) => tok.replace(/\[[^\]]*\]/g, '').toLowerCase().replace(/[^\p{L}\p{N}\p{Extended_Pictographic}]/gu, '');
 const words = (s: string) => tokensOf(s).map(norm).filter(Boolean);
 const OPEN_QUOTE = /^[“"‘'(«]+/;
+// How a number is spoken: number words, and the units/currencies that follow one.
+const NUMBERISH = /^(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|trillion|percent|pounds?|dollars?|euros?|pence|cents?|quid|grand|k|years?|months?|weeks?|days?|hours?|minutes?)$/;
 /** Does `text` already end with `tail` (case, punctuation and audio tags ignored)? */
 function endsWithWords(text: string, tail: string): boolean {
   const a = words(text);
@@ -121,7 +123,13 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
     if (textOverlap) return true;
     const clip = words(tts);
     const setup = words(cut.rest);
-    return setup.length > 0 && clip[clip.length - k - 1] === setup[setup.length - 1];
+    if (!setup.length) return false;
+    const prev = clip[clip.length - k - 1];
+    const lastRaw = tokensOf(cut.rest).at(-1) ?? '';
+    // A number the text writes in digits is spelled out in the clip: "30" ↔ "thirty", "£12,000" ↔ "…pounds",
+    // "7%" ↔ "percent" (so "seven | percent" never counts as running into a punch that starts with "percent").
+    if (/\d/.test(lastRaw)) return lastRaw.replace(/[^\p{L}\p{N}%]/gu, '').endsWith('%') ? prev === 'percent' : NUMBERISH.test(prev ?? '');
+    return prev === setup[setup.length - 1];
   };
   const refuse = () => {
     if (!already) line.text = joinSentence(cut.rest, shown);
