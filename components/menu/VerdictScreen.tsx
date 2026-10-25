@@ -77,6 +77,7 @@ export default function VerdictScreen({
                 ))}
               </ol>
             </div>
+            {transcript.sources.length > 0 && (
             <div>
               <h3 className="ct-kicker mb-3">Sources</h3>
               <ol className="flex flex-col gap-2">
@@ -90,6 +91,7 @@ export default function VerdictScreen({
                 ))}
               </ol>
             </div>
+            )}
           </div>
           </div>
         }
