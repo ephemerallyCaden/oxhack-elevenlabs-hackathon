@@ -8,8 +8,8 @@ import { useTrialState } from '@/lib/debate/useTrial';
 import { footnotes } from '@/lib/debate/transcript';
 
 const WHO: Record<Line['speaker'], { name: string; color: string }> = {
-  prosecution: { name: 'PROSECUTION · YES', color: '#c2410c' },
-  defense: { name: 'DEFENSE · NO', color: '#2563eb' },
+  prosecution: { name: 'PROSECUTION · YES', color: '#3b82f6' },
+  defense: { name: 'DEFENSE · NO', color: '#ef4444' },
   judge: { name: 'THE JUDGE', color: '#a16207' },
   user: { name: 'YOU', color: '#e4e4e7' },
 };
@@ -268,7 +268,7 @@ export default function TrialHarness() {
           )}
           <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4">
             <h2 className="mb-2 text-xs font-bold uppercase tracking-widest text-amber-500">Where the court stands</h2>
-            <div className="relative h-3 rounded-full bg-gradient-to-r from-blue-600 via-zinc-600 to-orange-600">
+            <div className="relative h-3 rounded-full bg-gradient-to-r from-red-600 via-zinc-600 to-blue-600">
               <div className="absolute -top-1.5 h-6 w-1.5 rounded bg-white transition-all" style={{ left: pos }} />
             </div>
             <div className="mt-1 flex justify-between text-xs text-zinc-400"><span>NO −100</span><span>0</span><span>+100 YES</span></div>

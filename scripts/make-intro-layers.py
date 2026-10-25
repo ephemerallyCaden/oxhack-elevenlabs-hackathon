@@ -45,6 +45,11 @@ MID_OBJECTS = {
     'witness_stand': [(366, 710), (524, 710), (524, 832), (366, 832)],
 }
 MID_FLOOR_ROWS = (745, CARPET_TOP)            # floor strip the desks stand on rides with them
+# Front layers: the pose art is cut off at the waist, so the Judge stands behind the bench and
+# the lawyers behind their desks. These redraw those pieces in front of the characters (same
+# pixels as the plane below them, so the scene is unchanged at rest).
+JUDGE_BENCH = [(232, 628), (658, 628), (658, 748), (232, 748)]
+FRONT_DESKS = ('left_desk', 'right_desk', 'witness_stand')
 # (name, first row, last row, depth weight). Weight 0 = far plane, 1 = nearest.
 PLANES = [
     ('far', None, None, 0.0),
@@ -167,6 +172,10 @@ def main():
     far_canvas = extended_canvas(far, img, PAD_BOTTOM)
     write('far', far_canvas, np.ones(far_canvas.shape[:2], np.float32), meta, 0.0)
 
+    # BENCH: the Judge's bench, in front of the Judge (rides the far plane).
+    bench = pad(soft_alpha(grow(poly_mask(img.shape, [JUDGE_BENCH]), CORE_GROW), FEATHER_OBJ))
+    write('bench', pad(img), bench, meta, 0.0)
+
     # MID: desks, railings, witness stand + the floor strip they stand on.
     mid_core = obj_core.copy()
     mid_core[MID_FLOOR_ROWS[0]:MID_FLOOR_ROWS[1], :] = 255
@@ -174,6 +183,10 @@ def main():
     a[:PAD_TOP, :] = 0
     a[PAD_TOP + h:, :] = 0
     write('mid', pad(img), a, meta, 0.30)
+
+    # DESKS: the lawyers' desks + witness stand, in front of the lawyers (ride the mid plane).
+    desks = pad(soft_alpha(grow(poly_mask(img.shape, [MID_OBJECTS[k] for k in FRONT_DESKS]), CORE_GROW), FEATHER_OBJ))
+    write('desks', pad(img), desks, meta, 0.30)
 
     # FLOOR BANDS: carpet canvas (extended), each band soft-edged. The side stairs ride
     # the first band (no holes cut in the floor). Later bands own their rows exclusively.

@@ -9,11 +9,11 @@
 //   4. Crowd ambience via engine.setAmbience() during debate
 //   5. Voice playback via engine.playVoice() with stereo panning
 
-import { useEffect, useMemo, useRef, useState, useCallback, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import type { Line, Scene, Speaker, SttResponse } from '@/types';
 import { TrialOrchestrator } from '@/lib/debate/orchestrator';
 import { sessionVoiceId } from '@/components/onboarding/VoiceStep';
-import { sessionSelfie } from '@/components/onboarding/SelfieStep';
+import { useSessionHeads } from '@/components/onboarding/sessionHeads';
 import SharePanel from '@/components/share/SharePanel';
 import { sessionProfile, takeSessionQuestion } from '@/lib/onboarding/session';
 import { useTrialState } from '@/lib/debate/useTrial';
@@ -35,10 +35,10 @@ const SCENE_MUSIC: Record<Scene, BgmName | null> = {
   cutscene: 'cutscene',
 };
 
-// -- Speaker display config --
+// -- Speaker display config (YES blue, NO red: the suits in the pose art) --
 const WHO: Record<Line['speaker'], { name: string; color: string }> = {
-  prosecution: { name: 'PROSECUTION \u00B7 YES', color: '#c2410c' },
-  defense: { name: 'DEFENSE \u00B7 NO', color: '#2563eb' },
+  prosecution: { name: 'PROSECUTION \u00B7 YES', color: '#3b82f6' },
+  defense: { name: 'DEFENSE \u00B7 NO', color: '#ef4444' },
   judge: { name: 'THE JUDGE', color: '#a16207' },
   user: { name: 'YOU', color: '#e4e4e7' },
 };
@@ -82,15 +82,13 @@ function useRecorder() {
   };
 }
 
-const noSubscribe = () => () => {};
-
 // -- Main trial page --
 export default function TrialPage() {
   // Onboarding (/) leaves the user's cloned voice + profile in sessionStorage; none → presenter voice.
   const orch = useMemo(() => new TrialOrchestrator({ voiceId: sessionVoiceId(), profile: sessionProfile() }), []);
   const s = useTrialState(orch);
-  // Selfie from onboarding (client-only, so the server render keeps the default face)
-  const faceSrc = useSyncExternalStore(noSubscribe, sessionSelfie, () => undefined);
+  // Head cut-outs from onboarding (client-only, so the server render keeps the default heads)
+  const heads = useSessionHeads();
   const recorder = useRecorder();
   const [holding, setHolding] = useState(false);
   const held = useRef(false);
@@ -439,7 +437,8 @@ export default function TrialPage() {
           objection={s.phase === 'listening'}
           status={introMode === 'play' ? undefined : s.phase === 'preparing' || s.phase === 'thinking' ? s.status : undefined}
           controls={introMode ? undefined : controls}
-          faceSrc={faceSrc}
+          heads={heads}
+          interrupting={s.phase === 'listening'}
           intro={introMode}
           onIntroDone={finishIntro}
           shot={shot}
@@ -466,7 +465,7 @@ export default function TrialPage() {
       {/* Top-right: spectrum + agenda (hidden through the intro) */}
       {!introMode && (
         <aside className="absolute right-4 top-4 z-50 w-72 rounded-lg bg-black/70 p-3">
-          <div className="relative h-2 rounded-full bg-gradient-to-r from-blue-600 via-zinc-600 to-orange-600">
+          <div className="relative h-2 rounded-full bg-gradient-to-r from-red-600 via-zinc-600 to-blue-600">
             <div className="absolute -top-1 h-4 w-1 rounded bg-white transition-all" style={{ left: pos }} />
           </div>
           <p className="mt-1 text-center text-xs font-bold">

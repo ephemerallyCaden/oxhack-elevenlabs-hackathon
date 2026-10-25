@@ -5,10 +5,12 @@
 import { useEffect, useId, useRef } from 'react';
 import './expressions.css';
 import type { Scene } from '@/types';
-import Character, { type Facing } from './Character';
+import Character from './Character';
 import Stage from './Stage';
 import TextBox from './TextBox';
 import type { CharacterMood, CourtActor } from './expressions';
+import type { Heads } from './heads';
+import { ALL_FRAMES, POSE_TUNING } from './poses';
 import { PLANES } from './intro';
 import { useIntroCrane, type IntroMode } from './useIntroCrane';
 import PunchShot, { PUNCH_BG } from './PunchShot';
@@ -16,25 +18,26 @@ import { shake } from './shake';
 import { useWhipCamera } from './useWhipCamera';
 import { SHOT } from './whip';
 
-/* Character torso centers — the #ff0000 markers measured in courtroom-bg.png,
-   adjusted for `background-size: cover` crop (image 5:3 → container 16:9). The tall
-   background's planes are aligned to the same framing, so these still hold. */
-const MARKER: Record<CourtActor, { x: string; y: string }> = {
-  prosecution: { x: '23.3%', y: '78%' },
-  defense: { x: '76.5%', y: '78%' },
-  judge: { x: '50%', y: '62.5%' },
+/* Face points (stage px): the head marker of each character's rest pose sits here. From the
+   #ff0000 markers measured in courtroom-bg.png; the tall background's planes keep that framing.
+   The lawyers sit POSE_TUNING.lawyersY higher (their pedestals follow). */
+const FACE: Record<CourtActor, [number, number]> = {
+  prosecution: [223.7, 343.7 + POSE_TUNING.lawyersY],
+  defense: [734.4, 343.7 + POSE_TUNING.lawyersY],
+  judge: [480, 283],
 };
+const LAWYERS = ['prosecution', 'defense'] as const;
 
-/* Characters ride the plane they stand on, so parallax never slides them off their desks. */
-const RIDES: Record<string, CourtActor[]> = { far: ['judge'], mid: ['prosecution', 'defense'] };
+/* The Judge stands on the far plane, behind the bench (it hides the robe's cut-off edge). The
+   lawyers get their own plane ABOVE every background segment, then their pedestals; both carry
+   the desks' parallax weight so the intro still moves them together. */
+const RIDES: Record<string, CourtActor[]> = { far: ['judge'] };
+const DESK_WEIGHT = 0.3;
 
 /* Camera shots + the whip pan between them: see whip.ts. */
 
-/* Side profiles in close-ups (facing courtroom center), front otherwise. */
-function facingFor(role: CourtActor, scene: Scene): Facing {
-  if (scene === 'yes' && role === 'prosecution') return 'right';
-  if (scene === 'no' && role === 'defense') return 'left';
-  return 'front';
+function preloadPoses() {
+  for (const src of ALL_FRAMES) new Image().src = src;
 }
 
 export default function Courtroom({
@@ -46,7 +49,8 @@ export default function Courtroom({
   objection,
   status,
   controls,
-  faceSrc,
+  heads,
+  interrupting = false,
   intro = null,
   onIntroDone,
   shot,
@@ -60,8 +64,10 @@ export default function Courtroom({
   text?: string;
   objection?: boolean;
   status?: string;
-  /** The user’s selfie (onboarding); default face when absent. */
-  faceSrc?: string;
+  /** The user’s head cut-outs (onboarding); the default heads when absent. */
+  heads?: Heads;
+  /** The user is interrupting: everyone turns to face front. */
+  interrupting?: boolean;
   /** Rendered inside the textbox (right side) so it scales with the stage. */
   controls?: React.ReactNode;
   /** Crane-up intro: 'hold' = still on the carpet (loading), 'play' = run it. */
@@ -94,7 +100,9 @@ export default function Courtroom({
   useEffect(() => {
     if (shakeKey && shaker.current) return shake(shaker.current);
   }, [shakeKey]);
-  const facing = (role: CourtActor) => (intro ? 'front' : facingFor(role, view));
+  useEffect(preloadPoses, []);
+  const at = (role: CourtActor) => ({ left: FACE[role][0], top: FACE[role][1] });
+  const ped = POSE_TUNING.pedestal;
 
   return (
     <Stage>
@@ -113,19 +121,37 @@ export default function Courtroom({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img className="manga-plane-img" src={p.file} alt="" style={p.style} />
                   {RIDES[p.name]?.map((role) => (
-                    <div
-                      key={role}
-                      className="absolute z-10"
-                      style={{ left: MARKER[role].x, top: MARKER[role].y, transform: 'translate(-50%, -50%)' }}
-                    >
-                      <Character role={role} mood={moods[role]} facing={facing(role)} faceSrc={faceSrc} />
+                    <div key={role} className="absolute" style={at(role)}>
+                      <Character role={role} mood={moods[role]} heads={heads} interrupting={interrupting} />
                     </div>
                   ))}
                 </div>
               ))}
+              <div className="manga-plane" data-plane="lawyers" data-weight={DESK_WEIGHT}>
+                {LAWYERS.map((role) => (
+                  <div key={role} className="absolute" style={at(role)}>
+                    <Character role={role} mood={moods[role]} heads={heads} interrupting={interrupting} />
+                  </div>
+                ))}
+              </div>
+              <div className="manga-plane" data-plane="pedestals" data-weight={DESK_WEIGHT}>
+                {LAWYERS.map((role) => {
+                  const m = role === 'defense' ? -1 : 1;
+                  return (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={role}
+                      className="pc-pedestal"
+                      src="/assets/pedestal.webp"
+                      alt=""
+                      style={{ width: ped.w, left: FACE[role][0] + ped.x * m - ped.w / 2, top: FACE[role][1] + ped.y, transform: `scaleX(${m})` }}
+                    />
+                  );
+                })}
+              </div>
             </div>
             <div className="absolute inset-0" ref={ghosts} />
-            {punch && punch.stage !== 'gone' && <PunchShot ref={punchLayer} who={punch.who} mood={punch.mood} faceSrc={faceSrc} />}
+            {punch && punch.stage !== 'gone' && <PunchShot ref={punchLayer} who={punch.who} mood={punch.mood} heads={heads} />}
           </div>
           <div className="manga-speedlines" />
           <div className="manga-zoomlines" ref={lines} />

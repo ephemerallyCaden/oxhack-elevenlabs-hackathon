@@ -4,17 +4,26 @@
 // public/mockups/punch-shot-pick.html. Sits inside the camera's blur wrapper so the whip
 // out of it is motion-blurred too.
 import { forwardRef, useMemo } from 'react';
-import Character from './Character';
+import Character, { artWidth } from './Character';
 import type { CharacterMood } from './expressions';
+import type { Heads } from './heads';
+import { POSE_ART, POSE_TUNING } from './poses';
 
 type Who = 'prosecution' | 'defense';
 
-export const PUNCH_BG: Record<Who, string> = { prosecution: '#ff3a3a', defense: '#1aa3ff' };
+// YES is blue, NO is red (the suits in the pose art).
+export const PUNCH_BG: Record<Who, string> = { prosecution: '#1aa3ff', defense: '#ff3a3a' };
 
 const STREAKS = { count: 91, thick: [1, 4], length: [80, 260], speed: 1400 } as const;
-// Character geometry (Character.tsx, lawyers): 160 wide, face 65px at top 10.
 const ZOOM = 5.6;
-const FACE_Y = 165;
+const FACE_Y = 165; // head centre in the shot, px
+
+/** The rest pose's side head centre, relative to the character's face point (Character.tsx). */
+function headOffset(who: Who) {
+  const s = artWidth(who) / POSE_ART[who].width;
+  const m = POSE_ART[who].faces === 'left' ? -1 : 1;
+  return { x: POSE_TUNING.side.x * s * m, y: POSE_TUNING.side.y * s };
+}
 
 interface Streak {
   top: number;
@@ -34,8 +43,8 @@ function makeStreaks(): Streak[] {
   });
 }
 
-const PunchShot = forwardRef<HTMLDivElement, { who: Who; mood: CharacterMood; faceSrc?: string }>(function PunchShot(
-  { who, mood, faceSrc },
+const PunchShot = forwardRef<HTMLDivElement, { who: Who; mood: CharacterMood; heads?: Heads }>(function PunchShot(
+  { who, mood, heads },
   ref,
 ) {
   const streaks = useMemo(makeStreaks, [who]);
@@ -43,6 +52,7 @@ const PunchShot = forwardRef<HTMLDivElement, { who: Who; mood: CharacterMood; fa
   // Streaks travel opposite to the way the speaker faces (the speaker "moves" toward the opponent).
   const [from, to] = facesRight ? ['980px', 'calc(-100% - 20px)'] : ['calc(-100% - 20px)', '980px'];
   const faceX = (facesRight ? 0.3 : 0.7) * 960;
+  const head = headOffset(who);
   return (
     <div ref={ref} className="punch-shot" style={{ background: PUNCH_BG[who] }} data-punch-shot={who}>
       {streaks.map((s, i) => (
@@ -66,9 +76,9 @@ const PunchShot = forwardRef<HTMLDivElement, { who: Who; mood: CharacterMood; fa
       ))}
       <div
         className="punch-char"
-        style={{ transform: `translate(${faceX - 80 * ZOOM}px, ${FACE_Y - (10 + 65 / 2) * ZOOM}px) scale(${ZOOM})` }}
+        style={{ transform: `translate(${faceX - head.x * ZOOM}px, ${FACE_Y - head.y * ZOOM}px) scale(${ZOOM})` }}
       >
-        <Character role={who} mood={mood} facing={facesRight ? 'right' : 'left'} faceSrc={faceSrc} />
+        <Character role={who} mood={mood} heads={heads} />
       </div>
     </div>
   );

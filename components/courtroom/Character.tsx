@@ -1,135 +1,137 @@
 'use client';
-// Expressive character: pose body + split face (upper/jaw) + expression overlays.
-// Replaces the colored-silhouette placeholder (C6). CSS states live in expressions.css.
+/* eslint-disable @next/next/no-img-element -- layered sprites, sized by the stage maths */
+// A courtroom character: pose art (poses.ts cycles it) with the head cut-out layered BEHIND
+// the suit at the pose's head marker, so the neck comes out of the collar. Blue markers take
+// the front head, red markers the side head. Expression particles ride the head.
+// Tuned in public/mockups/pose-cycling.html; CSS in expressions.css (.pc).
+//
+// The root is positioned so the rest pose's head marker sits on the parent's origin: place
+// the parent at the face point.
 import { useRef } from 'react';
-import { FACE_CAL, type CharacterMood, type CourtActor } from './expressions';
+import type { CharacterMood, CourtActor } from './expressions';
+import { DEFAULT_HEADS, type Heads } from './heads';
+import { HEAD_ART_W, POSE_ART, POSE_TUNING, REST_POSE } from './poses';
+import { usePoseCycle } from './usePoseCycle';
 import { useTalkEngine } from './useTalkEngine';
 
-export type Facing = 'front' | 'left' | 'right';
+/** Body width on stage. */
+export const artWidth = (role: CourtActor) => POSE_TUNING.artW * (role === 'judge' ? POSE_TUNING.judgeK : 1);
 
-const POSE_FILE: Record<CourtActor, string> = {
-  prosecution: 'prosecutor',
-  defense: 'defendant',
-  judge: 'judge',
-};
+// Particles, in face units from the head centre: [kind, dx, dy, size, image, delay s, keyframes, period s].
+const FX: [string, number, number, number, string, number, string?, number?][] = [
+  ['spark', 0.72, -0.44, 0.8, 'sparkle.png', 0], ['spark', -0.74, -0.18, 0.55, 'sparkle.png', 0.5],
+  ['spark', 0.92, 0.14, 0.6, 'sparkle.png', 0.25], ['spark', -0.48, -0.72, 0.45, 'sparkle.png', 0.9],
+  ['sweat', 0.57, -0.3, 0.27, 'sweat-drop.png', 0], ['sweat', 0.47, -0.36, 0.2, 'sweat-drop.png', 0.4],
+  ['sweat', 0.72, -0.26, 0.17, 'sweat-drop.png', 0.9],
+  ['vein', 0.6, -0.52, 1.05, 'anger-vein.png', 0, 'veinBounce1', 0.45], ['vein', -0.72, -0.34, 0.8, 'anger-vein.png', 0, 'veinBounce2', 0.55],
+  ['vein', -0.34, -0.72, 0.65, 'anger-vein.png', 0, 'veinBounce3', 0.38],
+  ['bang', 0, -0.86, 0.5, 'exclamation.png', 0],
+];
+// Breakdown crack fan: [angle deg, delay s].
+const CRACKS = [[0, 0], [55, 0.1], [-50, 0.15], [120, 0.2], [-115, 0.25], [175, 0.3]];
 
-// Internal px coordinate system (stage scales the whole 960×540 scene).
-const SIZE: Record<CourtActor, { w: number; h: number; face: number; faceTop: number }> = {
-  prosecution: { w: 160, h: 240, face: 65, faceTop: 10 },
-  defense: { w: 160, h: 240, face: 65, faceTop: 10 },
-  judge: { w: 120, h: 180, face: 55, faceTop: 8 },
-};
-
-const upperClip = `inset(0 0 ${((1 - FACE_CAL.lipY) * 100).toFixed(1)}% 0)`;
-const jawClip = `inset(${((FACE_CAL.lipY - FACE_CAL.jawOverlap) * 100).toFixed(1)}% 0 0 0)`;
-const jawOrigin = `center ${(FACE_CAL.lipY * 100).toFixed(1)}%`;
-const eyeVars = {
-  '--eye-left-x': `${(FACE_CAL.eyeViewerLeft.x * 100).toFixed(1)}%`,
-  '--eye-left-y': `${((FACE_CAL.eyeViewerLeft.y - FACE_CAL.browLift) * 100).toFixed(1)}%`,
-  '--eye-right-x': `${(FACE_CAL.eyeViewerRight.x * 100).toFixed(1)}%`,
-  '--eye-right-y': `${((FACE_CAL.eyeViewerRight.y - FACE_CAL.browLift) * 100).toFixed(1)}%`,
-} as React.CSSProperties;
+type Vars = React.CSSProperties & Record<`--${string}`, string | number>;
 
 export default function Character({
   role,
   mood,
-  facing = 'front',
-  faceSrc = '/assets/face.png',
+  heads = DEFAULT_HEADS,
+  interrupting = false,
 }: {
   role: CourtActor;
   mood: CharacterMood;
-  facing?: Facing;
-  faceSrc?: string;
+  heads?: Heads;
+  /** The user is interrupting: everyone faces front in the neutral pose. */
+  interrupting?: boolean;
 }) {
   const jawRef = useRef<HTMLImageElement>(null);
-  useTalkEngine(jawRef, mood.talking);
+  useTalkEngine(jawRef, mood.talking, { maxRotation: 8, openDistance: 3 });
+  const { pose, frame, spec } = usePoseCycle(role, mood, interrupting);
 
-  const { w, h, face, faceTop } = SIZE[role];
-  const pose = `/assets/pose-bodies/${POSE_FILE[role]}-${facing === 'front' ? 'front' : 'side'}.svg`;
-  const mirror = facing === 'left'; // side assets face right; mirror for facing-left
+  const art = POSE_ART[role];
+  const width = artWidth(role);
+  const s = width / art.width;
+  const [ax, ay] = art.poses[REST_POSE].centres[0];
+  const [cx, cy] = spec.centres[frame];
+  const kind = spec.head;
+  const H = heads[kind];
+  const mirror = art.faces === 'left' ? -1 : 1;
+  // One px scale for both heads: their frames share a height, so head sizes always match.
+  const k = (HEAD_ART_W[role] * POSE_TUNING.head * s) / heads.front.w;
+  const off = POSE_TUNING[kind];
+  const left = cx * s + off.x * s * mirror;
+  const top = cy * s + off.y * s;
+  const rot = role === 'judge' ? 0 : (POSE_TUNING.rot[pose] ?? 0);
+  // The side photo faces right: mirror it for a character facing left (on a wrapper no
+  // expression keyframe animates, so the flip can't be overridden mid-expression).
+  const flip = kind === 'side' && mirror < 0 ? -1 : 1;
+  const src = spec.frames[frame];
   const expr = mood.expression;
-  const cls = `char state-${expr}${mood.talking ? ' state-talking' : ''}`;
-  const facingCls = facing === 'front' ? '' : facing === 'right' ? ' facing-right' : ' facing-left';
+  const browW = ((heads.front.w * 0.32) / H.w) * 100;
 
   return (
     <div
-      className={cls}
-      style={{ width: w, height: h, ...eyeVars }}
+      className={`pc x-${expr}${mood.talking ? ' talking' : ''}`}
+      style={{ left: -ax * s, top: -ay * s, width, height: art.height * s }}
       data-role={role}
       data-expression={expr}
       data-talking={mood.talking || undefined}
+      data-pose={pose}
+      data-frame={frame}
+      data-head={kind}
     >
-      <div className="char-bob">
-      {expr === 'shocked' && <div className="flash-overlay" />}
-      {/* Mirror on a wrapper: expression keyframes animate .char-pose's transform. */}
-      <div className="char-mirror" style={mirror ? { transform: 'scaleX(-1)' } : undefined}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img className="char-pose" src={pose} alt="" />
-      </div>
-      <div
-        className={`face-container${facingCls}`}
-        style={{ width: face, height: face, top: faceTop }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img className="face-upper" src={faceSrc} alt="" style={{ clipPath: upperClip }} />
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          ref={jawRef}
-          className="face-jaw"
-          src={faceSrc}
-          alt=""
-          style={{ clipPath: jawClip, transformOrigin: jawOrigin }}
-        />
-        {expr === 'angry' && (
-          <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img className="face-eyebrow face-eyebrow-left" src="/assets/expressions/eyebrow.png" alt="" />
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img className="face-eyebrow face-eyebrow-right" src="/assets/expressions/eyebrow.png" alt="" />
-          </>
-        )}
-      </div>
-      {expr === 'angry' && (
-        <>
-          <div className="face-tint" style={{ width: face, height: face, top: faceTop, left: '50%', transform: 'translateX(-50%)' }} />
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="overlay overlay-vein1" src="/assets/expressions/anger-vein.png" alt="" />
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="overlay overlay-vein2" src="/assets/expressions/anger-vein.png" alt="" />
-        </>
-      )}
-      {expr === 'confident' && (
-        <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="overlay overlay-sparkle1" src="/assets/expressions/sparkle.png" alt="" />
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="overlay overlay-sparkle2" src="/assets/expressions/sparkle.png" alt="" />
-        </>
-      )}
-      {expr === 'sweating' && (
-        <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="overlay overlay-sweat1" src="/assets/expressions/sweat-drop.png" alt="" />
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="overlay overlay-sweat2" src="/assets/expressions/sweat-drop.png" alt="" />
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="overlay overlay-sweat3" src="/assets/expressions/sweat-drop.png" alt="" />
-        </>
-      )}
-      {expr === 'shocked' && (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img className="overlay overlay-exclamation" src="/assets/expressions/exclamation.png" alt="" />
-      )}
-      {expr === 'breakdown' && (
-        <div className="crack-fan">
-          {[1, 2, 3, 4, 5, 6].map((n) => (
-            <div key={n} className={`crack-slot crack-${n}`}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/assets/expressions/crack-lines.png" alt="" />
+      <div className="pc-bob">
+        <div className="pc-head" style={{ left, top }}>
+          <div
+            className="pc-head-in"
+            style={{
+              width: H.w * k,
+              height: H.h * k,
+              transformOrigin: `50% ${H.anchorY * 100}%`,
+              transform: `translate(-50%, ${-H.anchorY * 100}%) rotate(${rot * mirror}deg) scaleX(${flip})`,
+            }}
+          >
+            <img className="pc-face" src={H.src} alt="" style={{ clipPath: `inset(0 0 ${((1 - H.lipY) * 100).toFixed(1)}% 0)` }} />
+            <img
+              ref={jawRef}
+              className="pc-face pc-jaw"
+              src={H.src}
+              alt=""
+              style={{ clipPath: `inset(${((H.lipY - 0.02) * 100).toFixed(1)}% 0 0 0)`, transformOrigin: `center ${(H.lipY * 100).toFixed(1)}%` }}
+            />
+            {H.eyes.map(([x, y], i) => (
+              <img
+                key={`${kind}${i}`}
+                className="pc-brow"
+                src="/assets/expressions/eyebrow.png"
+                alt=""
+                style={{ left: `${x * 100}%`, top: `${(y - 0.11) * 100}%`, width: `${browW}%`, '--bs': kind === 'front' && i === 1 ? -1 : 1 } as Vars}
+              />
+            ))}
+          </div>
+        </div>
+        <img className="pc-pose" src={src} alt="" />
+        <div className="pc-fx" style={{ left, top, '--F': (heads.front.w * k * 0.8).toFixed(2), '--m': mirror } as Vars}>
+          {FX.map(([kind, dx, dy, w, img, d, anim, t], i) => (
+            <div
+              key={i}
+              className={`fxp ${kind}`}
+              style={{ '--dx': dx, '--dy': dy, '--w': w, '--d': `${d}s`, ...(anim && { '--anim': anim, '--t': `${t}s` }) } as Vars}
+            >
+              <img src={`/assets/expressions/${img}`} alt="" />
             </div>
           ))}
+          {expr === 'breakdown' && (
+            <div className="fxp crack" style={{ '--dx': 0, '--dy': 0, '--w': 0 } as Vars}>
+              {CRACKS.map(([a, d]) => (
+                <div key={a} className="crack-slot" style={{ '--a': `${a}deg`, '--d': `${d}s` } as Vars}>
+                  <img src="/assets/expressions/crack-lines.png" alt="" />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+        {expr === 'shocked' && <div className="pc-flash" style={{ maskImage: `url(${src})`, WebkitMaskImage: `url(${src})` }} />}
       </div>
     </div>
   );
