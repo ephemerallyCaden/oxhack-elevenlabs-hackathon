@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { UserProfile } from '@/types';
 import { planAfterInterrupt, TrialOrchestrator, type TrialState } from './orchestrator';
 import { computeSpectrum } from './spectrum';
+import { mockSetup } from './mock';
 
 // Offline: every API call fails, so the whole trial runs on the decision-aware mocks.
 vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
@@ -374,7 +375,18 @@ describe('fixes from the PR #79 review', () => {
 
   it("after an agenda change, the next topic's call starts before its intro has finished (no waiting)", async () => {
     const events: string[] = [];
+    // The mock agenda stops at MAX_TOPICS (2); this scenario needs a third topic to move on to, so the
+    // setup call answers with the mock agenda plus one more topic (the orchestrator takes any length).
+    const base = mockSetup({ question: 'Should I learn to sail?' });
+    const extra = { ...base.topics[base.topics.length - 1], id: 'topic-extra', title: 'Long-term consequences' };
+    const setup = {
+      ...base,
+      topics: [...base.topics, extra],
+      intros: { ...base.intros, [extra.id]: { ...base.intros[base.topics[base.topics.length - 1].id], id: 'intro-extra', topic_id: extra.id } },
+      fallback: false,
+    };
     vi.stubGlobal('fetch', (url: string, init?: { body?: string }) => {
+      if (String(url) === '/api/trial/setup') return Promise.resolve(new Response(JSON.stringify(setup), { headers: { 'Content-Type': 'application/json' } }));
       if (String(url) === '/api/trial/topic') events.push(`call:${JSON.parse(init?.body ?? '{}').topic?.id}`);
       return Promise.reject(new Error('offline'));
     });
@@ -457,5 +469,81 @@ describe('surprise punches', () => {
     } finally {
       vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
     }
+  });
+});
+
+describe('stop(): a replaced trial goes quiet', () => {
+  it('makes no more API calls and sends no more updates once stopped', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', (url: string) => {
+      calls.push(String(url));
+      return Promise.reject(new Error('offline'));
+    });
+    try {
+      const orch = new TrialOrchestrator({});
+      let updates = 0;
+      orch.subscribe(() => updates++);
+      orch.start('Should I learn to sail?');
+      await new Promise((r) => setTimeout(r, 0));
+      orch.stop();
+      const [nCalls, nUpdates] = [calls.length, updates];
+      await new Promise((r) => setTimeout(r, 200));
+      expect(calls.length).toBe(nCalls);
+      expect(updates).toBe(nUpdates);
+    } finally {
+      vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
+    }
+  });
+
+  it('a stopped trial waiting on a line unwinds: start() resolves', async () => {
+    const orch = new TrialOrchestrator({});
+    let speaking = false;
+    orch.subscribe(() => (speaking ||= orch.getState().phase === 'speaking'));
+    const run = orch.start('Should I learn to sail?');
+    await vi.waitFor(() => expect(speaking).toBe(true), { timeout: 3000 });
+    orch.stop();
+    await expect(Promise.race([run, new Promise((_, r) => setTimeout(() => r(new Error('still running')), 1000))])).resolves.toBeUndefined();
+  });
+
+  it('stopped while setup is still in flight: aborts it, no crash, no unhandled rejection', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(e);
+    process.on('unhandledRejection', onUnhandled);
+    let aborted = false;
+    vi.stubGlobal('fetch', (url: string, init?: { signal?: AbortSignal }) => {
+      if (String(url) !== '/api/trial/setup') return Promise.reject(new Error('offline'));
+      return new Promise((_, reject) => init?.signal?.addEventListener('abort', () => ((aborted = true), reject(new DOMException('aborted', 'AbortError')))));
+    });
+    try {
+      const orch = new TrialOrchestrator({});
+      const run = orch.start('Should I learn to sail?');
+      await new Promise((r) => setTimeout(r, 20));
+      orch.stop();
+      await Promise.race([run, new Promise((_, r) => setTimeout(() => r(new Error('still running')), 2000))]);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(aborted).toBe(true);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
+    }
+  });
+
+  it('stopped while the user is interrupting: the wait for their words is released', async () => {
+    const orch = new TrialOrchestrator({});
+    let speaking = false;
+    orch.subscribe(() => (speaking ||= orch.getState().phase === 'speaking'));
+    const run = orch.start('Should I learn to sail?');
+    await vi.waitFor(() => expect(speaking).toBe(true), { timeout: 3000 });
+    orch.beginInterrupt();
+    orch.stop();
+    await expect(Promise.race([run, new Promise((_, r) => setTimeout(() => r(new Error('still running')), 1000))])).resolves.toBeUndefined();
+  });
+
+  it('a stopped trial never starts', async () => {
+    const orch = new TrialOrchestrator({});
+    orch.stop();
+    await orch.start('Should I learn to sail?');
+    expect(orch.getState().phase).toBe('ask');
   });
 });

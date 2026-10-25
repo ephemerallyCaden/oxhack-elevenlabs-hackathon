@@ -35,7 +35,7 @@ import type {
   VerdictResponse,
 } from '@/types';
 import { SPEAKER_SCENE } from '@/types';
-import { estimateMs, postJson, uid, withFallback } from './fallback';
+import { anySignal, estimateMs, postJson, uid, withFallback } from './fallback';
 import { setupText } from './punch';
 import { punchVoiceSettings } from '@/lib/voice/configs';
 import type { VoiceSettings } from '@elevenlabs/elevenlabs-js/api';
@@ -103,6 +103,9 @@ export function planAfterInterrupt(side: Side, cycle: number, total: number): To
   return turns;
 }
 
+/** Thrown inside a stopped trial to unwind run() (see TrialOrchestrator.stop). */
+const STOPPED = new Error('trial stopped');
+
 export class TrialOrchestrator {
   private state: TrialState = this.initial();
   private listeners = new Set<() => void>();
@@ -134,6 +137,27 @@ export class TrialOrchestrator {
     this.state = { ...this.state, ...patch };
     this.listeners.forEach((fn) => fn());
   }
+
+  private stopped = false;
+  private abort = new AbortController();
+  /**
+   * A newer trial replaced this one (the page remounted for a new "Take it to court"). It shows nothing
+   * more (listeners dropped), aborts its requests in flight, makes no new ones (they fall back to the
+   * mocks at once) and unwinds at its next line, so it can't compete with the new trial for the model
+   * and search rate limits. Its state keeps updating internally, so nothing half-built can throw.
+   */
+  stop() {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.listeners.clear();
+    this.abort.abort();
+    this.sayResolve?.('done');
+    this.inputResolve?.(null); // stopped mid-interrupt: release the wait for the user's words
+  }
+  private post = <T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> => {
+    if (this.stopped) return Promise.reject(new Error('trial stopped'));
+    return postJson<T>(url, body, signal ? anySignal(signal, this.abort.signal) : this.abort.signal);
+  };
   private initial(): TrialState {
     return { phase: 'ask', scene: 'witness', question: '', agenda: [], cycle: 0, totalCycles: BASE_CYCLES, canInterrupt: false, spectrum: { value: 0, label: 'Toss-up' }, transcript: [], cards: [], ledger: [], fallbacks: [] };
   }
@@ -146,7 +170,7 @@ export class TrialOrchestrator {
 
   /** POST with timeout + mock fallback; records which calls fell back. */
   private async call<T extends { fallback?: boolean }>(url: string, body: unknown, fallback: () => T, ms: number): Promise<T> {
-    const r = await withFallback((signal) => postJson<T>(url, body, signal), fallback, ms, url);
+    const r = await withFallback((signal) => this.post<T>(url, body, signal), fallback, ms, url);
     if (r.fallback || r.value.fallback) this.set({ fallbacks: [...this.state.fallbacks, url.replace('/api/', '')] });
     return r.value;
   }
@@ -154,12 +178,13 @@ export class TrialOrchestrator {
   // ── UI → orchestrator ─────────────────────────────────────────────────────
   /** The user asked their question (already transcribed). Runs the whole trial. */
   async start(question: string, profile: UserProfile | undefined = this.opts.profile) {
-    if (this.state.phase !== 'ask') return; // already running (e.g. a double submit)
+    if (this.stopped || this.state.phase !== 'ask') return; // replaced, or already running (e.g. a double submit)
     this.state = { ...this.initial(), question, profile };
     this.set({ phase: 'preparing', scene: 'cutscene', status: 'The court is preparing the case…' });
     try {
       await this.run();
     } catch (err) {
+      if (err === STOPPED) return; // replaced by a newer trial: finish quietly
       console.error('[trial] crashed', err);
       this.set({ phase: 'done', status: 'The court is adjourned (something broke).' });
     }
@@ -194,7 +219,7 @@ export class TrialOrchestrator {
     const speaker = line.speaker;
     const voice = async (text: string, settings?: VoiceSettings) => {
       const r = await withFallback<TtsResponse | null>(
-        (signal) => postJson<TtsResponse>('/api/voice/tts', { text, speaker, voiceId: this.opts.voiceId, voiceSettings: settings }, signal),
+        (signal) => this.post<TtsResponse>('/api/voice/tts', { text, speaker, voiceId: this.opts.voiceId, voiceSettings: settings }, signal),
         null,
         TIMEOUTS.tts.client,
         'tts',
@@ -222,6 +247,7 @@ export class TrialOrchestrator {
   private async say(line: Line): Promise<SayResult> {
     const ready = await (this.voiced.get(line.id) ?? this.prepare(line));
     this.voiced.delete(line.id);
+    if (this.stopped) throw STOPPED; // unwinds run(): a replaced trial says nothing more
     const done = new Promise<SayResult>((r) => (this.sayResolve = r));
     this.set({
       phase: 'speaking',
@@ -233,6 +259,7 @@ export class TrialOrchestrator {
     });
     const result = await done;
     this.sayResolve = undefined;
+    if (this.stopped) throw STOPPED;
     this.recordLedger();
     // The line is over: no interrupting it while the next one is generated/voiced.
     if (result === 'done') this.set({ canInterrupt: false });
@@ -263,7 +290,7 @@ export class TrialOrchestrator {
       // Deep search lands later and is used by later cycles/topics. No mock: quick cards already cover it.
       for (const side of ['yes', 'no'] as const) {
         withFallback(
-          (signal) => postJson<ResearchResponse>('/api/research', { question: this.state.question, topic, side, tier: 'deep' }, signal),
+          (signal) => this.post<ResearchResponse>('/api/research', { question: this.state.question, topic, side, tier: 'deep' }, signal),
           { cards: [], fallback: true },
           TIMEOUTS.deepResearch.client,
           'deep research',
@@ -287,7 +314,7 @@ export class TrialOrchestrator {
     await this.sayHandled(setup.opening);
 
     let topic: Topic | undefined;
-    while ((topic = this.state.agenda.find((t) => t.status === 'pending'))) {
+    while (!this.stopped && (topic = this.state.agenda.find((t) => t.status === 'pending'))) {
       this.patchTopic(topic.id, { status: 'active' });
       this.set({ activeTopicId: topic.id, cycle: 1, totalCycles: BASE_CYCLES });
       // Usually written already. If not (the agenda just changed), write it now with priority, hidden behind the intro.
@@ -356,7 +383,7 @@ export class TrialOrchestrator {
    * written ahead; `urgent` when the user is about to reach it (it then takes the reserved slot).
    */
   private prewrite(topicId: string, urgent = false) {
-    if (this.prewritten.has(topicId)) return;
+    if (this.stopped || !this.topic(topicId) || this.prewritten.has(topicId)) return;
     const research = this.quickResearch.get(topicId) ?? Promise.resolve();
     this.prewritten.set(topicId, research.then(() => this.writeTopic(topicId, this.basePlan(), { urgent, cutInAllowed: true })));
   }
@@ -467,7 +494,7 @@ export class TrialOrchestrator {
     form.append('audio', input, 'interrupt.webm');
     const r = await withFallback(
       async (signal) => {
-        const res = await fetch('/api/voice/stt', { method: 'POST', body: form, signal });
+        const res = await fetch('/api/voice/stt', { method: 'POST', body: form, signal: anySignal(signal, this.abort.signal) });
         if (!res.ok) throw new Error(`stt ${res.status}`);
         return ((await res.json()) as SttResponse).transcript;
       },

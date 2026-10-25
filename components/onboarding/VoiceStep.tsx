@@ -39,8 +39,14 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
   const [result, setResult] = useState<VoiceStepResult | null>(null);
   const rec = useRef<{ recorder: MediaRecorder; stream: MediaStream; ctx: AudioContext; started: number; timer: number } | null>(null);
   const preview = useRef<HTMLAudioElement | null>(null);
+  // Mounted? Set in the effect body (StrictMode's fake cleanup flips it back), cleared on unmount:
+  // work still running after the user left (Skip, mid-processing) must not clone, store or play anything.
+  const alive = useRef(false);
 
+  const starting = useRef(false);
   async function start() {
+    if (starting.current || rec.current) return; // one recording at a time (the button stays up during the mic prompt)
+    starting.current = true;
     let stream: MediaStream;
     try {
       // No browser processing: noise suppression / AGC change the voice and hurt the clone.
@@ -48,18 +54,32 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
       });
     } catch {
-      finish({ voiceId: null, transcript: "", fallback: true }, "No microphone — using the default voice.");
+      starting.current = false;
+      if (alive.current) finish({ voiceId: null, transcript: "", fallback: true }, "No microphone — using the default voice.");
       return;
     }
-    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "";
-    const recorder = new MediaRecorder(stream, { ...(mimeType && { mimeType }), audioBitsPerSecond: 128_000 });
+    starting.current = false;
+    if (!alive.current) {
+      stream.getTracks().forEach((t) => t.stop()); // they left while the permission prompt was up
+      return;
+    }
+    let recorder: MediaRecorder, ctx: AudioContext, analyser: AnalyserNode;
+    try {
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "";
+      recorder = new MediaRecorder(stream, { ...(mimeType && { mimeType }), audioBitsPerSecond: 128_000 });
+      ctx = new AudioContext();
+      analyser = ctx.createAnalyser();
+      ctx.createMediaStreamSource(stream).connect(analyser);
+    } catch {
+      // A browser that can't record this way (older Safari): mic off, default voice.
+      stream.getTracks().forEach((t) => t.stop());
+      finish({ voiceId: null, transcript: "", fallback: true }, "This browser can't record here, so your future selves will use the default voice.");
+      return;
+    }
     const chunks: Blob[] = [];
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     recorder.onstop = () => process(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
 
-    const ctx = new AudioContext();
-    const analyser = ctx.createAnalyser();
-    ctx.createMediaStreamSource(stream).connect(analyser);
     const buf = new Float32Array(analyser.fftSize);
     const started = now();
     const timer = window.setInterval(() => {
@@ -101,6 +121,7 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
         .catch(() => ({ voiceId: null, fallback: true, error: "Couldn't reach the voice cloning service." })),
       fetch("/api/voice/stt", { method: "POST", body: form() }).then((r) => r.json() as Promise<SttResponse>).catch(() => ({ transcript: "", fallback: true })),
     ]);
+    if (!alive.current) return; // left mid-processing ("use the default voice"): keep nothing, play nothing
     const res: VoiceStepResult = { voiceId: clone.voiceId, transcript: stt.transcript, fallback: clone.fallback || stt.fallback, error: clone.error };
     try {
       if (res.voiceId) sessionStorage.setItem(SESSION_KEY, res.voiceId);
@@ -119,6 +140,7 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
     })
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null);
+    if (!alive.current) return;
     finish(res, res.voiceId ? "That's your voice, from the future." : "Your future selves will use the default voice.");
     if (tts?.audioUrl) {
       preview.current = new Audio(tts.audioUrl);
@@ -132,9 +154,22 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
     setPhase("preview");
   }
 
-  useEffect(() => () => {
-    rec.current?.stream.getTracks().forEach((t) => t.stop());
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+    alive.current = false;
+    // Left mid-recording (e.g. "Skip: use the default voice"): drop the recording, don't clone a partial clip.
+    const r = rec.current;
+    if (r) {
+      rec.current = null;
+      clearInterval(r.timer);
+      r.recorder.onstop = null;
+      if (r.recorder.state !== "inactive") r.recorder.stop();
+      r.stream.getTracks().forEach((t) => t.stop());
+      void r.ctx.close().catch(() => {});
+    }
     preview.current?.pause();
+    };
   }, []);
 
   return (

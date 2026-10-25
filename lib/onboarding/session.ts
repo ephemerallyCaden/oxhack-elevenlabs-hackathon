@@ -39,7 +39,8 @@ export function restoreSession(u: { voiceId: string | null; selfie: string | nul
 
 // Faces on this laptop: who has signed in with Google and kept their voice + face here. Tapping a
 // face starts Google sign-in for that account; "Forget me" or × removes it.
-export type RosterEntry = { email: string; name?: string; face?: string };
+/** `key`: the opaque jury key from the save (so the jury doesn't seat you twice). */
+export type RosterEntry = { email: string; name?: string; face?: string; key?: string };
 const ROSTER_KEY = "roulette.roster";
 export function readRoster(): RosterEntry[] {
   try {

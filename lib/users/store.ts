@@ -53,7 +53,8 @@ export async function saveUser(u: Omit<SavedUser, "id"> & { id?: string }): Prom
 export async function getUser(id: string): Promise<SavedUser | null> {
   if (!validId(id)) return null;
   if (supabase) {
-    const { data } = await supabase.from("users").select("id, profile, voice_id, selfie").eq("id", id).maybeSingle();
+    const { data, error } = await supabase.from("users").select("id, profile, voice_id, selfie").eq("id", id).maybeSingle();
+    if (error) throw new Error(`supabase select: ${error.message}`); // a failed lookup is not "no such user"
     return data ? { id: data.id, profile: data.profile ?? {}, voiceId: data.voice_id, ...unpackFaces(data.selfie) } : null;
   }
   try {
@@ -63,21 +64,23 @@ export async function getUser(id: string): Promise<SavedUser | null> {
   }
 }
 
-/** The jury on the homepage: every saved user's front face + name, newest first. Nothing else. */
-export async function listFaces(limit = 15): Promise<{ name?: string; selfie: string }[]> {
-  type Row = { profile: UserProfile | null; selfie: string | null };
+/** The jury on the homepage: every saved user's front face + first name, newest first (server-side only). */
+export async function listFaces(limit = 15): Promise<{ id: string; name?: string; selfie: string }[]> {
+  type Row = { id: string; profile: UserProfile | null; selfie: string | null };
   let rows: Row[] = [];
   if (supabase) {
-    const { data } = await supabase.from("users").select("profile, selfie").not("selfie", "is", null).order("updated_at", { ascending: false }).limit(limit);
+    const { data, error } = await supabase.from("users").select("id, profile, selfie").not("selfie", "is", null).order("updated_at", { ascending: false }).limit(limit);
+    if (error) throw new Error(`supabase select: ${error.message}`); // not "nobody saved": don't cache an empty jury
     rows = (data ?? []) as Row[];
   } else {
     const files = await readdir(DIR).catch(() => [] as string[]);
     const saved = await Promise.all(files.filter((f) => f.endsWith(".json")).map((f) => readFile(join(DIR, f), "utf8").then((t) => JSON.parse(t) as SavedUser).catch(() => null)));
-    rows = saved.filter((u): u is SavedUser => !!u).slice(0, limit).map((u) => ({ profile: u.profile, selfie: packFaces(u) }));
+    rows = saved.filter((u): u is SavedUser => !!u).slice(0, limit).map((u) => ({ id: u.id, profile: u.profile, selfie: packFaces(u) }));
   }
   return rows.flatMap((r) => {
     const { selfie } = unpackFaces(r.selfie);
-    return selfie ? [{ name: r.profile?.name?.split(/\s+/)[0], selfie }] : [];
+    const name = typeof r.profile?.name === "string" ? r.profile.name.trim().split(/\s+/)[0].slice(0, 20) || undefined : undefined;
+    return selfie ? [{ id: r.id, name, selfie }] : [];
   });
 }
 
@@ -85,7 +88,9 @@ export async function listFaces(limit = 15): Promise<{ name?: string; selfie: st
 export async function deleteUser(id: string): Promise<SavedUser | null> {
   const user = await getUser(id);
   if (!user) return null;
-  if (supabase) await supabase.from("users").delete().eq("id", id);
-  else await rm(join(DIR, `${id}.json`), { force: true });
+  if (supabase) {
+    const { error } = await supabase.from("users").delete().eq("id", id);
+    if (error) throw new Error(`supabase delete: ${error.message}`); // never report "forgotten" when it wasn't
+  } else await rm(join(DIR, `${id}.json`), { force: true });
   return user;
 }

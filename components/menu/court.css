@@ -116,6 +116,7 @@
 .juror-x { position: absolute; z-index: 6; top: -4px; right: -10px; width: 22px; height: 22px; font: 600 13px/18px var(--ui); color: var(--c-stone); background: var(--c-black); border: 2px solid var(--c-oak); opacity: 0; transition: opacity 120ms; }
 .juror.kept:hover .juror-x, .juror-x:focus-visible { opacity: 1; }
 .juror-x:hover { color: var(--c-no); border-color: var(--c-no); }
+@media (hover: none) { .juror-x { opacity: 1; } } /* touch: no hover to reveal it */
 .juror.kept:hover img, .juror-pick:focus-visible img { transform: translateY(-8px); }
 .juror.me img { filter: none; }
 .juror.me::before { content: ''; position: absolute; left: 50%; bottom: 10%; width: 220%; aspect-ratio: 1; transform: translateX(-50%); background: radial-gradient(circle, rgb(224 224 220 / 0.22), transparent 62%); pointer-events: none; }
@@ -180,6 +181,11 @@
 .ct-share .text-zinc-400, .ct-share .text-zinc-300 { color: var(--c-stone); }
 .ct-share button { border-radius: 0; font-family: var(--ui); color: var(--c-black); background: var(--c-plaster); }
 .ct-share button:hover:not(:disabled) { background: #fff; }
+
+/* The verdict screen covers the trial and scrolls when its band is taller than the window (laptops):
+   the YES/NO fields and the record drawer stay pinned while the band scrolls. */
+.court-ui.verdict-screen { position: fixed; inset: 0; overflow-y: auto; }
+.verdict-screen .seam-half, .verdict-screen .seam-strip { position: fixed; }
 
 /* ── Chips (confirm step) ── */
 .ct-chips { display: flex; flex-wrap: wrap; gap: 8px; }

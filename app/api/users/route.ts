@@ -1,23 +1,37 @@
+import { after } from "next/server";
 import { z } from "zod";
 import type { UserProfile } from "@/types";
 import { elevenlabs } from "@/lib/voice/client";
-import { requireUser, unauthorized } from "@/lib/auth/server";
+import { authAvailable, authUnavailable, requireUser, unauthorized } from "@/lib/auth/server";
 import { getUser, saveUser } from "@/lib/users/store";
+import { invalidateJury, juryKey } from "@/lib/users/jury";
 
-const Head = z.object({ src: z.string().startsWith("data:image/").max(1_500_000) }).passthrough();
+// Faces are only ever PNG/JPEG/WebP data URLs (no SVG: the jury decodes them server-side).
+const IMAGE = /^data:image\/(?:png|jpeg|webp);base64,/;
+const Head = z.object({ src: z.string().regex(IMAGE).max(1_500_000) }).passthrough();
 const Body = z.object({
   profile: z.record(z.string(), z.unknown()).default({}),
   voiceId: z.string().max(64).nullable().optional(),
-  selfie: z.string().startsWith("data:image/").max(2_000_000).nullable().optional(),
+  selfie: z.string().regex(IMAGE).max(2_000_000).nullable().optional(),
   /** Both head cut-outs + their calibration (components/courtroom/heads.ts). */
   heads: z.object({ front: Head, side: Head.optional() }).nullable().optional(),
 });
+
+/** after() outside a request (unit tests) throws: run the work inline there. */
+function later(work: () => Promise<void>) {
+  try {
+    after(work);
+  } catch {
+    void work();
+  }
+}
 
 // POST { profile, voiceId?, selfie?, heads? } → { id } — keep the signed-in user's voice, face and
 // profile ("Remember me"). Signed-in only: the row is keyed by their Supabase user id. Renames the
 // session_* voice clone to user_<id> so scripts/delete-clones.mjs (which removes session_* after
 // the demo) keeps it.
 export async function POST(req: Request) {
+  if (!authAvailable()) return authUnavailable();
   const user = await requireUser(req);
   if (!user) return unauthorized();
   const parsed = Body.safeParse(await req.json().catch(() => null));
@@ -26,19 +40,25 @@ export async function POST(req: Request) {
   try {
     const before = await getUser(user.id);
     const saved = await saveUser({ id: user.id, profile: profile as UserProfile, voiceId: voiceId ?? null, selfie: selfie ?? heads?.front.src ?? null, heads: heads ?? null });
-    if (elevenlabs) {
+    invalidateJury();
+    // Voice clone housekeeping (up to 4 ElevenLabs calls) runs after the answer: the browser gives
+    // the save 5s, and a slow voice service must not make a saved user look unsaved.
+    const housekeeping = async () => {
+      if (!elevenlabs) return;
       const mine = `user_${saved}`;
       if (voiceId) {
         const voice = await elevenlabs.voices.get(voiceId).catch(() => null);
-        if (voice?.name?.startsWith("session_")) await elevenlabs.voices.update(voiceId, { name: mine }).catch(() => {});
+        if (voice?.name?.startsWith("session_"))
+          await elevenlabs.voices.update(voiceId, { name: mine }).catch((e) => console.warn(`[users] couldn't rename ${voiceId} to ${mine} (scripts/delete-clones.mjs would remove it):`, e));
       }
       // Re-onboarding replaced their clone: delete the old one (only if it is theirs), or clones pile up.
       if (before?.voiceId && before.voiceId !== voiceId) {
         const old = await elevenlabs.voices.get(before.voiceId).catch(() => null);
         if (old?.name === mine) await elevenlabs.voices.delete(before.voiceId).catch(() => {});
       }
-    }
-    return Response.json({ id: saved });
+    };
+    later(housekeeping);
+    return Response.json({ id: saved, juryKey: juryKey(saved) });
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 500 });
   }

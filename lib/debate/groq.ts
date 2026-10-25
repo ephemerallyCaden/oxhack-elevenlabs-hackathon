@@ -26,9 +26,14 @@ export async function askGroq(model: string, system: string, content: string, js
     }),
     signal,
   });
-  if (!res.ok) throw new Error(`Groq ${res.status}: ${(await res.text()).slice(0, 600)}`);
+  if (!res.ok) {
+    const detail = (await res.text()).slice(0, 600);
+    // Groq refuses its own invalid JSON with 400 json_validate_failed: that's a malformed answer (retried once), not a dead model.
+    if (res.status === 400 && detail.includes('json_validate_failed')) throw new SyntaxError(`Groq: answer wasn't valid JSON (${detail.slice(0, 120)})`);
+    throw new Error(`Groq ${res.status}: ${detail}`);
+  }
   const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
   const text = body.choices?.[0]?.message?.content;
-  if (!text) throw new Error('Groq: empty response');
+  if (!text) throw new SyntaxError('Groq: empty response'); // like Gemini's JSON.parse(''): a malformed answer, retried once
   return text;
 }

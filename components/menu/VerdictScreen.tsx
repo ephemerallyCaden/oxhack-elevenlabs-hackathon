@@ -2,7 +2,7 @@
 // After the verdict: the seam again, as the trial's last frame. The winning future gloats, the
 // losing one breaks down (a toss-up leaves both sweating), and the band closes the loop: a new
 // case (same voice + face), save & share, the court record, or back to the menu.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Transcript } from '@/types';
 import type { Heads } from '@/components/courtroom/heads';
 import { WHO } from '@/components/courtroom/roles';
@@ -28,6 +28,20 @@ export default function VerdictScreen({
   onLeave: (href: string) => void;
 }) {
   const [record, setRecord] = useState(false);
+  const newCase = useRef<HTMLButtonElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  // Closing the drawer makes its own Close inert: hand focus back to the button that opened it.
+  const closeRecord = () => {
+    setRecord(false);
+    toggle.current?.focus();
+  };
+  useEffect(() => newCase.current?.focus(), []); // the verdict takes focus (the trial's controls are gone)
+  useEffect(() => {
+    if (!record) return;
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && closeRecord();
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [record]);
   // The court's label decides (Strong / Lean / Toss-up): a strong loss breaks the loser, a lean one makes them sweat.
   const side = verdictSide(label);
   const win = fig('confident2', 'confident');
@@ -37,14 +51,19 @@ export default function VerdictScreen({
   const tone = side === 'yes' ? 'var(--c-yes)' : side === 'no' ? 'var(--c-no)' : 'var(--c-stone)';
 
   return (
-    <section className="court-ui fixed inset-0 z-[60]" aria-label="Verdict">
+    <section className="court-ui verdict-screen z-[60]" aria-label="Verdict">
       <Seam
         yes={yes}
         no={no}
         heads={heads}
         stripOpen={record}
         strip={
-          <div className="grid max-h-[62vh] grid-cols-1 gap-8 overflow-y-auto px-8 py-6 md:grid-cols-[3fr_2fr]">
+          <div className="relative max-h-[45vh] overflow-y-auto">
+          {/* Its own Close (and Escape): the drawer can cover the band's buttons on a laptop. */}
+          <div className="sticky top-0 z-10 flex justify-end bg-[var(--c-umber)] px-8 pt-3">
+            <button className="ct-ghost" onClick={closeRecord}>Close the court record ✕</button>
+          </div>
+          <div className="grid grid-cols-1 gap-8 px-8 pb-6 pt-2 md:grid-cols-[3fr_2fr]">
             <div>
               <h3 className="ct-kicker mb-3">Transcript</h3>
               <ol className="flex flex-col gap-2">
@@ -72,6 +91,7 @@ export default function VerdictScreen({
               </ol>
             </div>
           </div>
+          </div>
         }
       >
         <span className="ct-kicker">The court finds</span>
@@ -84,8 +104,8 @@ export default function VerdictScreen({
         {transcript.verdict?.explanation && <p className="ct-body">{transcript.verdict.explanation}</p>}
         <div className="flex flex-col items-start gap-3">
           {/* Same tab, so the voice, faces and profile in sessionStorage carry over to the new case. */}
-          <button className="ct-primary" onClick={() => onLeave('/?again=1')}>New case</button>
-          <button className="ct-ghost" aria-expanded={record} onClick={() => setRecord((o) => !o)}>
+          <button ref={newCase} className="ct-primary" onClick={() => onLeave('/?again=1')}>New case</button>
+          <button ref={toggle} className="ct-ghost" aria-expanded={record} onClick={() => setRecord((o) => !o)}>
             {record ? 'Close the court record' : 'Read the court record'}
           </button>
         </div>

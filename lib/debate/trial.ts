@@ -58,6 +58,8 @@ async function ask<S extends z.ZodType, R>(
   build: (out: z.infer<S>) => R,
   fallback: () => R,
   priority: Priority = 'interactive',
+  /** The caller's request signal: a client that gave up (e.g. a stopped trial) frees the model slot too. */
+  signal?: AbortSignal,
 ): Promise<{ value: R; fallback: boolean }> {
   const llm = debateLlm();
   if (llm === 'mock') return { value: fallback(), fallback: true };
@@ -65,10 +67,10 @@ async function ask<S extends z.ZodType, R>(
   const system = task === P.PROFILE_TASK ? task : `${P.COURT}\n\n${task}`;
   if (llm === 'gemini') {
     const deadline = Date.now() + ms;
-    return withFallback(async (signal) => build(await askGemini(system, content, schema, signal, priority, deadline)), fallback, ms, label);
+    return withFallback(async (s) => build(await askGemini(system, content, schema, s, priority, deadline)), fallback, ms, label, signal);
   }
   return withFallback(
-    async (signal) => {
+    async (s) => {
       const res = await claude().messages.parse(
         {
           model: MODEL,
@@ -77,7 +79,7 @@ async function ask<S extends z.ZodType, R>(
           messages: [{ role: 'user', content }],
           output_config: { effort: 'low', format: zodOutputFormat(schema) },
         },
-        { signal },
+        { signal: s },
       );
       if (!res.parsed_output) throw new Error(`no parsed output (stop_reason ${res.stop_reason})`);
       return build(res.parsed_output as z.infer<S>);
@@ -85,17 +87,20 @@ async function ask<S extends z.ZodType, R>(
     fallback,
     ms,
     label,
+    signal,
   );
 }
 
 const Spoken = z.object({ text: z.string(), tts: z.string() });
 /** Models sometimes start a line with its speaker ("Judge: …"), even after leading audio tags. */
-const SPEAKER_LABEL = /^((?:\[[^\]\n]{1,40}\]\s*)*)(?:the\s+)?(?:judge|prosecution|defen[cs]e)(?:\s*\([^)]*\))?\s*:\s*/i;
-export const unlabel = (s: string) => s.replace(SPEAKER_LABEL, '$1');
+const SPEAKER_LABEL = /^((?:\[[^\]\n]{1,40}\]\s*)*)(?:the\s+)?(?:judge|prosecution|defen[cs]e|witness|future\s+you)(?:\s*\([^)]*\))?\s*:\s*/i;
+// Side labels only in capitals ("YES:"), so a sentence opening "No: …" keeps its word.
+const SIDE_LABEL = /^((?:\[[^\]\n]{1,40}\]\s*)*)(?:YES|NO)\s*:\s*/;
+export const unlabel = (s: string) => s.replace(SPEAKER_LABEL, '$1').replace(SIDE_LABEL, '$1');
 /** Display text never shows voice cues: models sometimes put audio tags like [confident] in `text` too. */
 export const plain = (s: string) => unlabel(s).replace(/\[[^\]\n]{1,40}\]\s*/g, '').replace(/\s{2,}/g, ' ').trim();
 const judgeLine = (kind: Line['kind'], s: { text: string; tts: string }, topic_id?: string): Line => {
-  if (!s.text.trim()) throw new Error(`empty ${kind} line`); // → mock fallback
+  if (!plain(s.text)) throw new Error(`empty ${kind} line`); // → mock fallback (a bare label or tags is empty too)
   return { id: uid('line'), speaker: 'judge', kind, text: plain(s.text), tts: unlabel(s.tts), cites: [], topic_id };
 };
 
@@ -122,7 +127,7 @@ const SetupSchema = z.object({
   personas: z.object({ yes: PersonaSchema, no: PersonaSchema }),
 });
 
-export async function buildSetup(req: SetupRequest): Promise<SetupResponse> {
+export async function buildSetup(req: SetupRequest, signal?: AbortSignal): Promise<SetupResponse> {
   const { value } = await ask(
     P.SETUP_TASK,
     `QUESTION: ${req.question}\n${P.profileBlock(req.profile)}`,
@@ -153,6 +158,8 @@ export async function buildSetup(req: SetupRequest): Promise<SetupResponse> {
       };
     },
     () => mockSetup(req),
+    'interactive',
+    signal,
   );
   return value;
 }
@@ -185,7 +192,7 @@ const TopicSchema = z.object({
   ruling: Spoken,
 });
 
-export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
+export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promise<TopicResponse> {
   const valid = new Set(req.cards.map((c) => c.id));
   const t = req.urgent ? TIMEOUTS.topicUrgent : TIMEOUTS.topic;
   const { value } = await ask(
@@ -205,7 +212,8 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
     'topic',
     (out): TopicResponse => {
       // The code owns the structure: one line per planned turn, speakers from the plan.
-      if (out.lines.length < req.turns.length || req.turns.some((_, i) => !out.lines[i].text.trim()))
+      // (Checked after cleaning: a line that was only a speaker label or audio tags is empty too.)
+      if (out.lines.length < req.turns.length || req.turns.some((_, i) => !plain(out.lines[i].text).replace(/—/g, '').trim()))
         throw new Error(`topic: ${out.lines.length} lines for ${req.turns.length} turns`);
       const lines: Line[] = [];
       const byIndex: Line[] = [];
@@ -225,19 +233,30 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
         };
         lines.push(line);
         byIndex.push(line);
-        if (!cutUsed && !turn.answer && o.cut_in.text.trim() && o.resume.text.trim()) {
+        if (!cutUsed && !turn.answer && plain(o.cut_in.text) && plain(o.resume.text)) {
           cutUsed = true;
+          // The cut-in interrupts this line: it must end cut off (a punch on it is dropped by design).
+          // End mark before any closing quote or trailing tags: "less. [sighs]" → "less [sighs] —".
+          const cutOff = (s: string) => (s.trim().endsWith('—') ? s.trim() : `${s.trim().replace(/[.!?…]+(?=["”’')»]*(?:\s*\[[^\]]*\])*$)/, '')} —`);
+          line.text = cutOff(line.text);
+          if (line.tts?.trim()) line.tts = cutOff(line.tts);
           const other = turn.side === 'yes' ? 'no' : 'yes';
           lines.push(
             { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in', text: plain(o.cut_in.text), tts: unlabel(o.cut_in.tts), cites: [], ...base },
             { id: uid('line'), speaker: SIDE_SPEAKER[turn.side], kind: 'resume', text: plain(o.resume.text), tts: unlabel(o.resume.tts), cites: [], ...base },
           );
         } else if (line.text.trim().endsWith('—')) {
-          // No cut-in for this line: don't leave it hanging mid-sentence.
-          line.text = line.text.trim().replace(/—$/, '.');
-          if (line.tts) line.tts = line.tts.trim().replace(/—$/, '.');
+          // No cut-in for this line: don't leave it hanging mid-sentence. A punch the model wrote anyway is
+          // the end of that sentence: keep it as ordinary words (no punch shot: the line was meant to be cut).
+          const draft = o.punch && plain(o.punch.text) ? { text: plain(o.punch.text), tts: unlabel(o.punch.tts) } : undefined;
+          line.text = line.text.trim().replace(/\s*—$/, draft ? '' : '.');
+          if (line.tts) line.tts = line.tts.trim().replace(/\s*—$/, draft ? '' : '.');
+          if (draft) attachPunch(line, draft, new Set(['yes', 'no'])); // refused → appended
+          // (If the text already said the punch, nothing was appended: still end the sentence.)
+          if (!/[.!?…]["”’')»]*$/.test(line.text.trim())) line.text = `${line.text.trim()}.`;
+          if (line.tts && !/[.!?…]["”’')»]*$/.test(line.tts.trim())) line.tts = `${line.tts.trim()}.`;
         } else {
-          attachPunch(line, o.punch, punched);
+          attachPunch(line, o.punch && { text: plain(o.punch.text), tts: unlabel(o.punch.tts) }, punched);
         }
       });
       // The witness's point being answered (line_index -1) is recorded once; earlier points already were.
@@ -267,6 +286,7 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
     },
     () => mockTopic(req),
     req.urgent ? 'interactive' : 'background',
+    signal,
   );
   return value;
 }
@@ -288,7 +308,7 @@ const ProfileSchema = z.object({
   question: z.string().nullable().describe('The decision they described, as "Should I …?"; null if none'),
 });
 
-export async function extractProfile(req: ProfileRequest): Promise<ProfileResponse> {
+export async function extractProfile(req: ProfileRequest, signal?: AbortSignal): Promise<ProfileResponse> {
   const text = onboardingText(req);
   if (!text) return { profile: mergeProfile({}, req.form), fallback: true };
   const { value } = await ask(
@@ -309,6 +329,8 @@ export async function extractProfile(req: ProfileRequest): Promise<ProfileRespon
       return { profile: mergeProfile(extracted, req.form), question: out.question?.trim() || undefined, fallback: false };
     },
     () => mockProfile(req),
+    'interactive',
+    signal,
   );
   return value;
 }
@@ -325,7 +347,7 @@ const JudgeInterruptSchema = z.object({
   line: Spoken,
 });
 
-export async function judgeInterrupt(req: JudgeInterruptRequest): Promise<JudgeInterruptResponse> {
+export async function judgeInterrupt(req: JudgeInterruptRequest, signal?: AbortSignal): Promise<JudgeInterruptResponse> {
   const removable = new Set(req.agenda.filter((t) => t.status === 'pending' || t.status === 'active').map((t) => t.id));
   const { value } = await ask(
     P.JUDGE_INTERRUPT_TASK,
@@ -355,6 +377,8 @@ THE WITNESS SAYS: "${req.text}"`,
       return { action: 'none', line, fallback: false };
     },
     () => mockJudgeInterrupt(req),
+    'interactive',
+    signal,
   );
   return value;
 }
@@ -363,7 +387,7 @@ THE WITNESS SAYS: "${req.text}"`,
 
 const VerdictSchema = z.object({ explanation: z.string(), line: Spoken });
 
-export async function verdict(req: VerdictRequest): Promise<VerdictResponse> {
+export async function verdict(req: VerdictRequest, signal?: AbortSignal): Promise<VerdictResponse> {
   const spectrum = computeSpectrum(req.agenda);
   const scored = req.agenda.filter((t) => t.status !== 'removed' && t.score);
   const breakdown = scored.map((t) => ({ topic_id: t.id, title: t.title, weight: t.importance, t: t.score!.t, deciding_argument: t.score!.deciding_argument, added_by: t.added_by }));
@@ -383,6 +407,8 @@ WITNESS INTERRUPTS: ${req.userLines.length ? req.userLines.map((l) => `"${l.text
       fallback: false,
     }),
     () => mockVerdict(req),
+    'interactive',
+    signal,
   );
   return value;
 }

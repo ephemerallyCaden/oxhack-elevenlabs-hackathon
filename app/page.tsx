@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import type { UserProfile } from "@/types";
 import type { SavedUser } from "@/lib/users/store";
@@ -9,6 +9,7 @@ import HoldToTalk from "@/components/HoldToTalk";
 import SelfieStep, { sessionSelfie } from "@/components/onboarding/SelfieStep";
 import { HEADS_KEY, useSessionHeads } from "@/components/onboarding/sessionHeads";
 import Jury from "@/components/menu/Jury";
+import { forgetError, seatJury } from "@/components/menu/seatJury";
 import "@/components/menu/court.css";
 import ProfileChips from "@/components/menu/ProfileChips";
 import { parsePastTrials, pastTrialsRaw, verdictSide } from "@/components/menu/pastTrials";
@@ -17,6 +18,7 @@ import { authConfigured, authedPost, signInWithGoogle, signOut, useSession } fro
 import {
   addToRoster,
   faceThumb,
+  readRoster,
   removeFromRoster,
   restoreSession,
   saveDraft,
@@ -46,6 +48,13 @@ function sessionHeadsJson() {
 }
 
 const noSubscribe = () => () => {};
+const hasRestore = () => {
+  try {
+    return !!sessionStorage.getItem("roulette.draft") || new URLSearchParams(location.search).has("again");
+  } catch {
+    return false;
+  }
+};
 const rosterRaw = () => {
   try {
     return localStorage.getItem("roulette.roster") ?? "[]";
@@ -89,6 +98,10 @@ export default function Home() {
   const past = useMemo(() => parsePastTrials(pastJson), [pastJson]);
 
   // Back from Google mid-onboarding (the draft), or "New case" from the verdict (keeps voice + face).
+  // Only when there is something to restore (a draft, or ?again), the page waits for it, so "New case"
+  // doesn't flash the title page on its way to the confirm step. The server render is always visible.
+  const [restored, setRestored] = useState(false);
+  const needsRestore = useSyncExternalStore(noSubscribe, hasRestore, () => false);
   useEffect(() => {
     void Promise.resolve().then(() => {
       const draft = takeDraft();
@@ -100,19 +113,28 @@ export default function Home() {
         setStep("confirm");
       } else if (again) {
         setProfile(sessionProfile() ?? {});
+        setQuestion("");
         setStep("confirm");
         history.replaceState(null, "", "/");
       }
+      setRestored(true);
     });
   }, []);
 
   // The jury: every saved face (thumbnail + first name). Decoration: a slow or failed fetch leaves silhouettes.
-  useEffect(() => {
+  const juryRequest = useRef(0);
+  const forgotten = useRef(new Set<string>()); // seats removed by Forget me: other instances may still cache them
+  const [myKey, setMyKey] = useState<string | undefined>(); // your own seat, while signed in
+  const loadJury = useCallback(() => {
+    const n = ++juryRequest.current; // a slow earlier reply must not overwrite a newer one
     fetch("/api/jury", { method: "POST", signal: AbortSignal.timeout(5000) })
       .then((r) => (r.ok ? r.json() : { jurors: [] }))
-      .then(({ jurors }: { jurors: { name?: string; face: string }[] }) => setStored(jurors.map((j) => ({ email: "", name: j.name, face: j.face }))))
+      .then(({ jurors }: { jurors: { key: string; name?: string; face: string }[] }) => {
+        if (n === juryRequest.current) setStored(jurors.filter((j) => !forgotten.current.has(j.key)).map((j) => ({ email: "", key: j.key, name: j.name, face: j.face })));
+      })
       .catch(() => {});
   }, []);
+  useEffect(loadJury, [loadJury]);
 
   // Signed in → their saved file, if they kept one → "Welcome back".
   useEffect(() => {
@@ -120,8 +142,15 @@ export default function Home() {
     let live = true;
     authedPost("/api/users/get", session)
       .then((r) => (r.ok ? r.json() : null))
-      .then((res: { user: SavedUser } | null) => {
+      .then((res: { user: SavedUser; juryKey?: string } | null) => {
         if (!live || !res) return;
+        setMyKey(res.juryKey);
+        // Faces kept before jury keys existed learn theirs now, so the jury stops seating them twice.
+        const mine = session.user.email && readRoster().find((r) => r.email === session.user.email);
+        if (mine && res.juryKey && mine.key !== res.juryKey) {
+          addToRoster({ ...mine, key: res.juryKey });
+          bump((n) => n + 1);
+        }
         setReturning(res.user);
         setStep((s) => (s === "welcome" ? "back" : s));
       })
@@ -133,6 +162,7 @@ export default function Home() {
 
   function begin() {
     clearSession();
+    setError(""); // a message meant for the last person
     setStep("voice");
   }
 
@@ -166,20 +196,37 @@ export default function Home() {
     setStep("voice");
   }
 
+  const forgetting = useRef(false);
   async function forgetMe() {
-    if (!session) return;
+    if (!session || forgetting.current) return; // a double click sends one request
+    forgetting.current = true;
     setError("");
     const r = await authedPost("/api/users/delete", session, {}, AbortSignal.timeout(8000)).catch(() => null);
+    forgetting.current = false;
     if (!r?.ok) {
-      setError("The court couldn’t delete your voice and face just now. Nothing was removed; try again.");
+      setError(forgetError(r?.status));
+      if (r?.status === 401) {
+        // Expired: this screen has no sign-in button, so sign out and show the title page (with the message).
+        await signOut();
+        setReturning(null);
+        setStep("welcome");
+      }
       return;
     }
+    // Other server instances may still cache the jury for a minute: take your seat out here and now.
+    const { juryKey } = (await r.json().catch(() => ({}))) as { juryKey?: string };
+    if (juryKey) {
+      forgotten.current.add(juryKey);
+      setStored((js) => js.filter((j) => j.key !== juryKey));
+    }
+    setMyKey(undefined);
     if (session.user.email) removeFromRoster(session.user.email);
     await signOut();
     setReturning(null);
     clearSession();
     bump((n) => n + 1);
     setStep("welcome");
+    loadJury(); // your face leaves the jury now, not in a minute
   }
 
   function forgetFace(email: string) {
@@ -195,7 +242,13 @@ export default function Home() {
 
   const leaving = useRef(false);
   // Browser Back restores this page (Cache Components / Activity) with the guard still set: release it when hidden.
-  useEffect(() => () => void (leaving.current = false), []);
+  useEffect(
+    () => () => {
+      leaving.current = false;
+      setBusy(false); // and the "Entering the court…" label
+    },
+    [],
+  );
   async function toCourt() {
     const q = question.trim();
     if (!q || leaving.current) return; // Enter + click (or a double click) must not save twice
@@ -208,7 +261,11 @@ export default function Home() {
       const heads = sessionHeadsJson();
       const body = { profile, voiceId: sessionVoiceId() ?? null, ...(heads ? { heads } : { selfie }) };
       const r = await authedPost("/api/users", session, body, AbortSignal.timeout(5000)).catch(() => null);
-      if (r?.ok && session.user.email) addToRoster({ email: session.user.email, name: profile.name, face: selfie ? await faceThumb(selfie) : undefined });
+      if (r?.ok && session.user.email) {
+        const { juryKey } = (await r.json().catch(() => ({}))) as { juryKey?: string };
+        addToRoster({ email: session.user.email, name: profile.name, face: selfie ? await faceThumb(selfie) : undefined, key: juryKey });
+      } else if (r?.status === 503) console.warn("[menu] sign-in isn't configured on the server: your voice and face weren't kept");
+      else console.warn(`[menu] couldn't keep your voice and face (${r ? r.status : "timed out"}); the trial goes ahead without saving`);
     }
     router.push("/trial");
   }
@@ -218,11 +275,11 @@ export default function Home() {
   const signedInAs = session?.user.email;
   const menu = step === "welcome" || step === "back";
   // The jury: faces kept on this laptop, plus yours once the photos are taken (not clickable).
-  const yours = !menu && heads ? [{ email: "", name: profile.name || "You", face: heads.front.src }] : [];
+  const yours = !menu && heads && !(signedInAs && roster.some((r) => r.email === signedInAs)) ? [{ email: "", name: profile.name || "You", face: heads.front.src }] : [];
   const pickJuror = authConfigured ? (e: RosterEntry) => e.email && e.email !== signedInAs && void signInWithGoogle(e.email) : undefined;
 
   return (
-    <main className="court-ui">
+    <main className="court-ui" style={needsRestore && !restored ? { visibility: "hidden" } : undefined}>
       <div className="menu-bg" />
       {menu ? (
         <div className="menu-grid">
@@ -234,6 +291,7 @@ export default function Home() {
                 <span className="ct-kicker">Court of Future Selves</span>
                 <h1 className="ct-title-sm">Your future is on trial.</h1>
                 <p className="ct-body">Read one short paragraph out loud, then put your decision before the court.</p>
+                {error && <p role="alert" className="ct-alert">{error}</p>}
                 <div className="flex flex-col items-start gap-4">
                   <button className="ct-primary" onClick={begin} {...aimProps}>Begin</button>
                   <button className="ct-link" onClick={() => { clearSession(); router.push("/trial"); }}>Skip setup: go straight to court</button>
@@ -248,12 +306,12 @@ export default function Home() {
                   <div className="flex flex-col gap-3 border-t-2 border-[var(--c-oak)] pt-5">
                     {signedInAs ? (
                       <p className="ct-small">
-                        Signed in as {signedInAs}. <button className="ct-link" onClick={() => void signOut()}>Sign out</button>
+                        Signed in as {signedInAs}. <button className="ct-link" onClick={() => (setMyKey(undefined), void signOut())}>Sign out</button>
                       </p>
                     ) : (
                       <>
                         <span className="ct-small">{roster.length ? "Been here before? Find your face in the jury, or:" : "Been here before?"}</span>
-                        <button className="ct-google self-start" disabled={!authConfigured} onClick={() => void signInWithGoogle()}>
+                        <button className="ct-google self-start" disabled={!authConfigured} onClick={() => (setError(""), void signInWithGoogle())}>
                           <b aria-hidden="true">G</b> Sign in with Google
                         </button>
                         {!authConfigured && <span className="ct-small">Sign-in isn’t switched on for this build yet.</span>}
@@ -292,7 +350,13 @@ export default function Home() {
             {step === "voice" && (
               <>
                 <VoiceStep onDone={onVoice} />
-                <button className="ct-link self-start" onClick={() => setStep("selfie")}>Skip: use the default voice</button>
+                <button className="ct-link self-start" onClick={() => {
+                // The default voice means the default: drop a clone made before they changed their mind.
+                try {
+                  sessionStorage.removeItem("roulette.voiceId");
+                } catch {}
+                setStep("selfie");
+              }}>Skip: use the default voice</button>
               </>
             )}
 
@@ -310,6 +374,7 @@ export default function Home() {
                     className="ct-input"
                     placeholder="Should I …?"
                     value={question}
+                    disabled={busy} // already handed to the trial: typing now would be lost
                     autoFocus
                     onChange={(e) => setQuestion(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && toCourt()}
@@ -338,7 +403,15 @@ export default function Home() {
           </div>
         </div>
       )}
-      <Jury roster={[...yours, ...roster, ...stored]} signedInAs={signedInAs} onPick={pickJuror} onRemove={(e) => forgetFace(e.email)} leaning={aim} compact={!menu} />
+      {/* Kept faces are also saved users: seat each person once. Taps only on the title page (mid-onboarding a tap would throw the progress away). */}
+      <Jury
+        roster={seatJury({ yours, roster, stored, signedInAs, myKey })}
+        signedInAs={signedInAs}
+        onPick={menu ? pickJuror : undefined}
+        onRemove={menu ? (e) => forgetFace(e.email) : undefined}
+        leaning={aim}
+        compact={!menu}
+      />
       {past.length > 0 && (
         <div className={`seam-strip${pastOpen ? " open" : ""}`} aria-hidden={!pastOpen} inert={!pastOpen}>
           <div className="grid grid-cols-2 md:grid-cols-4">

@@ -24,7 +24,7 @@ describe('Jury', () => {
     render(<Jury roster={[maya]} onPick={onPick} onRemove={onRemove} />);
     fireEvent.click(screen.getByRole('button', { name: 'Sign in as Maya' }));
     expect(onPick).toHaveBeenCalledWith(maya);
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Maya from this laptop' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Remove Maya from this laptop/ }));
     expect(onRemove).toHaveBeenCalledWith(maya);
   });
 
@@ -37,7 +37,8 @@ describe('Jury', () => {
   it('marks the signed-in juror and shows only the front pew when compact', () => {
     const { container } = render(<Jury roster={[maya]} signedInAs="maya@x.com" onPick={vi.fn()} compact />);
     expect(container.querySelector('.juror.me')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Maya (signed in)' })).toBeTruthy();
+    // Your own seat isn't a button (tapping it would do nothing): no "Sign in as Maya" while signed in as Maya.
+    expect(screen.queryByRole('button', { name: /Sign in as Maya/ })).toBeNull();
     expect(container.querySelector('.jury-back')).toBeNull();
   });
 });

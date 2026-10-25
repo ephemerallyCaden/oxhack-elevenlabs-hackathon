@@ -65,7 +65,9 @@ describe('/api/users* require a verified Google session', () => {
   it('saves under the signed-in user id, never one the client picks', async () => {
     const r = await save(req({ id: 'someone-elses-id-123456', profile: { name: 'Maya' } }, 'good-token'));
     expect(r.status).toBe(200);
-    expect((await r.json()).id).toBe(MAYA);
+    const body = await r.json();
+    expect(body.id).toBe(MAYA);
+    expect(body.juryKey).toMatch(/^[\w-]{12}$/); // opaque: lets this browser skip its own seat in the jury
     expect([...rows.keys()]).toEqual([MAYA]);
   });
 
@@ -88,12 +90,13 @@ describe('/api/users* require a verified Google session', () => {
 
 describe('voice clones stay tied to their owner', () => {
   it('renames the fresh clone to the user, and deletes the clone a re-onboarding replaced', async () => {
+    // The clone housekeeping runs after the response (next/server after()), so wait for it.
     voices.set('v1', 'session_1');
     await save(req({ profile: {}, voiceId: 'v1' }, 'good-token'));
-    expect(voices.get('v1')).toBe(`user_${MAYA}`);
+    await vi.waitFor(() => expect(voices.get('v1')).toBe(`user_${MAYA}`));
     voices.set('v2', 'session_2');
     await save(req({ profile: {}, voiceId: 'v2' }, 'good-token'));
-    expect(voices.has('v1')).toBe(false);
+    await vi.waitFor(() => expect(voices.has('v1')).toBe(false));
     expect(voices.get('v2')).toBe(`user_${MAYA}`);
   });
 
@@ -101,11 +104,21 @@ describe('voice clones stay tied to their owner', () => {
     voices.set('presenter', 'Presenter voice');
     voices.set('leo', 'user_someone-else-0000000000');
     await save(req({ profile: {}, voiceId: 'presenter' }, 'good-token'));
+    await new Promise((r) => setTimeout(r, 20)); // let the after-response housekeeping run
     expect(voices.get('presenter')).toBe('Presenter voice');
     await save(req({ profile: {}, voiceId: 'leo' }, 'good-token'));
+    await new Promise((r) => setTimeout(r, 20));
     expect(voices.get('leo')).toBe('user_someone-else-0000000000');
     await del(req({}, 'good-token'));
     expect(voices.get('leo')).toBe('user_someone-else-0000000000');
     expect(voices.get('presenter')).toBe('Presenter voice');
+  });
+});
+
+describe('images the server will decode later', () => {
+  it('only accepts PNG/JPEG/WebP faces (no SVG)', async () => {
+    const svg = 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=';
+    expect((await save(req({ profile: {}, selfie: svg }, 'good-token'))).status).toBe(400);
+    expect((await save(req({ profile: {}, heads: { front: { src: svg } } }, 'good-token'))).status).toBe(400);
   });
 });
