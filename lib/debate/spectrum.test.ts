@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LedgerEntry, Topic } from '@/types';
-import { addTopic, computeSpectrum, ledgerBalance, normalise, orderAgenda, removeTopic, spectrumLabel } from './spectrum';
+import { addTopic, computeSpectrum, ledgerBalance, normalise, orderAgenda, removeTopic, spectrumLabel, sway } from './spectrum';
 
 const topic = (id: string, importance: number, extra: Partial<Topic> = {}): Topic => ({
   id, title: id, question: `${id}?`, importance, research_speed: 'quick', status: 'pending', added_by: 'judge', ...extra,
@@ -70,5 +70,16 @@ describe('ledger balance', () => {
 
   it('is 0 for an empty ledger', () => {
     expect(ledgerBalance([])).toBe(0);
+  });
+});
+
+describe('sway (the court commits)', () => {
+  it('pushes a close ruling well off the middle, keeps the sign, and leaves 0 and ±1 alone', () => {
+    expect(sway(0)).toBe(0);
+    expect(sway(1)).toBe(1);
+    expect(sway(-1)).toBe(-1);
+    expect(sway(0.1)).toBeGreaterThan(0.25);
+    expect(sway(-0.3)).toBeLessThan(-0.5);
+    expect(Math.abs(sway(0.6))).toBeLessThan(1);
   });
 });

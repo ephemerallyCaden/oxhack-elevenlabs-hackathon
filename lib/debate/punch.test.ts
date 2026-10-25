@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Line, Side } from '@/types';
-import { attachPunch, punchedSides, setupText } from './punch';
+import { attachPunch, forcePunch, punchedSides, setupText } from './punch';
 
 const line = (speaker: Line['speaker'], text: string, extra: Partial<Line> = {}): Line => ({
   id: Math.random().toString(36), speaker, kind: 'argument', text, cites: [], topic_id: 't1', ...extra,
@@ -444,5 +444,25 @@ describe('attachPunch', () => {
     const c = line('prosecution', 'More than');
     attachPunch(c, { text: 'every quant.', tts: '[gasps] every quant.' }, new Set()); // not a prosecution tag
     expect(c.punch?.tts).toBe('[passionate] every quant.');
+  });
+});
+
+describe('forcePunch (a topic that must land one)', () => {
+  const mk = (speaker: Line['speaker'], text: string, tts?: string): Line => ({ id: 'l', speaker, kind: 'argument', text, tts, cites: [], topic_id: 't' });
+
+  it('makes the last sentence’s final words the punch, and trims them from the clip', () => {
+    const l = mk('defense', 'Debt follows you. By thirty you will still be paying for this degree.', '[sad] Debt follows you. By thirty you will still be paying for this degree.');
+    expect(forcePunch(l)).toBe(true);
+    expect(l.text).toBe('Debt follows you. By thirty you will still be paying for this degree.');
+    expect(l.punch!.text).toBe('for this degree.');
+    expect(setupText(l)).toBe('Debt follows you. By thirty you will still be paying');
+    expect(l.tts).toBe('[sad] Debt follows you. By thirty you will still be paying');
+  });
+
+  it('skips lines it can’t split cleanly', () => {
+    expect(forcePunch(mk('judge', 'Order in the court, both of you, right now.'))).toBe(false);
+    expect(forcePunch(mk('defense', 'Too short.'))).toBe(false);
+    expect(forcePunch(mk('defense', 'And the median player earns —'))).toBe(false);
+    expect(forcePunch(mk('defense', 'You will still be renting a box room at 35.', '[sad] You will still be renting a box room at thirty-five.'))).toBe(false);
   });
 });

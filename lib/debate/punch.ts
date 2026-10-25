@@ -234,3 +234,21 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   }
   return true;
 }
+
+/**
+ * Make the end of `line`'s last sentence its punch (3-6 words), for a topic that must land one and
+ * whose model draft had none. Skips lines it can't split cleanly: the Judge, cut-off lines, short
+ * sentences, numbers (the clip spells them differently) and clips that don't end with the same words.
+ */
+export function forcePunch(line: Line): boolean {
+  const text = line.text.trim();
+  if (line.punch || (line.speaker !== 'prosecution' && line.speaker !== 'defense') || text.endsWith('—')) return false;
+  const sentence = text.replace(/^[\s\S]*[.!?…]["”’')»]*\s+(?=\S)/, '');
+  const toks = tokensOf(sentence);
+  const n = Math.min(6, Math.max(3, Math.round(toks.length / 3)));
+  if (toks.length - n < 3) return false;
+  const tail = toks.slice(-n).join(' ');
+  if (/\d/.test(tail) || /^[,;:—]/.test(tail)) return false;
+  if (line.tts?.trim() && !endsWithWords(line.tts, tail)) return false;
+  return attachPunch(line, { text: tail, tts: '' }, new Set());
+}

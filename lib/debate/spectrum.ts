@@ -49,6 +49,9 @@ export function spectrumLabel(value: number): SpectrumLabel {
   return 'Strong yes';
 }
 
+/** A topic's −1…+1 ruling stretched away from 0 so the court commits (0.1 → 0.28, 0.3 → 0.52, 0.6 → 0.76). */
+export const sway = (t: number) => Math.sign(t) * Math.abs(t) ** 0.55;
+
 /** Importance-weighted average of SCORED, non-removed topics, × 100. 0 before any topic is scored. */
 export function computeSpectrum(topics: Topic[]): Spectrum {
   const scored = topics.filter((t) => live(t) && t.score);

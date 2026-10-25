@@ -270,6 +270,8 @@ export interface TopicRequest {
   userPoint?: string;
   /** The other side may cut in once (only if no cut-in has played on this topic yet). */
   cutInAllowed: boolean;
+  /** This topic must land a punch (the trial's first topic, or none has landed yet): forced from a line if the model skips it. */
+  punchRequired?: boolean;
   /** true = the user is waiting (after an interrupt); false = pre-writing in the background. */
   urgent: boolean;
 }

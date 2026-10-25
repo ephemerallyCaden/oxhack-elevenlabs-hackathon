@@ -100,3 +100,35 @@ describe('writeTopic: a model punch with a label and tags is cleaned like the li
     expect(res.fallback).toBe(true);
   });
 });
+
+describe('writeTopic: a topic that must land a punch', () => {
+  const twoPlain = () => {
+    const o = out(empty);
+    o.lines[0].text = 'YES: You will meet people who open doors you never knew existed.';
+    o.lines[0].tts = '[confident] You will meet people who open doors you never knew existed.';
+    o.ledger = [
+      { line_index: 0, claim: 'c', supports: 'yes', strength: 5 },
+      { line_index: 1, claim: 'c', supports: 'no', strength: 2 },
+    ] as never;
+    return o;
+  };
+  const req = (punchRequired: boolean) => ({ question: 'Should I?', topic, cards: [], history: [], turns: [{ side: 'yes' as const, cycle: 1 }, { side: 'no' as const, cycle: 1 }], cutInAllowed: false, urgent: true, punchRequired });
+
+  it('turns the strongest line’s final words into the punch when the model skipped it', async () => {
+    askGemini.mockImplementation(async (_s: string, _c: string, schema: { parse: (x: unknown) => unknown }) => schema.parse(twoPlain()));
+    const res = await writeTopic(req(true));
+    const punched = res.lines.filter((l) => l.punch);
+    expect(punched).toHaveLength(1);
+    expect(punched[0].text).toBe('You will meet people who open doors you never knew existed.');
+    expect(punched[0].text.endsWith(punched[0].punch!.text)).toBe(true);
+    expect(punched[0].tts?.endsWith(punched[0].punch!.text)).toBe(false); // the clip covers only the setup
+  });
+
+  it('asks the model for it, and leaves other topics alone', async () => {
+    askGemini.mockImplementation(async (_s: string, _c: string, schema: { parse: (x: unknown) => unknown }) => schema.parse(twoPlain()));
+    await writeTopic(req(true));
+    expect(askGemini.mock.calls.at(-1)![1]).toContain('PUNCH: required');
+    const res = await writeTopic(req(false));
+    expect(res.lines.some((l) => l.punch)).toBe(false);
+  });
+});
