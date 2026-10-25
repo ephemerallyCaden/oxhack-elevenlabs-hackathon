@@ -29,7 +29,7 @@ import { TIMEOUTS } from './timeouts';
 import { mergeProfile, mockJudgeInterrupt, mockProfile, mockSetup, mockTopic, mockVerdict, onboardingText } from './mock';
 import * as P from './prompts';
 import { computeSpectrum, MAX_TOPICS, normalise, orderAgenda } from './spectrum';
-import { attachPunch, punchedSides } from './punch';
+import { attachPunch, forcePunch, punchedSides } from './punch';
 
 /**
  * Which model writes the debate. DEBATE_LLM in .env.local: `mock` (testing, no API calls),
@@ -253,7 +253,7 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
       P.cardsBlock(req.cards),
       P.historyBlock(req.history),
       `CUT-IN ALLOWED: ${req.cutInAllowed ? 'yes' : 'no'}`,
-      `PUNCH ALLOWED: ${punchedSides(req.history, req.topic.id).size ? 'no' : 'yes'}`,
+      `PUNCH: ${punchedSides(req.history, req.topic.id).size ? 'no' : req.punchRequired ? 'required' : 'yes'}`,
       P.turnsBlock(req.turns, req.userPoint),
     ].join('\n'),
     TopicSchema,
@@ -320,6 +320,12 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
           return { id: uid('ledger'), line_id: line.id, topic_id: req.topic.id, by: line.speaker, supports: e.supports, claim: e.claim, strength: Math.min(5, Math.max(1, e.strength)), card_ids: line.cites };
         })
         .filter((e): e is LedgerEntry => e !== null);
+      // Every trial lands at least one punch: if this topic must have one and the model skipped it,
+      // the strongest line's final words become the punch.
+      if (req.punchRequired && !punched.size && !lines.some((l) => l.punch)) {
+        const strength = (l: Line) => Math.max(0, ...ledger.filter((e) => e.line_id === l.id).map((e) => e.strength));
+        [...byIndex].sort((a, b) => strength(b) - strength(a)).some((l) => forcePunch(l));
+      }
       return {
         lines,
         ledger,

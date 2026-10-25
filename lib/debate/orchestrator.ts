@@ -40,7 +40,7 @@ import { setupText } from './punch';
 import { punchVoiceSettings } from '@/lib/voice/configs';
 import type { VoiceSettings } from '@elevenlabs/elevenlabs-js/api';
 import { mockCards, mockJudgeInterrupt, mockProfile, mockSetup, mockTopic, mockVerdict } from './mock';
-import { addTopic, computeSpectrum, removeTopic } from './spectrum';
+import { addTopic, computeSpectrum, removeTopic, sway } from './spectrum';
 import { buildTranscript } from './transcript';
 import { TIMEOUTS } from './timeouts';
 
@@ -330,7 +330,7 @@ export class TrialOrchestrator {
       this.prewriteNext();
       const res = await this.debate(topic.id);
       if (!res || this.topic(topic.id)?.status !== 'active') continue;
-      this.patchTopic(topic.id, { status: 'done', score: res.score });
+      this.patchTopic(topic.id, { status: 'done', score: { ...res.score, t: sway(res.score.t) } }); // the court commits
       this.set({ spectrum: computeSpectrum(this.state.agenda) });
       const next = this.state.agenda.find((t) => t.status === 'pending');
       if (next) this.prefetchVoice(this.introFor(next)); // voiced while the ruling plays
@@ -372,6 +372,8 @@ export class TrialOrchestrator {
       turns,
       userPoint: opts.userPoint,
       cutInAllowed: opts.cutInAllowed,
+      // At least one punch a trial: the first topic always lands one, later ones until one has.
+      punchRequired: this.state.agenda.find((t) => t.status !== 'removed')?.id === topicId || !this.state.transcript.some((l) => l.punch),
       urgent: opts.urgent,
     };
     return this.call<TopicResponse>('/api/trial/topic', req, () => mockTopic(req), opts.urgent ? TIMEOUTS.topicUrgent.client : TIMEOUTS.topic.client);
