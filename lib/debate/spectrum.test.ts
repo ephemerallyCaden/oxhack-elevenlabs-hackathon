@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LedgerEntry, Topic } from '@/types';
-import { addTopic, computeSpectrum, ledgerBalance, normalise, orderAgenda, removeTopic, spectrumLabel, sway } from './spectrum';
+import { addTopic, computeSpectrum, ledgerBalance, normalise, orderAgenda, removeTopic, spectrumLabel, sway, BAR_GAIN } from './spectrum';
 
 const topic = (id: string, importance: number, extra: Partial<Topic> = {}): Topic => ({
   id, title: id, question: `${id}?`, importance, research_speed: 'quick', status: 'pending', added_by: 'judge', ...extra,
@@ -45,9 +45,12 @@ describe('spectrum', () => {
     expect(computeSpectrum([topic('a', 1)])).toEqual({ value: 0, label: 'Toss-up' });
   });
 
-  it('is the importance-weighted average of scored topics', () => {
-    // 0.75 * +1 + 0.25 * -1 = +0.5
-    expect(computeSpectrum([scored('a', 0.75, 1), scored('b', 0.25, -1), topic('c', 0.5)]).value).toBe(50);
+  it('is the importance-weighted average of scored topics, swung by BAR_GAIN and capped at ±100', () => {
+    // 0.75 * +1 + 0.25 * -1 = +0.5 → × 1.8 = +90
+    expect(computeSpectrum([scored('a', 0.75, 1), scored('b', 0.25, -1), topic('c', 0.5)]).value).toBe(Math.round(50 * BAR_GAIN));
+    // a mild lean reads as a lean, not a toss-up: +0.15 → +27
+    expect(computeSpectrum([scored('a', 1, 0.15)]).label).toBe('Lean yes');
+    expect(computeSpectrum([scored('a', 1, -0.8)]).value).toBe(-100);
   });
 
   it('ignores removed topics even if they were scored', () => {
