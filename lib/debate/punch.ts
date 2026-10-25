@@ -35,7 +35,8 @@ function overlap(text: string, tail: string): number {
   const a = words(text);
   const b = words(tail);
   // A finished sentence ("I lost it all.") only counts if it ends with the whole tail, never a part of it.
-  const finished = /[.!?]["”’')»]*$/.test(text.trim());
+  // (A comma/semicolon/colon is a deliberate pause too: "freedom, freedom to fail" keeps both words.)
+  const finished = /[.!?,;:]["”’')»]*$/.test(untagged(text));
   for (let k = Math.min(a.length, b.length); k > 0; k--) {
     if (finished && k < b.length) break;
     if (b.slice(0, k).every((w, i) => a[a.length - k + i] === w)) return k;
@@ -43,7 +44,11 @@ function overlap(text: string, tail: string): number {
   return 0;
 }
 /** The tail as it follows `setup`: after a full stop it starts a new sentence (capitalised). */
-const tailAfter = (setup: string, tail: string) => (/[.!?]$/.test(setup.trim()) ? tail.charAt(0).toUpperCase() + tail.slice(1) : tail);
+// A sentence ended (a full stop, maybe inside a closing quote), but not a "..." pause before the punch.
+const SENTENCE_END = /(?<!\.)[.!?]["”’')»]*$/;
+const untagged = (s: string) => s.replace(/\[[^\]]*\]/g, '').trim();
+/** The tail as it follows `setup`: after a sentence end it starts a new sentence (first letter capitalised). */
+const tailAfter = (setup: string, tail: string) => (SENTENCE_END.test(untagged(setup)) ? tail.replace(/\p{L}/u, (c) => c.toUpperCase()) : tail);
 const joinSentence = (setup: string, tail: string) => (setup.trim() ? `${setup.trim()} ${tailAfter(setup, tail)}` : tail);
 /** `text` without its last `n` words, plus any opening quote the first dropped word carried. */
 function dropWords(text: string, n: number): { rest: string; lead: string } {
@@ -96,9 +101,9 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   // The punch's spoken form (numbers written out, "..." beats), without its delivery tag.
   const spoken = draft!.tts.replace(/^\s*\[[^\]]+\]\s*/, '').trim() || punch;
   const refuse = () => {
-    if (already) return false;
-    line.text = joinSentence(cut.rest, shown);
-    if (line.tts?.trim() && !endsWithWords(line.tts, spoken)) line.tts = joinSentence(before(line.tts, spoken).rest, spoken);
+    if (!already) line.text = joinSentence(cut.rest, shown);
+    // The voice line must say the whole sentence too (it may hold only the setup, as the prompt asks).
+    if (line.tts?.trim() && !endsWithWords(line.tts, spoken) && !endsWithWords(line.tts, punch)) line.tts = joinSentence(before(line.tts, spoken).rest, spoken);
     return false;
   };
   if (line.speaker !== 'prosecution' && line.speaker !== 'defense') return refuse();
@@ -114,7 +119,8 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   // The setup clip is voiced from `tts`: if it also says (part of) the punch, in either form, cut it.
   if (line.tts?.trim()) {
     const t = line.tts;
-    line.tts = endsWithWords(t, spoken) || overlap(t, spoken) ? before(t, spoken).rest : before(t, punch).rest;
+    const rest = endsWithWords(t, spoken) || overlap(t, spoken) ? before(t, spoken).rest : before(t, punch).rest;
+    line.tts = words(rest).length ? rest : ''; // nothing left but a tag: voice the setup text instead
   }
   return true;
 }

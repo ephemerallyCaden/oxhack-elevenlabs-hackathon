@@ -114,6 +114,41 @@ describe('attachPunch', () => {
     expect(quoted.text).toBe('He said "every quant on Wall Street."');
   });
 
+  it('a trailing sound tag still ends the sentence: no spoken word is lost', () => {
+    const l = line('defense', 'I lost it all.', { tts: '[sighs] I lost it all. [sighs]' });
+    expect(attachPunch(l, { text: 'All of it.', tts: '' }, new Set())).toBe(true);
+    expect(l.text).toBe('I lost it all. All of it.');
+    expect(l.tts).toBe('[sighs] I lost it all. [sighs]');
+  });
+
+  it('a refused punch the text already says still completes a setup-only voice line', () => {
+    const l = line('defense', 'The median earns less than minimum wage.', { tts: '[concerned] The median earns' });
+    expect(attachPunch(l, { text: 'less than minimum wage.', tts: '[concerned] less than... minimum wage.' }, new Set<Side>(['yes']))).toBe(false);
+    expect(l.text).toBe('The median earns less than minimum wage.');
+    expect(l.tts).toBe('[concerned] The median earns less than... minimum wage.');
+  });
+
+  it('a "..." pause before the punch is not a sentence end; a closing quote after a full stop is', () => {
+    const pause = line('defense', 'And the median earns...');
+    attachPunch(pause, { text: 'less than minimum wage.', tts: '' }, new Set());
+    expect(pause.text).toBe('And the median earns... less than minimum wage.');
+    const quoted = line('prosecution', 'He said "no."');
+    attachPunch(quoted, { text: '"you win."', tts: '' }, new Set());
+    expect(quoted.text).toBe('He said "no." "You win."');
+  });
+
+  it('keeps deliberate repetition after a comma', () => {
+    const l = line('prosecution', 'What you get is freedom,');
+    attachPunch(l, { text: 'freedom to fail.', tts: '' }, new Set());
+    expect(l.text).toBe('What you get is freedom, freedom to fail.');
+  });
+
+  it('a voice line that only said the punch falls back to the setup text', () => {
+    const l = line('defense', 'The median earns', { tts: '[concerned] less than minimum wage.' });
+    expect(attachPunch(l, { text: 'less than minimum wage.', tts: '[concerned] less than minimum wage.' }, new Set())).toBe(true);
+    expect(l.tts).toBe('');
+  });
+
   it('leaves a cut-off line alone (the cut-in finishes it)', () => {
     const l = line('defense', 'And the median is —');
     attachPunch(l, { text: 'nothing.', tts: '' }, new Set());

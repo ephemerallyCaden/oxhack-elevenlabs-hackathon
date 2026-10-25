@@ -39,6 +39,9 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
   const [result, setResult] = useState<VoiceStepResult | null>(null);
   const rec = useRef<{ recorder: MediaRecorder; stream: MediaStream; ctx: AudioContext; started: number; timer: number } | null>(null);
   const preview = useRef<HTMLAudioElement | null>(null);
+  // Mounted? Set in the effect body (StrictMode's fake cleanup flips it back), cleared on unmount:
+  // work still running after the user left (Skip, mid-processing) must not clone, store or play anything.
+  const alive = useRef(false);
 
   async function start() {
     let stream: MediaStream;
@@ -48,7 +51,11 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
       });
     } catch {
-      finish({ voiceId: null, transcript: "", fallback: true }, "No microphone — using the default voice.");
+      if (alive.current) finish({ voiceId: null, transcript: "", fallback: true }, "No microphone — using the default voice.");
+      return;
+    }
+    if (!alive.current) {
+      stream.getTracks().forEach((t) => t.stop()); // they left while the permission prompt was up
       return;
     }
     const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "";
@@ -101,6 +108,7 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
         .catch(() => ({ voiceId: null, fallback: true, error: "Couldn't reach the voice cloning service." })),
       fetch("/api/voice/stt", { method: "POST", body: form() }).then((r) => r.json() as Promise<SttResponse>).catch(() => ({ transcript: "", fallback: true })),
     ]);
+    if (!alive.current) return; // left mid-processing ("use the default voice"): keep nothing, play nothing
     const res: VoiceStepResult = { voiceId: clone.voiceId, transcript: stt.transcript, fallback: clone.fallback || stt.fallback, error: clone.error };
     try {
       if (res.voiceId) sessionStorage.setItem(SESSION_KEY, res.voiceId);
@@ -119,6 +127,7 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
     })
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null);
+    if (!alive.current) return;
     finish(res, res.voiceId ? "That's your voice, from the future." : "Your future selves will use the default voice.");
     if (tts?.audioUrl) {
       preview.current = new Audio(tts.audioUrl);
@@ -132,7 +141,10 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
     setPhase("preview");
   }
 
-  useEffect(() => () => {
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+    alive.current = false;
     // Left mid-recording (e.g. "Skip: use the default voice"): drop the recording, don't clone a partial clip.
     const r = rec.current;
     if (r) {
@@ -144,6 +156,7 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
       void r.ctx.close().catch(() => {});
     }
     preview.current?.pause();
+    };
   }, []);
 
   return (

@@ -30,9 +30,11 @@ describe('VerdictScreen', () => {
     expect(strip().classList.contains('open')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: /Close the court record ✕/ }));
     expect(strip().classList.contains('open')).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Read the court record' })); // focus comes back
     fireEvent.click(screen.getByRole('button', { name: 'Read the court record' }));
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(strip().classList.contains('open')).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Read the court record' }));
     fireEvent.click(screen.getByRole('button', { name: 'New case' }));
     expect(onLeave).toHaveBeenCalledWith('/?again=1');
     fireEvent.click(screen.getByRole('button', { name: 'Main menu' }));

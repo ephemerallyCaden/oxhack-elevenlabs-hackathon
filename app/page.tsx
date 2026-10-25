@@ -162,6 +162,7 @@ export default function Home() {
 
   function begin() {
     clearSession();
+    setError(""); // a message meant for the last person
     setStep("voice");
   }
 
@@ -309,7 +310,7 @@ export default function Home() {
                     ) : (
                       <>
                         <span className="ct-small">{roster.length ? "Been here before? Find your face in the jury, or:" : "Been here before?"}</span>
-                        <button className="ct-google self-start" disabled={!authConfigured} onClick={() => void signInWithGoogle()}>
+                        <button className="ct-google self-start" disabled={!authConfigured} onClick={() => (setError(""), void signInWithGoogle())}>
                           <b aria-hidden="true">G</b> Sign in with Google
                         </button>
                         {!authConfigured && <span className="ct-small">Sign-in isn’t switched on for this build yet.</span>}

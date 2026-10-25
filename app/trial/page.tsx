@@ -341,7 +341,7 @@ export default function TrialPage() {
       if (!orch.beginInterrupt()) return;
       // Play OBJECTION sting (cuts voice, plays sfx, ducks music); still locked: as soon as it unlocks
       if (audioOn.current) engine.objection();
-      else void unlocking.then((ok) => ok && engine.objection());
+      else void unlocking.then((ok) => ok && orch.getState().phase === 'listening' && engine.objection()); // only if still interrupting
     } else if (phase !== 'ask') return;
     held.current = true;
     setHolding(true);
@@ -388,7 +388,7 @@ export default function TrialPage() {
     const free = () => {
       const el = document.activeElement;
       if (el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return false;
-      return !el?.closest('[aria-label="Verdict"]') && !(introMode && !asking);
+      return !el?.closest('[aria-label="Verdict"]') && !(introMode && !asking) && orch.getState().phase !== 'done'; // done: Space is the focused button's
     };
     const kd = (e: KeyboardEvent) => e.code === 'Space' && !e.repeat && free() && (e.preventDefault(), down());
     const ku = (e: KeyboardEvent) => e.code === 'Space' && free() && (e.preventDefault(), up());
