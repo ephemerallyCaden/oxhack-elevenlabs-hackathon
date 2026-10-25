@@ -1,22 +1,26 @@
 import { z } from "zod";
 
-export type ModelProvider = "agnes" | "gemini";
+export type ModelProvider = "agnes" | "gemini" | "groq";
 export type ModelOptions = { provider?: ModelProvider; apiKey?: string; model?: string; fetchImpl?: typeof fetch };
 export type ModelConfiguration = { provider: ModelProvider | null; model: string; apiKey: string; warning?: string };
 const providers = {
   agnes: { endpoint: "https://apihub.agnes-ai.com/v1/chat/completions", model: "agnes-2.5-flash" },
   gemini: { endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", model: "gemini-3.8-flash" },
+  // Groq free tier: 1,000 requests/day per model. gpt-oss-20b keeps research off the debate's gpt-oss-120b quota.
+  groq: { endpoint: "https://api.groq.com/openai/v1/chat/completions", model: "openai/gpt-oss-20b" },
 } as const;
+const isProvider = (name: string): name is ModelProvider => name in providers;
 
 /** Server configuration only. Request bodies cannot choose an endpoint or credentials. */
 export function resolveModelConfiguration(options: ModelOptions = {}): ModelConfiguration {
   if (typeof window !== "undefined") throw new Error("Model credentials must stay on the server");
   const name = options.provider ?? (process.env.RESEARCH_MODEL_PROVIDER?.trim() || "agnes");
-  if (name !== "agnes" && name !== "gemini") return { provider: null, model: "unconfigured", apiKey: "",
+  if (!isProvider(name)) return { provider: null, model: "unconfigured", apiKey: "",
     warning: "Unsupported research model provider; no request sent." };
-  const model = options.model?.trim() || process.env.RESEARCH_MODEL?.trim()
-    || (name === "agnes" ? process.env.AGNES_MODEL?.trim() : process.env.GEMINI_MODEL?.trim()) || providers[name].model;
-  const apiKey = options.apiKey ?? (name === "agnes" ? process.env.AGNES_API_KEY || process.env.AGNES_API_KEY_1 : process.env.GEMINI_API_KEY) ?? "";
+  const providerModel = { agnes: process.env.AGNES_MODEL, gemini: process.env.GEMINI_MODEL, groq: process.env.GROQ_RESEARCH_MODEL }[name]?.trim();
+  const model = options.model?.trim() || process.env.RESEARCH_MODEL?.trim() || providerModel || providers[name].model;
+  const providerKey = { agnes: process.env.AGNES_API_KEY || process.env.AGNES_API_KEY_1, gemini: process.env.GEMINI_API_KEY, groq: process.env.GROQ_API_KEY }[name];
+  const apiKey = options.apiKey ?? providerKey ?? "";
   return { provider: name, model, apiKey,
     ...(!apiKey.trim() ? { warning: "Selected model provider key is not configured; no request sent." } : {}) };
 }
@@ -49,7 +53,7 @@ export class ModelRequestError extends Error {
   constructor(readonly kind: "not_configured" | "unavailable", message: string) { super(message); }
 }
 
-/** The two providers implement the same JSON result boundary, with separate wire options. */
+/** The providers implement the same JSON result boundary, with separate wire options (Gemini and Groq share the OpenAI json_schema shape). */
 export async function requestModelJson(config: ModelConfiguration, input: {
   messages: { role: "system" | "user"; content: string }[]; maxTokens: number; schema: Record<string, unknown>;
 }, signal: AbortSignal, fetchImpl: typeof fetch = fetch): Promise<unknown> {
