@@ -4,20 +4,22 @@ import { useEffect, useRef, useState } from 'react';
 import type { CharacterMood, CourtActor } from './expressions';
 import { FRAME_MS, INTERRUPT_POSE, REST_POSE, nextFrame, nextTickMs, pickPose, poseOf, reactionPose } from './poses';
 
-export function usePoseCycle(role: CourtActor, mood: CharacterMood, interrupting = false) {
+/** `forced` pins one pose (menus, verdict screen): no ticks, no reactions; its frames still animate. */
+export function usePoseCycle(role: CourtActor, mood: CharacterMood, interrupting = false, forced?: string) {
   const { expression, talking } = mood;
   const cycles = role !== 'judge'; // the Judge has one static pose
   const [cur, setCur] = useState(() => ({
-    pose: (cycles && (interrupting ? INTERRUPT_POSE : !talking && reactionPose(expression))) || REST_POSE,
+    pose: forced ?? ((cycles && (interrupting ? INTERRUPT_POSE : !talking && reactionPose(expression))) || REST_POSE),
     frame: 0,
   }));
-  const [seen, setSeen] = useState({ expression, interrupting });
+  const [seen, setSeen] = useState({ expression, interrupting, forced });
 
   // Interrupt → front neutral; a silent lawyer who becomes shocked / breaks down jumps to it.
-  if (seen.expression !== expression || seen.interrupting !== interrupting) {
-    setSeen({ expression, interrupting });
-    const jump =
-      interrupting && !seen.interrupting
+  if (seen.expression !== expression || seen.interrupting !== interrupting || seen.forced !== forced) {
+    setSeen({ expression, interrupting, forced });
+    const jump = forced
+      ? forced
+      : interrupting && !seen.interrupting
         ? INTERRUPT_POSE
         : !interrupting && !talking && seen.expression !== expression
           ? reactionPose(expression)
@@ -32,7 +34,7 @@ export function usePoseCycle(role: CourtActor, mood: CharacterMood, interrupting
   }, [expression]);
 
   useEffect(() => {
-    if (!cycles || !talking || interrupting) return; // not talking: hold the current pose
+    if (!cycles || !talking || interrupting || forced) return; // not talking: hold the current pose
     let id: ReturnType<typeof setTimeout>;
     const schedule = () => {
       id = setTimeout(() => {
@@ -42,7 +44,7 @@ export function usePoseCycle(role: CourtActor, mood: CharacterMood, interrupting
     };
     schedule();
     return () => clearTimeout(id);
-  }, [cycles, talking, interrupting]);
+  }, [cycles, talking, interrupting, forced]);
 
   const spec = poseOf(role, cur.pose);
   const animated = spec.anim !== 'static' && spec.frames.length > 1;

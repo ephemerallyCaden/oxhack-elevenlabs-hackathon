@@ -94,3 +94,15 @@ describe('usePoseCycle', () => {
     expect(h.result.current.pose).toBe('neutral1');
   });
 });
+
+describe('usePoseCycle pinned pose (menu + verdict screens)', () => {
+  it('holds the pinned pose even while talking, and follows it when it changes', () => {
+    const h = renderHook((p: { pose: string }) => usePoseCycle('prosecution', mood('confident', true), false, p.pose), { initialProps: { pose: 'confident2' } });
+    expect(h.result.current.pose).toBe('confident2');
+    act(() => vi.advanceTimersByTime(POSE_TUNING.tick.max * 3));
+    expect(h.result.current.pose).toBe('confident2');
+    expect(h.result.current.frame).toBe(1); // once-hold still plays
+    h.rerender({ pose: 'neutral2' });
+    expect(h.result.current.pose).toBe('neutral2');
+  });
+});
