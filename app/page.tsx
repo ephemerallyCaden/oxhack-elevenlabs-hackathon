@@ -268,6 +268,12 @@ export default function Home() {
         addToRoster({ email: session.user.email, name: profile.name, face: selfie ? await faceThumb(selfie) : undefined, key: juryKey });
       } else if (r?.status === 503) console.warn("[menu] sign-in isn't configured on the server: your voice and face weren't kept");
       else console.warn(`[menu] couldn't keep your voice and face (${r ? r.status : "timed out"}); the trial goes ahead without saving`);
+    } else if (remember) {
+      // Not signed in: a new jury row the visitor can't come back to (app/api/users/guest).
+      const heads = sessionHeadsJson();
+      const body = { profile, voiceId: sessionVoiceId() ?? null, ...(heads ? { heads } : { selfie: sessionSelfie() ?? null }) };
+      const r = await fetch("/api/users/guest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) }).catch(() => null);
+      if (!r?.ok) console.warn(`[menu] couldn't put your face on the jury (${r ? r.status : "timed out"}); the trial goes ahead without saving`);
     }
     router.push("/trial");
   }
@@ -383,18 +389,27 @@ export default function Home() {
                 <div className="ct-htt self-start">
                   <HoldToTalk label="Hold to say your question" spacebar={false} onTranscript={setQuestion} />
                 </div>
-                {authConfigured &&
-                  (session ? (
-                    <label className="ct-small flex items-center gap-2.5">
-                      <input type="checkbox" className="size-4 accent-[var(--c-brass)]" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-                      Keep my voice, face and file with {session.user.email}
-                    </label>
-                  ) : (
-                    <p className="ct-small">
-                      Want to come back as yourself?{" "}
-                      <button className="ct-link" onClick={signInToKeep}>Sign in with Google to keep your voice and face</button>
-                    </p>
-                  ))}
+                {session ? (
+                  <label className="ct-small flex items-center gap-2.5">
+                    <input type="checkbox" className="size-4 accent-[var(--c-brass)]" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+                    Keep my voice, face and file with {session.user.email}
+                  </label>
+                ) : (
+                  <>
+                    {heads && (
+                      <label className="ct-small flex items-center gap-2.5">
+                        <input type="checkbox" className="size-4 accent-[var(--c-brass)]" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+                        Put my face and first name on the public jury
+                      </label>
+                    )}
+                    {authConfigured && (
+                      <p className="ct-small">
+                        Want to come back as yourself?{" "}
+                        <button className="ct-link" onClick={signInToKeep}>Sign in with Google to keep your voice and face</button>
+                      </p>
+                    )}
+                  </>
+                )}
                 <button className="ct-primary self-start" disabled={!question.trim() || busy} onClick={toCourt} {...aimProps}>
                   {busy ? "Entering the court…" : "Take it to court"}
                 </button>

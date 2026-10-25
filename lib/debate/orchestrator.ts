@@ -277,6 +277,8 @@ export class TrialOrchestrator {
 
   // ── research (A's agents) ─────────────────────────────────────────────────
   private research(topics: Topic[]) {
+    // Off for the demo: it returned no cards in testing and spends model quota. NEXT_PUBLIC_RESEARCH=on re-enables it.
+    if (process.env.NEXT_PUBLIC_RESEARCH !== 'on') return;
     const add = (r: ResearchResponse) => this.set({ cards: [...this.state.cards, ...r.cards] });
     for (const topic of topics) {
       const q = (side: Side) =>

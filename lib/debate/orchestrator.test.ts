@@ -7,7 +7,10 @@ import { mockSetup } from './mock';
 // Offline: every API call fails, so the whole trial runs on the decision-aware mocks.
 vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
 vi.spyOn(console, 'warn').mockImplementation(() => {});
-afterEach(() => vi.clearAllTimers());
+afterEach(() => {
+  vi.clearAllTimers();
+  vi.unstubAllEnvs();
+});
 
 type Plan = (s: TrialState, orch: TrialOrchestrator) => string | null | undefined;
 
@@ -38,6 +41,7 @@ function play(question: string, plan: Plan = () => undefined, profile?: UserProf
 
 describe('TrialOrchestrator', () => {
   it('runs a full trial for any question: agenda → debate per topic → scores → verdict → transcript', async () => {
+    vi.stubEnv('NEXT_PUBLIC_RESEARCH', 'on'); // research is off by default for the demo; this trial covers it
     const s = await play('Should I take a gap year before university?');
     const live = s.agenda.filter((t) => t.status !== 'removed');
     expect(live.length).toBeGreaterThan(0);
