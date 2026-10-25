@@ -1,61 +1,44 @@
-# Hackathon Template
+<p align="center">
+  <img src="public/assets/logo/roulette-seal-600.webp" alt="Roulette court seal" width="220">
+</p>
 
-Pre-configured Claude Code orchestration for a 4-person, 24-hour hackathon with ElevenLabs.
+<h1 align="center">Roulette</h1>
 
-## Quick start
+<p align="center"><b>The Court of Future Selves.</b> Ask a life question out loud, and two future versions of you argue it out in your own cloned voice while a Judge rules on real evidence.</p>
+
+<p align="center"><a href="https://hackathon-template-vert.vercel.app"><b>Try it live →</b></a></p>
+
+You read a short script, the app clones your voice with ElevenLabs and cuts out your face from a selfie, then you ask a yes/no question ("Should I quit my job to play poker?"). The court opens: YES is the future where it went well, NO is the future where it went wrong. Both speak in your voice, cite researched facts, cut each other off, and you can shout OBJECTION! at any point to argue back. The Judge scores each topic and delivers the verdict.
+
+<table>
+  <tr>
+    <td><img src="docs/media/objection-wide.png" alt="Wide courtroom shot during an objection: the Judge in the centre, YES and NO selves at their desks with the spectrum bar overhead"></td>
+    <td><img src="docs/media/punch-shot.png" alt="Punch shot: close-up on the YES self with speed lines and the Hold to interrupt button"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/shocked-closeup.png" alt="Close-up of a future self with a shocked exclamation mark, the topic agenda in the corner"></td>
+    <td><img src="docs/media/verdict-screen.png" alt="Verdict screen: YES and NO selves either side of the court's finding, with New case and Save and share"></td>
+  </tr>
+</table>
+
+Watch a full run: [docs/media/demo-run.mp4](docs/media/demo-run.mp4)
+
+## Built with
+
+- **ElevenLabs**: Instant Voice Clone, `eleven_v4` text-to-speech with audio tags and per-role voice settings, Scribe speech-to-text
+- **Next.js 16** on Vercel, Tailwind CSS 4, Framer Motion
+- **Groq / Gemini** to write the debate; Exa search for public-source evidence
+- **Supabase** for returning users and shareable trial links
+- MediaPipe face landmarks for the selfie head cut-outs
+
+## Run locally
 
 ```bash
-git clone [this-repo]
-cd hackathon-template
-cp .env.example .env
-# Add your ELEVENLABS_API_KEY to .env
+npm install
+vercel env pull .env.local   # or copy .env.example to .env.local and add your keys
+npm run dev                  # http://localhost:3000
 ```
 
-## First 30 minutes
+Use Chrome: the onboarding needs the microphone and camera. Without keys the app still runs end to end on mock data, so `DEBATE_LLM=mock npm run dev` costs nothing.
 
-1. Run `/spec` to turn your idea into a buildable spec
-2. Choose your tech stack, fill in CLAUDE.md
-3. Each teammate: `git checkout -b feature/[name]`
-4. Start building
-
-## What's included
-
-```
-.claude/
-  settings.json            Auto-approved commands, desktop notifications
-  agents/
-    reviewer.md            Demo-focused code review (opus)
-    explorer.md            Fast codebase search (haiku)
-    test-runner.md         Build/test failure reporter (haiku)
-    integrator.md          Branch merging assistant (sonnet)
-  skills/
-    spec/SKILL.md          /spec: idea -> SPEC.md via interview
-    fix/SKILL.md           /fix: paste error, get fix
-    verify/SKILL.md        /verify: build + types + lint + tests + diff review
-    ship/SKILL.md          /ship: build, test, commit, push
-    demo/SKILL.md          /demo: generate pitch script from codebase
-CLAUDE.md                  Fill in at kickoff (with agent auto-routing rules)
-HACKATHON.md               Timeline, tactics, ElevenLabs reference
-```
-
-## Workflow
-
-```
-/spec -> build features -> /fix when broken -> /verify before merge -> /ship -> /demo for the pitch
-```
-
-When a development problem needs outside evidence or reusable code, use
-`/reference-loop <problem>` in Claude Code or `$reference-loop <problem>` in
-Codex. It connects relevant sources and community replies to a bounded trial
-and a saved decision, then returns to the feature or fix. See the
-[team setup and usage guide](docs/reference-loop.md).
-
-## Agent auto-routing
-
-Claude uses agents proactively without being asked:
-- After writing code: auto-runs `/verify`
-- On build failure: auto-runs `/fix`
-- Before commits: scans diff for debug code and secrets
-- When exploring: uses the `explorer` agent
-
-Read `HACKATHON.md` for the full playbook.
+Built at OxHack by [@ephemerallyCaden](https://github.com/ephemerallyCaden), [@randodeh](https://github.com/randodeh), [@awckiu](https://github.com/awckiu) and [@Dust-OP](https://github.com/Dust-OP).
