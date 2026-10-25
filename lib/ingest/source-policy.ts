@@ -1,6 +1,8 @@
 import type { CollectionRecord } from "./collection";
 
-const sourceHosts = new Set(["www.ons.gov.uk", "ons.gov.uk", "journals.plos.org",
+export const publicSearchHosts: readonly string[] = ["www.gov.uk", "www.moneyhelper.org.uk", "www.citizensadvice.org.uk",
+  "www.acas.org.uk", "www.nhs.uk", "www.ons.gov.uk", "www.consumerfinance.gov", "www.bls.gov", "www.who.int", "journals.plos.org"];
+const sourceHosts = new Set([...publicSearchHosts, "ons.gov.uk",
   "community.nomadgate.com", "www.nomadicmatt.com", "t.me", "www.youtube.com",
   "x.com", "en.wikipedia.org", "doi.org"]);
 const lifeExchange = new Set(["academia", "travel", "expatriates", "workplace", "pets", "parenting", "money", "fitness", "interpersonal"]);

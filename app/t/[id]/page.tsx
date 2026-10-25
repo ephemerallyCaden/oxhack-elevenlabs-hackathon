@@ -72,8 +72,8 @@ async function Trial({ id }: { id: string }) {
           <ol className="flex flex-col gap-1 text-sm text-zinc-300">
             {t.sources.map((c, i) => (
               <li key={c.id}>
-                [{i + 1}] {c.evidence} ·{" "}
-                {c.source_url ? <a className="underline" href={c.source_url} target="_blank" rel="noreferrer">{c.source_name}</a> : c.source_name}
+                [{i + 1}] {c.evidence}
+                {c.source_url && <a className="block break-all text-xs text-zinc-500 underline" href={c.source_url} target="_blank" rel="noreferrer">{c.source_url}</a>}
               </li>
             ))}
           </ol>

@@ -4,12 +4,15 @@ import type { CommunityTransport } from "./community-types";
 export class CommunityHttpError extends Error {
   constructor(readonly status: number, readonly retryAt?: string) { super("Public source request was not successful."); }
 }
-type Options = { hosts: readonly string[]; fetchImpl?: typeof fetch; now?: () => number; cooldown?: Map<string, number> };
+type Options = { hosts: readonly string[]; fetchImpl?: typeof fetch; now?: () => number; cooldown?: Map<string, number>;
+  /** Shortest cooldown after a 429 without a usable Retry-After (default one minute). */
+  minCooldownMs?: number };
 /** One collection gets at most four requests, each bounded to 4s and 512KB. */
 export function createCommunityTransport(options: Options): CommunityTransport {
   let requests = 0;
   const fetchImpl = options.fetchImpl ?? fetch, now = options.now ?? Date.now;
   const cooldown = options.cooldown ?? new Map<string, number>();
+  const minCooldownMs = options.minCooldownMs ?? 60000;
   async function read(value: string, signal: AbortSignal, init?: RequestInit): Promise<string> {
     if (typeof window !== "undefined") throw new Error("Community collection must run on the server");
     const url = new URL(value);
@@ -30,7 +33,7 @@ export function createCommunityTransport(options: Options): CommunityTransport {
         if (response.status === 429) {
           const retry = response.headers.get("retry-after") ?? "";
           const time = /^\d+$/.test(retry) ? now() + Number(retry) * 1000 : Date.parse(retry);
-          const end = now() + Math.max(60000, Math.min(86400000, Number.isFinite(time) ? time - now() : 60000));
+          const end = now() + Math.max(minCooldownMs, Math.min(86400000, Number.isFinite(time) ? time - now() : minCooldownMs));
           cooldown.set(url.hostname, end); retryAt = new Date(end).toISOString();
         }
         throw new CommunityHttpError(response.status, retryAt);

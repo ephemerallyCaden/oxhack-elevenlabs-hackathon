@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import type { CollectionRecord } from "./collection";
 import { ModelRequestError, readBoundedModelJson, requestModelJson, resolveModelConfiguration } from "./model-client";
-import { generateCollectedResponse } from "./response-pipeline";
 import { createPassageSelector } from "./research-selection";
 import type { TopicResearchRequest } from "./research-contract";
 
@@ -72,7 +71,7 @@ test("Agnes and Gemini use isolated endpoints and provider-specific JSON options
   assert.equal("chat_template_kwargs" in gemini.body, false);
 });
 
-test("the environment provider switch reaches both the passage selector and two-stage response", async () => {
+test("the environment provider switch reaches the passage selector", async () => {
   vi.stubEnv("RESEARCH_MODEL_PROVIDER", "gemini");
   vi.stubEnv("RESEARCH_MODEL", "synthetic-gemini-model");
   vi.stubEnv("AGNES_API_KEY", "synthetic-agnes-key");
@@ -80,32 +79,21 @@ test("the environment provider switch reaches both the passage selector and two-
 
   const requests: { url: string; init: RequestInit; body: Record<string, unknown> }[] = [];
   const geminiFetch: typeof fetch = async (input, init) => {
-    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    requests.push({ url: String(input), init: init ?? {}, body });
-    const messages = body.messages as { role: string; content: string }[];
-    const payload = JSON.parse(messages[1].content) as { stage?: string };
-    if (!payload.stage) return providerResponse({ selections: [{ recordId, quote: passage, side: "yes" }] });
-    return providerResponse({
-      text: payload.stage === "draft"
-        ? "The listing describes weekly Saturday sessions and mentoring."
-        : "The listing describes Saturday sessions and mentoring.",
-      citedIds: [recordId],
-    });
+    requests.push({ url: String(input), init: init ?? {}, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+    return providerResponse({ selections: [{ recordId, quote: passage, side: "yes" }] });
   };
 
   const selection = await createPassageSelector({ fetchImpl: geminiFetch })(researchRequest, [record], new AbortController().signal);
-  const response = await generateCollectedResponse([record], { fetchImpl: geminiFetch });
 
   assert.equal(selection.status, "ok");
   assert.deepEqual(selection.selections, [{ recordId, quote: passage, side: "yes" }]);
-  assert.equal(response.draft.mode, "live");
-  assert.equal(response.summary.mode, "live");
-  assert.equal(requests.length, 3);
-  assert.ok(requests.every(item => item.url === "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"));
-  assert.ok(requests.every(item => item.body.model === "synthetic-gemini-model"));
-  assert.ok(requests.every(item => new Headers(item.init.headers).get("authorization") === "Bearer synthetic-gemini-key"));
-  assert.ok(requests.every(item => item.body.reasoning_effort === "low"));
-  assert.ok(requests.every(item => !("chat_template_kwargs" in item.body)));
+  assert.equal(requests.length, 1);
+  const [sent] = requests;
+  assert.equal(sent.url, "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
+  assert.equal(sent.body.model, "synthetic-gemini-model");
+  assert.equal(new Headers(sent.init.headers).get("authorization"), "Bearer synthetic-gemini-key");
+  assert.equal(sent.body.reasoning_effort, "low");
+  assert.equal("chat_template_kwargs" in sent.body, false);
 });
 
 test("missing selected-provider keys and unknown providers never fall back to another provider key", async () => {
@@ -114,27 +102,21 @@ test("missing selected-provider keys and unknown providers never fall back to an
     calls++;
     throw new Error("Unexpected provider request");
   };
+  const select = () => createPassageSelector({ fetchImpl })(researchRequest, [record], new AbortController().signal);
 
   vi.stubEnv("RESEARCH_MODEL_PROVIDER", "gemini");
   vi.stubEnv("GEMINI_API_KEY", "");
   vi.stubEnv("AGNES_API_KEY", "synthetic-agnes-key");
   vi.stubEnv("AGNES_API_KEY_1", "synthetic-agnes-alternate-key");
-  const selectorWithoutGeminiKey = await createPassageSelector({ fetchImpl })(researchRequest, [record], new AbortController().signal);
-  const responseWithoutGeminiKey = await generateCollectedResponse([record], { fetchImpl });
-  assert.equal(selectorWithoutGeminiKey.status, "not_configured");
-  assert.match(selectorWithoutGeminiKey.warnings.join(" "), /key is not configured/i);
-  assert.equal(responseWithoutGeminiKey.draft.mode, "fallback");
-  assert.match(responseWithoutGeminiKey.warnings.join(" "), /key is not configured/i);
-  assert.equal(calls, 0);
+  const withoutGeminiKey = await select();
+  assert.equal(withoutGeminiKey.status, "not_configured");
+  assert.match(withoutGeminiKey.warnings.join(" "), /key is not configured/i);
 
   vi.stubEnv("RESEARCH_MODEL_PROVIDER", "unknown-provider");
   vi.stubEnv("GEMINI_API_KEY", "synthetic-gemini-key");
-  const selectorWithUnknownProvider = await createPassageSelector({ fetchImpl })(researchRequest, [record], new AbortController().signal);
-  const responseWithUnknownProvider = await generateCollectedResponse([record], { fetchImpl });
-  assert.equal(selectorWithUnknownProvider.status, "not_configured");
-  assert.match(selectorWithUnknownProvider.warnings.join(" "), /unsupported/i);
-  assert.equal(responseWithUnknownProvider.draft.mode, "fallback");
-  assert.match(responseWithUnknownProvider.warnings.join(" "), /unsupported/i);
+  const unknownProvider = await select();
+  assert.equal(unknownProvider.status, "not_configured");
+  assert.match(unknownProvider.warnings.join(" "), /unsupported/i);
   assert.equal(calls, 0);
 });
 
@@ -222,4 +204,59 @@ test("Groq without a key sends nothing and says why", () => {
   vi.stubEnv("GROQ_API_KEY", "");
   const config = resolveModelConfiguration();
   assert.match(config.warning ?? "", /key is not configured/);
+});
+
+test("openrouter and any OpenAI-compatible endpoint are configured from the environment", async () => {
+  vi.stubEnv("RESEARCH_MODEL_PROVIDER", "openrouter");
+  vi.stubEnv("OPENROUTER_API_KEY", "synthetic-openrouter-key");
+  vi.stubEnv("RESEARCH_MODEL", "");
+  vi.stubEnv("OPENROUTER_RESEARCH_MODEL", "");
+  const openrouter = resolveModelConfiguration();
+  assert.equal(openrouter.endpoint, "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(openrouter.model, "openai/gpt-oss-20b:free");
+  assert.equal(openrouter.warning, undefined);
+
+  vi.stubEnv("RESEARCH_MODEL_PROVIDER", "openai");
+  vi.stubEnv("RESEARCH_MODEL_BASE_URL", "https://llm.example.test/v1/");
+  vi.stubEnv("RESEARCH_MODEL_API_KEY", "synthetic-generic-key");
+  vi.stubEnv("RESEARCH_MODEL", "vendor/some-model");
+  const generic = resolveModelConfiguration();
+  assert.equal(generic.endpoint, "https://llm.example.test/v1/chat/completions");
+  let seenUrl = "";
+  const result = await requestModelJson(generic, { messages: [{ role: "user", content: "x" }], maxTokens: 5, schema: { type: "object" } },
+    new AbortController().signal, async (input, init) => {
+      seenUrl = String(input);
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer synthetic-generic-key");
+      assert.equal(JSON.parse(String(init?.body)).response_format.type, "json_schema");
+      return providerResponse({ ok: true });
+    });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(seenUrl, "https://llm.example.test/v1/chat/completions");
+});
+
+test("the generic provider sends nothing without an https endpoint or a model name", async () => {
+  vi.stubEnv("RESEARCH_MODEL_PROVIDER", "openai");
+  vi.stubEnv("RESEARCH_MODEL_API_KEY", "synthetic-generic-key");
+  vi.stubEnv("RESEARCH_MODEL", "vendor/some-model");
+  vi.stubEnv("RESEARCH_MODEL_BASE_URL", "http://llm.example.test/v1");
+  assert.match(resolveModelConfiguration().warning ?? "", /endpoint/);
+  vi.stubEnv("RESEARCH_MODEL_BASE_URL", "https://llm.example.test/v1");
+  vi.stubEnv("RESEARCH_MODEL", "");
+  assert.match(resolveModelConfiguration().warning ?? "", /model name/);
+  let calls = 0;
+  const selection = await createPassageSelector({ fetchImpl: async () => { calls++; throw new Error("must not fetch"); } })(researchRequest, [record], new AbortController().signal);
+  assert.equal(selection.status, "not_configured");
+  assert.equal(calls, 0);
+});
+
+test("with no RESEARCH_MODEL_PROVIDER, the first provider that has a key is used", () => {
+  for (const key of ["RESEARCH_MODEL_PROVIDER", "GROQ_API_KEY", "GEMINI_API_KEY", "AGNES_API_KEY", "AGNES_API_KEY_1", "OPENROUTER_API_KEY", "RESEARCH_MODEL_API_KEY", "RESEARCH_MODEL"]) vi.stubEnv(key, "");
+  assert.equal(resolveModelConfiguration().provider, "agnes"); // nothing configured: the old default, with its warning
+  assert.match(resolveModelConfiguration().warning ?? "", /key is not configured/);
+  vi.stubEnv("GEMINI_API_KEY", "synthetic-gemini-key");
+  assert.deepEqual([resolveModelConfiguration().provider, resolveModelConfiguration().warning], ["gemini", undefined]);
+  vi.stubEnv("GROQ_API_KEY", "synthetic-groq-key");
+  assert.equal(resolveModelConfiguration().provider, "groq"); // groq wins when both are present
+  vi.stubEnv("RESEARCH_MODEL_PROVIDER", "gemini");
+  assert.equal(resolveModelConfiguration().provider, "gemini"); // an explicit choice always wins
 });
