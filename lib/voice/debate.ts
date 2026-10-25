@@ -9,7 +9,7 @@ const RETRIES = 2;
 // Fills audioUrl + durationMs on every line spoken by prosecution/defense/judge. A line that still
 // fails after retries is left without audio and the response is marked fallback.
 export async function voiceLines(lines: Line[], voiceId?: string): Promise<{ lines: Line[]; fallback: boolean; characters: number }> {
-  const todo = lines.filter((l) => l.speaker !== "user" && (l.tts ?? l.text));
+  const todo = lines.filter((l) => l.speaker !== "user" && (l.tts || l.text));
   let fallback = false;
   let characters = 0;
 
@@ -17,7 +17,7 @@ export async function voiceLines(lines: Line[], voiceId?: string): Promise<{ lin
   async function worker() {
     while (next < todo.length) {
       const line = todo[next++];
-      const text = line.tts ?? line.text;
+      const text = line.tts || line.text;
       for (let attempt = 0; ; attempt++) {
         try {
           const out = await synthesizeCached(text, line.speaker as VoiceRole, voiceId);

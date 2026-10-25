@@ -148,7 +148,7 @@ export type LineKind =
   | 'score' // Judge scores a topic
   | 'verdict';
 
-/** One line of dialogue. The UI shows `text`, voices `tts ?? text`, and picks the scene from `speaker`. */
+/** One line of dialogue. The UI shows `text`, voices `tts || text`, and picks the scene from `speaker`. */
 export interface Line {
   id: string;
   speaker: Speaker;
