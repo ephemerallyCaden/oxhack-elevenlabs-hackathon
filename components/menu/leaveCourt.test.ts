@@ -51,3 +51,18 @@ describe('leaveCourt', () => {
     expect(assign).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('reloadIfRestored', () => {
+  it('reloads a page shown from the back/forward cache, not a normal load', async () => {
+    const { reloadIfRestored } = await import('./leaveCourt');
+    const listeners: ((e: { persisted: boolean }) => void)[] = [];
+    const reload = vi.fn();
+    const win = { addEventListener: (_: string, f: never) => listeners.push(f), removeEventListener: vi.fn(), location: { reload } } as never;
+    const off = reloadIfRestored(win);
+    listeners[0]({ persisted: false });
+    expect(reload).not.toHaveBeenCalled();
+    listeners[0]({ persisted: true });
+    expect(reload).toHaveBeenCalledTimes(1);
+    off();
+  });
+});

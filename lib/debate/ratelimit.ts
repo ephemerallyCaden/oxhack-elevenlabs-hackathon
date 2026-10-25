@@ -74,6 +74,7 @@ export function classifyGeminiError(err: unknown): QuotaError | null {
 
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('aborted')); // an already-fired signal never fires again
     const t = setTimeout(resolve, ms);
     signal?.addEventListener('abort', () => (clearTimeout(t), reject(new Error('aborted'))), { once: true });
   });
@@ -107,6 +108,7 @@ export class ModelPool {
    */
   async acquire(priority: Priority, deadline: number, signal?: AbortSignal): Promise<string> {
     for (;;) {
+      if (signal?.aborted) throw new Error('aborted'); // the caller gave up: don't spend a slot on it
       const pick = this.pick(priority);
       if (!pick) throw new Error('every Gemini model is out of quota for today');
       if (pick.wait === 0) {

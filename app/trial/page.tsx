@@ -16,7 +16,8 @@ import { sessionVoiceId } from '@/components/onboarding/VoiceStep';
 import { useSessionHeads } from '@/components/onboarding/sessionHeads';
 import VerdictScreen from '@/components/menu/VerdictScreen';
 import { signOut } from '@/lib/auth/browser';
-import { leaveCourt } from '@/components/menu/leaveCourt';
+import { leaveCourt, reloadIfRestored } from '@/components/menu/leaveCourt';
+import { unlockSoon as unlockSoonWith } from '@/components/courtroom/audioUnlock';
 import { sessionProfile, takeSessionQuestion } from '@/lib/onboarding/session';
 import { useTrialState } from '@/lib/debate/useTrial';
 import * as engine from '@/lib/audio/engine';
@@ -90,10 +91,7 @@ function TypedInput({
 /** The trial on screen. A new trial page (layout.tsx remounts it per push) stops the one it replaces. */
 let live: TrialOrchestrator | null = null;
 
-/** engine.unlock() can hang without a user gesture, or reject (Safari): never let it block the trial. */
-function unlockSoon(ms = 1500): Promise<boolean> {
-  return Promise.race([engine.unlock().then(() => true, () => false), new Promise<boolean>((r) => setTimeout(() => r(false), ms))]);
-}
+const unlockSoon = () => unlockSoonWith(engine.unlock);
 
 // -- Main trial page --
 export default function TrialPage() {
@@ -153,14 +151,20 @@ export default function TrialPage() {
   const leave = (href: string) => {
     void engine.setMusic(null);
     void engine.setAmbience(false);
-    void leaveCourt(href, { signOut, assign: (h) => location.assign(h) });
+    // Main menu replaces the history entry: Back from the menu never returns to the finished trial.
+    void leaveCourt(href, { signOut, assign: (h) => (h === '/' ? location.replace(h) : location.assign(h)) });
   };
 
   // -- Audio unlock on first user gesture --
-  const unlockAudio = useCallback(async () => {
-    if (audioUnlocked) return;
-    if (await unlockSoon()) setAudioUnlocked(true);
-    else void engine.unlock().then(() => setAudioUnlocked(true), () => {}); // a late resume() still counts
+  /** Resolves true once audio can play (now or within the wait). */
+  const unlockAudio = useCallback(async (): Promise<boolean> => {
+    if (audioUnlocked) return true;
+    if (await unlockSoon()) {
+      setAudioUnlocked(true);
+      return true;
+    }
+    void engine.unlock().then(() => setAudioUnlocked(true), () => {}); // a late resume() still counts
+    return false;
   }, [audioUnlocked]);
   // Lines read this (not the state) so an unlock mid-line doesn't replay it.
   const audioOn = useRef(audioUnlocked);
@@ -181,6 +185,10 @@ export default function TrialPage() {
 
   // -- 0. Arrived from onboarding: start straight away with the confirmed question --
   // (the "Take it to court" click on / counts as the user gesture for audio)
+  // Back after "Main menu" can restore this whole page from the browser's back/forward cache (verdict,
+  // faces, the signed-out session in memory): reload it instead, so the next person starts clean.
+  useEffect(() => reloadIfRestored(), []);
+
   const autoStarted = useRef(false);
   useEffect(() => {
     if (live !== orch) {
@@ -327,12 +335,13 @@ export default function TrialPage() {
   // -- 2. OBJECTION sting on interrupt --
   async function down() {
     if (held.current) return;
-    void unlockAudio(); // not awaited: a locked unlock can take 1.5s, and a quick release must still end the hold
+    const unlocking = unlockAudio(); // not awaited: a locked unlock can take 1.5s, and a quick release must still end the hold
     const phase = orch.getState().phase;
     if (phase === 'speaking') {
       if (!orch.beginInterrupt()) return;
-      // Play OBJECTION sting (cuts voice, plays sfx, ducks music)
+      // Play OBJECTION sting (cuts voice, plays sfx, ducks music); still locked: as soon as it unlocks
       if (audioOn.current) engine.objection();
+      else void unlocking.then((ok) => ok && engine.objection());
     } else if (phase !== 'ask') return;
     held.current = true;
     setHolding(true);
@@ -492,8 +501,10 @@ export default function TrialPage() {
           speakerColor={box?.color}
           text={introMode && !asking ? undefined : box?.text}
           objection={s.phase === 'listening'}
-          status={introMode === 'play' ? undefined : s.phase === 'preparing' || s.phase === 'thinking' ? s.status : undefined}
-          controls={(introMode && !asking) || s.result ? undefined : controls}
+          status={
+            introMode === 'play' ? undefined : s.phase === 'preparing' || s.phase === 'thinking' || (s.phase === 'done' && !s.result) ? s.status : undefined
+          }
+          controls={(introMode && !asking) || s.phase === 'done' ? undefined : controls}
           heads={heads}
           interrupting={s.phase === 'listening'}
           interrupted={s.interruptTarget === 'user' ? undefined : s.interruptTarget}

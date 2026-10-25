@@ -31,3 +31,12 @@ export async function leaveCourt(href: string, deps: LeaveDeps): Promise<void> {
     deps.assign(href);
   }
 }
+
+/** A page restored from the back/forward cache (Back after "Main menu") reloads instead. Returns the cleanup. */
+export function reloadIfRestored(win: Pick<Window, 'addEventListener' | 'removeEventListener' | 'location'> = window): () => void {
+  const onShow = (e: PageTransitionEvent) => {
+    if (e.persisted) win.location.reload();
+  };
+  win.addEventListener('pageshow', onShow as EventListener);
+  return () => win.removeEventListener('pageshow', onShow as EventListener);
+}

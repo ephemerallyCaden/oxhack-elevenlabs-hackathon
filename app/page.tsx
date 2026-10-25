@@ -9,6 +9,7 @@ import HoldToTalk from "@/components/HoldToTalk";
 import SelfieStep, { sessionSelfie } from "@/components/onboarding/SelfieStep";
 import { HEADS_KEY, useSessionHeads } from "@/components/onboarding/sessionHeads";
 import Jury from "@/components/menu/Jury";
+import { forgetError, seatJury } from "@/components/menu/seatJury";
 import "@/components/menu/court.css";
 import ProfileChips from "@/components/menu/ProfileChips";
 import { parsePastTrials, pastTrialsRaw, verdictSide } from "@/components/menu/pastTrials";
@@ -202,11 +203,13 @@ export default function Home() {
     const r = await authedPost("/api/users/delete", session, {}, AbortSignal.timeout(8000)).catch(() => null);
     forgetting.current = false;
     if (!r?.ok) {
-      setError(
-        r?.status === 401
-          ? "Your sign-in has expired. Sign in with Google again, then use Forget me."
-          : "The court couldn’t delete your voice and face just now. Nothing was removed; try again.",
-      );
+      setError(forgetError(r?.status));
+      if (r?.status === 401) {
+        // Expired: this screen has no sign-in button, so sign out and show the title page (with the message).
+        await signOut();
+        setReturning(null);
+        setStep("welcome");
+      }
       return;
     }
     // Other server instances may still cache the jury for a minute: take your seat out here and now.
@@ -286,6 +289,7 @@ export default function Home() {
                 <span className="ct-kicker">Court of Future Selves</span>
                 <h1 className="ct-title-sm">Your future is on trial.</h1>
                 <p className="ct-body">Read one short paragraph out loud, then put your decision before the court.</p>
+                {error && <p role="alert" className="ct-alert">{error}</p>}
                 <div className="flex flex-col items-start gap-4">
                   <button className="ct-primary" onClick={begin} {...aimProps}>Begin</button>
                   <button className="ct-link" onClick={() => { clearSession(); router.push("/trial"); }}>Skip setup: go straight to court</button>
@@ -392,7 +396,7 @@ export default function Home() {
       )}
       {/* Kept faces are also saved users: seat each person once. Taps only on the title page (mid-onboarding a tap would throw the progress away). */}
       <Jury
-        roster={[...yours, ...roster, ...stored.filter((j) => !roster.some((r) => r.key && r.key === j.key) && !(signedInAs && myKey && j.key === myKey && yours.length))]}
+        roster={seatJury({ yours, roster, stored, signedInAs, myKey })}
         signedInAs={signedInAs}
         onPick={menu ? pickJuror : undefined}
         onRemove={menu ? (e) => forgetFace(e.email) : undefined}

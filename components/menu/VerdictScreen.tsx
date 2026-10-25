@@ -29,10 +29,16 @@ export default function VerdictScreen({
 }) {
   const [record, setRecord] = useState(false);
   const newCase = useRef<HTMLButtonElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  // Closing the drawer makes its own Close inert: hand focus back to the button that opened it.
+  const closeRecord = () => {
+    setRecord(false);
+    toggle.current?.focus();
+  };
   useEffect(() => newCase.current?.focus(), []); // the verdict takes focus (the trial's controls are gone)
   useEffect(() => {
     if (!record) return;
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setRecord(false);
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && closeRecord();
     window.addEventListener('keydown', esc);
     return () => window.removeEventListener('keydown', esc);
   }, [record]);
@@ -55,7 +61,7 @@ export default function VerdictScreen({
           <div className="relative max-h-[45vh] overflow-y-auto">
           {/* Its own Close (and Escape): the drawer can cover the band's buttons on a laptop. */}
           <div className="sticky top-0 z-10 flex justify-end bg-[var(--c-umber)] px-8 pt-3">
-            <button className="ct-ghost" onClick={() => setRecord(false)}>Close the court record ✕</button>
+            <button className="ct-ghost" onClick={closeRecord}>Close the court record ✕</button>
           </div>
           <div className="grid grid-cols-1 gap-8 px-8 pb-6 pt-2 md:grid-cols-[3fr_2fr]">
             <div>
@@ -99,7 +105,7 @@ export default function VerdictScreen({
         <div className="flex flex-col items-start gap-3">
           {/* Same tab, so the voice, faces and profile in sessionStorage carry over to the new case. */}
           <button ref={newCase} className="ct-primary" onClick={() => onLeave('/?again=1')}>New case</button>
-          <button className="ct-ghost" aria-expanded={record} onClick={() => setRecord((o) => !o)}>
+          <button ref={toggle} className="ct-ghost" aria-expanded={record} onClick={() => setRecord((o) => !o)}>
             {record ? 'Close the court record' : 'Read the court record'}
           </button>
         </div>

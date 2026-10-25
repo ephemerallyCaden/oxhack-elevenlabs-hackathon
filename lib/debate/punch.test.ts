@@ -87,6 +87,33 @@ describe('attachPunch', () => {
     expect(l.punch).toBeUndefined();
   });
 
+  it('cuts the punch out of the setup clip in its spoken form too (numbers written out)', () => {
+    const l = line('defense', 'Four years on, my rent is', { tts: '[sighs] Four years on, my rent is two thousand pounds a month.' });
+    expect(attachPunch(l, { text: '£2,000 a month.', tts: '[concerned] two thousand... pounds... a month.' }, new Set())).toBe(true);
+    expect(l.tts).toBe('[sighs] Four years on, my rent is');
+    expect(l.text).toBe('Four years on, my rent is £2,000 a month.');
+  });
+
+  it('never repeats words the text already says of the punch (a partial overlap)', () => {
+    const l = line('prosecution', 'They earn more than every quant');
+    expect(attachPunch(l, { text: 'every quant on Wall Street.', tts: '' }, new Set())).toBe(true);
+    expect(l.text).toBe('They earn more than every quant on Wall Street.');
+    expect(setupText(l)).toBe('They earn more than');
+    // ...but a finished sentence isn't merged into the next one
+    const done = line('defense', 'I lost it all.');
+    expect(attachPunch(done, { text: 'All of it.', tts: '' }, new Set())).toBe(true);
+    expect(done.text).toBe('I lost it all. All of it.');
+  });
+
+  it('keeps a multi-word tag as one token and an opening quote on the punch', () => {
+    const tagged = line('prosecution', 'Listen [laughs softly] they earn more than every quant on Wall Street.');
+    expect(attachPunch(tagged, { text: 'every quant on Wall Street.', tts: '' }, new Set())).toBe(true);
+    expect(setupText(tagged)).toBe('Listen [laughs softly] they earn more than');
+    const quoted = line('defense', 'He said "every quant on Wall Street."');
+    expect(attachPunch(quoted, { text: 'every quant on Wall Street."', tts: '' }, new Set())).toBe(true);
+    expect(quoted.text).toBe('He said "every quant on Wall Street."');
+  });
+
   it('leaves a cut-off line alone (the cut-in finishes it)', () => {
     const l = line('defense', 'And the median is —');
     attachPunch(l, { text: 'nothing.', tts: '' }, new Set());

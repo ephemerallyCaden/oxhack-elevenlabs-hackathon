@@ -8,6 +8,8 @@ export async function withFallback<T>(
   /** The caller gave up (a route's request.signal, a stopped trial): abort the work and fall back now. */
   outer?: AbortSignal,
 ): Promise<{ value: T; fallback: boolean }> {
+  const fallbackValue = () => (typeof fallback === 'function' ? (fallback as () => T)() : fallback);
+  if (outer?.aborted) return { value: fallbackValue(), fallback: true }; // gave up before we started: no work at all
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onOuter: (() => void) | undefined;
@@ -20,14 +22,13 @@ export async function withFallback<T>(
       controller.abort();
       reject(new Error(`${label} cancelled by the caller`));
     };
-    if (outer?.aborted) onOuter();
-    else outer?.addEventListener('abort', onOuter, { once: true });
+    outer?.addEventListener('abort', onOuter, { once: true });
   });
   try {
     return { value: await Promise.race([work(controller.signal), timeout]), fallback: false };
   } catch (err) {
     console.warn(`[fallback] ${label}: ${(err as Error).message}`);
-    return { value: typeof fallback === 'function' ? (fallback as () => T)() : fallback, fallback: true };
+    return { value: fallbackValue(), fallback: true };
   } finally {
     clearTimeout(timer);
     if (onOuter) outer?.removeEventListener('abort', onOuter);

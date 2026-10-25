@@ -133,7 +133,16 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
   }
 
   useEffect(() => () => {
-    rec.current?.stream.getTracks().forEach((t) => t.stop());
+    // Left mid-recording (e.g. "Skip: use the default voice"): drop the recording, don't clone a partial clip.
+    const r = rec.current;
+    if (r) {
+      rec.current = null;
+      clearInterval(r.timer);
+      r.recorder.onstop = null;
+      if (r.recorder.state !== "inactive") r.recorder.stop();
+      r.stream.getTracks().forEach((t) => t.stop());
+      void r.ctx.close().catch(() => {});
+    }
     preview.current?.pause();
   }, []);
 

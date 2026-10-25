@@ -42,7 +42,9 @@ export function useSession(): { session: Session | null; ready: boolean } {
 export function signInWithGoogle(email?: string) {
   return auth()?.signInWithOAuth({
     provider: "google",
-    options: { redirectTo: `${location.origin}/`, queryParams: email ? { login_hint: email } : { prompt: "select_account" } },
+    // Always the account chooser: on a shared laptop Google is often still signed in as the last person,
+    // and a bare login_hint would sign the next one in as them without asking.
+    options: { redirectTo: `${location.origin}/`, queryParams: email ? { login_hint: email, prompt: "select_account" } : { prompt: "select_account" } },
   });
 }
 

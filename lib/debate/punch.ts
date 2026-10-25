@@ -17,23 +17,51 @@ export function punchedSides(history: Line[], topicId: string): Set<Side> {
   return used;
 }
 
-// Words = whitespace tokens with their punctuation removed ("£12,000." → "12000", "can't" → "cant"), so
-// this and dropWords() count the same tokens.
-const words = (s: string) => s.toLowerCase().replace(/\[[^\]]*\]/g, ' ').replace(/[^\p{L}\p{N}\s]/gu, '').split(/\s+/).filter(Boolean);
+// Text is compared word by word: whitespace tokens with audio tags and punctuation removed ("£12,000."
+// → "12000", "can't" → "cant"), a multi-word tag like [laughs softly] kept as one token.
+const JOIN = '\u2060'; // word joiner: not whitespace, so a tag's inner spaces don't split it
+const tokensOf = (s: string) => s.trim().replace(/\[[^\]]*\]/g, (t) => t.replace(/\s+/g, JOIN)).split(/\s+/).filter(Boolean);
+const norm = (tok: string) => tok.replace(/\[[^\]]*\]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+const words = (s: string) => tokensOf(s).map(norm).filter(Boolean);
+const OPEN_QUOTE = /^[“"‘'(«]+/;
 /** Does `text` already end with `tail` (case, punctuation and audio tags ignored)? */
 function endsWithWords(text: string, tail: string): boolean {
   const a = words(text);
   const b = words(tail);
   return b.length > 0 && a.length >= b.length && b.every((w, i) => a[a.length - b.length + i] === w);
 }
+/** How many of `tail`'s first words `text` already ends with (a partial overlap; 0 if none). */
+function overlap(text: string, tail: string): number {
+  const a = words(text);
+  const b = words(tail);
+  // A finished sentence ("I lost it all.") only counts if it ends with the whole tail, never a part of it.
+  const finished = /[.!?]["”’')»]*$/.test(text.trim());
+  for (let k = Math.min(a.length, b.length); k > 0; k--) {
+    if (finished && k < b.length) break;
+    if (b.slice(0, k).every((w, i) => a[a.length - k + i] === w)) return k;
+  }
+  return 0;
+}
 /** The tail as it follows `setup`: after a full stop it starts a new sentence (capitalised). */
 const tailAfter = (setup: string, tail: string) => (/[.!?]$/.test(setup.trim()) ? tail.charAt(0).toUpperCase() + tail.slice(1) : tail);
-const joinSentence = (setup: string, tail: string) => `${setup.trim()} ${tailAfter(setup, tail)}`;
-/** `text` without its last `n` words (tokens with letters/digits; audio tags and dashes don't count). */
-function dropWords(text: string, n: number): string {
-  const tokens = text.trim().split(/\s+/);
-  while (n > 0 && tokens.length) if (/[\p{L}\p{N}]/u.test(tokens.pop()!.replace(/\[[^\]]*\]/g, ''))) n--;
-  return tokens.join(' ');
+const joinSentence = (setup: string, tail: string) => (setup.trim() ? `${setup.trim()} ${tailAfter(setup, tail)}` : tail);
+/** `text` without its last `n` words, plus any opening quote the first dropped word carried. */
+function dropWords(text: string, n: number): { rest: string; lead: string } {
+  const tokens = tokensOf(text);
+  let lead = '';
+  while (n > 0 && tokens.length) {
+    const tok = tokens.pop()!;
+    if (norm(tok)) {
+      n--;
+      lead = OPEN_QUOTE.exec(tok.replace(/\[[^\]]*\]/g, ''))?.[0] ?? '';
+    }
+  }
+  return { rest: tokens.join(' ').replaceAll(JOIN, ' '), lead };
+}
+/** `text` with whatever it already says of `tail` taken off its end (so joining never repeats words). */
+function before(text: string, tail: string): { rest: string; lead: string } {
+  const k = overlap(text, tail);
+  return k ? dropWords(text, k) : { rest: text.trim(), lead: '' };
 }
 
 /** The setup half of a punch line (everything before the punch). */
@@ -61,13 +89,16 @@ function punchTts(speaker: 'prosecution' | 'defense', tts: string, text: string)
 export function attachPunch(line: Line, draft: { text: string; tts: string } | undefined, used: Set<Side>): boolean {
   const punch = draft?.text.trim();
   if (!punch || line.text.trim().endsWith('—') || !line.text.trim()) return false;
-  // Models sometimes leave the punch in the line's text too: never say it twice.
+  // Models sometimes leave all or part of the punch in the line's text too: never say a word twice.
   const already = endsWithWords(line.text, punch);
+  const cut = before(line.text, punch);
+  const shown = cut.lead && !OPEN_QUOTE.test(punch) ? cut.lead + punch : punch; // keep an opening quote
+  // The punch's spoken form (numbers written out, "..." beats), without its delivery tag.
+  const spoken = draft!.tts.replace(/^\s*\[[^\]]+\]\s*/, '').trim() || punch;
   const refuse = () => {
     if (already) return false;
-    line.text = joinSentence(line.text, punch);
-    const spoken = draft!.tts.replace(/^\s*\[[^\]]+\]\s*/, '').trim() || punch;
-    if (line.tts?.trim() && !endsWithWords(line.tts, spoken)) line.tts = joinSentence(line.tts, spoken);
+    line.text = joinSentence(cut.rest, shown);
+    if (line.tts?.trim() && !endsWithWords(line.tts, spoken)) line.tts = joinSentence(before(line.tts, spoken).rest, spoken);
     return false;
   };
   if (line.speaker !== 'prosecution' && line.speaker !== 'defense') return refuse();
@@ -75,13 +106,15 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   const count = punch.split(/\s+/).length;
   if (used.size > 0 || count > MAX_WORDS) return refuse();
   // The punch must be exactly the end of `text` (setupText() cuts it off by length), after a real setup.
-  const setup = already ? dropWords(line.text, words(punch).length) : line.text.trim();
-  if (!words(setup).length) return false; // the punch would be the whole line: keep it as a plain line
+  if (!words(cut.rest).length) return false; // the punch would be the whole line: keep it as a plain line
   used.add(side);
-  const tail = tailAfter(setup, punch);
-  line.text = `${setup} ${tail}`;
+  const tail = tailAfter(cut.rest, shown);
+  line.text = `${cut.rest} ${tail}`;
   line.punch = { text: tail, tts: punchTts(line.speaker, draft!.tts, punch) };
-  // The setup clip is voiced from `tts`: if the model also left the punch there, cut it, or it's said twice.
-  if (line.tts?.trim() && endsWithWords(line.tts, punch)) line.tts = dropWords(line.tts, words(punch).length);
+  // The setup clip is voiced from `tts`: if it also says (part of) the punch, in either form, cut it.
+  if (line.tts?.trim()) {
+    const t = line.tts;
+    line.tts = endsWithWords(t, spoken) || overlap(t, spoken) ? before(t, spoken).rest : before(t, punch).rest;
+  }
   return true;
 }
