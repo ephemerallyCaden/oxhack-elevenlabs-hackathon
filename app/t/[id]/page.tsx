@@ -29,7 +29,7 @@ export default function SharedTrial({ params }: PageProps<"/t/[id]">) {
 
 async function Trial({ id }: { id: string }) {
   const t = await getTrial(id);
-  if (!t) return <p className="text-zinc-400">This trial doesn’t exist (or has been cleared).</p>;
+  if (!t) return <p className="text-zinc-400">This trial doesn’t exist, or it was deleted (trials are kept for 7 days).</p>;
   const v = t.verdict;
   return (
     <>
