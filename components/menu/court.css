@@ -178,6 +178,8 @@
 .ct-share [data-testid='share-panel'] { border-radius: 0; background: var(--c-black); border: 2px solid var(--c-oak); }
 .ct-share .text-amber-400 { color: var(--c-brass); }
 .ct-share .text-zinc-400, .ct-share .text-zinc-300 { color: var(--c-stone); }
+.ct-share button { border-radius: 0; font-family: var(--ui); color: var(--c-black); background: var(--c-plaster); }
+.ct-share button:hover:not(:disabled) { background: #fff; }
 
 /* ── Chips (confirm step) ── */
 .ct-chips { display: flex; flex-wrap: wrap; gap: 8px; }
