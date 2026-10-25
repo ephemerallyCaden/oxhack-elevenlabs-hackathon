@@ -64,11 +64,16 @@ export const MIN_SWING = 0.25;
 /** One topic's push on the bar: its score × BAR_GAIN, but at least MIN_SWING towards the side it favours. */
 const push = (t: number) => (t === 0 ? 0 : Math.sign(t) * Math.max(Math.abs(BAR_GAIN * t), MIN_SWING));
 
-/** Importance-weighted average of SCORED, non-removed topics' pushes × 100, capped. 0 before any topic is scored. */
+/**
+ * Importance-weighted average of SCORED, non-removed topics' pushes × 100, capped. 0 before any topic is scored.
+ * The result is also at least MIN_SWING towards whichever side is ahead (so topics that mostly cancel still
+ * give a verdict); only a tie (rounds to 0) stays at Toss-up.
+ */
 export function computeSpectrum(topics: Topic[]): Spectrum {
   const scored = topics.filter((t) => live(t) && t.score);
   const w = scored.reduce((s, t) => s + t.importance, 0);
   const raw = w === 0 ? 0 : scored.reduce((s, t) => s + t.importance * push(t.score!.t), 0) / w;
-  const value = Math.round(Math.max(-1, Math.min(1, raw)) * 100);
+  const lean = Math.round(raw * 100) === 0 ? 0 : Math.sign(raw) * Math.max(Math.abs(raw), MIN_SWING);
+  const value = Math.round(Math.max(-1, Math.min(1, lean)) * 100);
   return { value, label: spectrumLabel(value) };
 }

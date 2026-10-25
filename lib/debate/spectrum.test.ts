@@ -65,6 +65,16 @@ describe('spectrum', () => {
     expect(computeSpectrum([scored('a', 1, 0.4)]).value).toBe(Math.round(0.4 * BAR_GAIN * 100));
   });
 
+  it('gives a verdict when topics split: at least 25 towards the side ahead, Toss-up only on a tie', () => {
+    // +0.4 YES vs -0.3 NO: 0.5 × 72 − 0.5 × 54 = +9 → floored to +25
+    expect(computeSpectrum([scored('a', 0.5, 0.4), scored('b', 0.5, -0.3)])).toEqual({ value: 25, label: 'Lean yes' });
+    expect(computeSpectrum([scored('a', 0.5, -0.4), scored('b', 0.5, 0.3)])).toEqual({ value: -25, label: 'Lean no' });
+    // an even split is a genuine tie
+    expect(computeSpectrum([scored('a', 0.5, 0.2), scored('b', 0.5, -0.2)])).toEqual({ value: 0, label: 'Toss-up' });
+    // a clear win is untouched: 0.5 × (0.6 × 1.8) − 0.5 × (0.2 × 1.8) = +0.36 → +36
+    expect(computeSpectrum([scored('a', 0.5, 0.6), scored('b', 0.5, -0.2)]).value).toBe(36);
+  });
+
   it('ignores removed topics even if they were scored', () => {
     expect(computeSpectrum([scored('a', 0.5, 1), scored('b', 0.5, -1, { status: 'removed' })]).value).toBe(100);
   });
