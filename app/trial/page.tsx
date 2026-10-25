@@ -105,9 +105,12 @@ export default function TrialPage() {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   // Crane-up intro: hold on the carpet while the trial loads (no line yet), play as soon as
   // the first line is ready (so the hold lasts exactly the loading time), once per trial.
+  // The court is only revealed by the crane, so it holds through 'ask' too.
   const [introFinished, setIntroFinished] = useState(false);
-  const introMode =
-    introFinished || s.phase === 'ask' || s.phase === 'done' ? null : s.current ? 'play' : 'hold';
+  const introMode = introFinished || s.phase === 'done' ? null : s.current ? 'play' : 'hold';
+  // The ask prompt stays hidden until we know no question arrived from onboarding (that one starts by itself).
+  const [askOpen, setAskOpen] = useState(false);
+  const asking = s.phase === 'ask' && askOpen;
   const finishIntro = useCallback(() => setIntroFinished(true), []);
   // Surprise punch: which beat of the sequence is on screen, and a counter that shakes the screen.
   const [punchStage, setPunchStage] = useState<PunchStage | null>(null);
@@ -131,7 +134,10 @@ export default function TrialPage() {
     if (autoStarted.current) return;
     autoStarted.current = true;
     const q = takeSessionQuestion();
-    if (!q) return;
+    if (!q) {
+      queueMicrotask(() => setAskOpen(true));
+      return;
+    }
     void engine.unlock().then(() => {
       setAudioUnlocked(true);
       orch.start(q);
@@ -415,12 +421,12 @@ export default function TrialPage() {
         <Courtroom
           scene={s.scene}
           moods={moods}
-          speakerName={introMode ? undefined : box?.name}
+          speakerName={introMode && !asking ? undefined : box?.name}
           speakerColor={box?.color}
-          text={introMode ? undefined : box?.text}
+          text={introMode && !asking ? undefined : box?.text}
           objection={s.phase === 'listening'}
           status={introMode === 'play' ? undefined : s.phase === 'preparing' || s.phase === 'thinking' ? s.status : undefined}
-          controls={introMode ? undefined : controls}
+          controls={introMode && !asking ? undefined : controls}
           heads={heads}
           interrupting={s.phase === 'listening'}
           intro={introMode}

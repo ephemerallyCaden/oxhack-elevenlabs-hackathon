@@ -28,6 +28,7 @@ export function useIntroCrane(refs: Refs, mode: IntroMode, onDone?: () => void) 
   // Paint the start frame before the browser shows the first intro frame.
   useLayoutEffect(() => {
     if (mode) render(refs, 0, 0);
+    refs.stage.current?.setAttribute('data-ready', '');
   }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
