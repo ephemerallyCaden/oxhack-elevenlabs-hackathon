@@ -276,6 +276,20 @@ describe('attachPunch', () => {
     }
   });
 
+  it('keeps the number’s scale word, unit or am/pm even when the clip ends with the whole punch', () => {
+    for (const [text, tts, punch] of [
+      ['We raised $5m', '[sad] We raised five million', 'million reasons to quit.'],
+      ['Bank $2bn', '[sad] Bank two billion dollars', 'dollars'],
+      ['We raised $5m', '[sad] We raised five million', 'Million.'],
+      ['Meet at 9am', '[sad] Meet at nine am', 'AM sharp.'],
+      ['It returns 7%', '[sad] It returns seven percent of nothing', 'percent of nothing.'],
+    ]) {
+      const l = line('defense', text, { tts });
+      attachPunch(l, { text: punch, tts: '' }, new Set());
+      expect(l.tts).toBe(tts);
+    }
+  });
+
   it('"I am" before a number is not part of it: the spoken number stays in the clip', () => {
     const l = line('defense', 'I am 30', { tts: '[sad] I am thirty' });
     attachPunch(l, { text: 'Thirty and broke.', tts: '' }, new Set());

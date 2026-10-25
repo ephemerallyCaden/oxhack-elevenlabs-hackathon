@@ -127,6 +127,28 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   /** A partial overlap of the clip with the punch is cut only if the text overlapped too, or the clip lines up
    *  with the setup right before it ("…more than | every quant"): a coincidence ("…returns seven | percent"
    *  for the text's "7%") never cuts a setup word. */
+  /** Do the clip's last `k` words start with the setup number's own scale or unit ("$5m" → "million",
+   *  "£12k" → "pounds", "7%" → "percent", "9am" → "am")? Then they belong to the setup, not the punch. */
+  const numberOwns = (tts: string, k: number) => {
+    const bare = (tokensOf(cut.rest).at(-1) ?? '').replace(/[^\p{L}\p{N}%£$€¥]/gu, '');
+    if (!/\d/.test(bare)) return false;
+    const units = [
+      bare.endsWith('%') && /^(?:percent|per|cent)$/,
+      /£/.test(bare) && /^(?:pounds?|quid|grand|pence|p)$/,
+      /\$/.test(bare) && /^(?:dollars?|bucks|grand|cents?)$/,
+      /€/.test(bare) && /^(?:euros?|cents?|grand)$/,
+      /¥/.test(bare) && /^yen$/,
+      /\dx$/i.test(bare) && /^times$/,
+      /\dp$/i.test(bare) && /^(?:pence|p)$/,
+      /\dk$/i.test(bare) && /^(?:thousand|k|grand)$/,
+      /\d(?:am|pm)$/i.test(bare) && /^(?:am|pm)$/,
+    ].filter((u): u is RegExp => !!u);
+    const scale = /\dk$/i.test(bare) ? /^thousand$/ : /\dm$/i.test(bare) ? /^million$/ : /\d(?:bn|b)$/i.test(bare) ? /^billion$/ : null;
+    const ov = words(tts).slice(-k);
+    const j = ov.findIndex((w) => units.some((u) => u.test(w)));
+    // Number words before the unit only belong to the setup if its digits say them ("$5m" → million).
+    return j >= 0 ? ov.slice(0, j).every((w) => scale?.test(w)) : !!scale?.test(ov[0] ?? '');
+  };
   const clipOverlap = (tts: string, tail: string) => {
     const k = overlap(tts, tail);
     if (k <= 0) return false;
@@ -147,23 +169,8 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
       const rawPrev = raws.slice(0, i).reverse().find((t) => /[\p{L}\p{N}%]/u.test(t.replace(/\[[^\]]*\]/g, ''))) ?? '';
       const spokenPrev = norm(rawPrev.split('-').at(-1) ?? '');
       const bare = lastRaw.replace(/[^\p{L}\p{N}%£$€¥]/gu, '');
+      if (numberOwns(tts, k)) return false;
       if (bare.endsWith('%')) return prev === setup[setup.length - 1] || /^(?:per)?cent$/.test(prev ?? '') || /%$/.test(rawPrev);
-      // The number's spoken units, from its symbol and suffix ("£12k" → pounds…, grand, thousand).
-      const units = [
-        /£/.test(bare) && /^(?:pounds?|quid|grand|pence|p)$/,
-        /\$/.test(bare) && /^(?:dollars?|bucks|grand|cents?)$/,
-        /€/.test(bare) && /^(?:euros?|cents?|grand)$/,
-        /¥/.test(bare) && /^yen$/,
-        /\dx$/i.test(bare) && /^times$/,
-        /\dp$/i.test(bare) && /^(?:pence|p)$/,
-        /\dk$/i.test(bare) && /^(?:thousand|k|grand)$/,
-      ].filter((u): u is RegExp => !!u);
-      // The overlap starts with the number's unit ("…five | million dollars"): it belongs to the setup.
-      const ov = clip.slice(clip.length - k);
-      const j = ov.findIndex((w) => units.some((u) => u.test(w)));
-      // Number words before the unit only belong to the setup if its digits say them ("$5m" → million).
-      const scale = /\dk$/i.test(bare) ? /^thousand$/ : /\dm$/i.test(bare) ? /^million$/ : /\d(?:bn|b)$/i.test(bare) ? /^billion$/ : null;
-      if (j >= 0 && ov.slice(0, j).every((w) => scale?.test(w))) return false;
       // "am"/"pm" only count as part of the number right after one ("nine am", not "I am").
       if (/^(?:am|pm)$/.test(spokenPrev) && !NUMBERISH.test(clip[clip.length - k - 2] ?? '')) return prev === setup[setup.length - 1];
       return prev === setup[setup.length - 1] || NUMBERISH.test(spokenPrev);
@@ -193,9 +200,9 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
     const t = line.tts;
     // Partial overlaps only where clipOverlap allows them (else "freedom, freedom to fail" — same word
     // count in clip and text — would lose a word in the clip).
-    const rest = endsWithWords(t, spoken)
+    const rest = endsWithWords(t, spoken) && !numberOwns(t, words(spoken).length)
       ? before(t, spoken).rest
-      : endsWithWords(t, punch)
+      : endsWithWords(t, punch) && !numberOwns(t, words(punch).length)
         ? before(t, punch).rest
         : clipOverlap(t, spoken)
           ? before(t, spoken).rest
