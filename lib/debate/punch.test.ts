@@ -303,6 +303,18 @@ describe('attachPunch', () => {
     }
   });
 
+  it('a "k" amount keeps its currency word when the punch starts with it', () => {
+    for (const [text, tts, punch] of [
+      ['You lose £12k', '[sad] You lose twelve thousand pounds', 'Pounds you never see again.'],
+      ['You lose $5k', '[sad] You lose five thousand dollars', 'Dollars you never had.'],
+      ['You lose £12k', '[sad] You lose twelve k pounds', 'Pounds you never see again.'],
+    ]) {
+      const l = line('defense', text, { tts });
+      attachPunch(l, { text: punch, tts: '' }, new Set());
+      expect(l.tts).toBe(tts);
+    }
+  });
+
   it('"I am" before a number is not part of it: the spoken number stays in the clip', () => {
     const l = line('defense', 'I am 30', { tts: '[sad] I am thirty' });
     attachPunch(l, { text: 'Thirty and broke.', tts: '' }, new Set());
