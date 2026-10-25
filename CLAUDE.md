@@ -48,7 +48,8 @@ The first failure is handed back to you once; after that it is only reported. Gi
 | `lib/debate/`, `types.ts` | D — awckiu | Claude prompts, orchestrator, interrupts, fallback |
 
 ## Mock-first rule (we may not have API keys yet)
-- Every wrapper around an external API (Gemini, Claude, ElevenLabs) must **return mock/cached data when its key is missing** or the call takes > 5s. The app must always run end to end.
+- Every wrapper around an external API (Gemini, Groq, Claude, ElevenLabs) must **return mock/cached data when its key is missing** or the call takes too long. The app must always run end to end.
+- "Too long" is 5s for calls the user is waiting on with nothing playing. Work that's prepared while something else plays (a debate topic written while the previous one plays, the next line voiced during the current one) can take longer: its limits live in `lib/debate/timeouts.ts`.
 - Mocks live next to the code: `lib/sim/mock-result.json`, `lib/debate/mock-events.json`, etc.
 
 ## API keys
