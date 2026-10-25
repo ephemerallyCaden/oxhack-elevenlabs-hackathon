@@ -60,3 +60,11 @@ describe('extractProfile (server)', () => {
     expect(r).toEqual({ profile: { age: 20 }, fallback: true });
   });
 });
+
+describe('plain (display text)', () => {
+  it('strips audio tags the model leaked into display text', async () => {
+    const { plain } = await import('./trial');
+    expect(plain('[authoritative] The court finds… [sighs] for YES.')).toBe('The court finds… for YES.');
+    expect(plain('No tags here.')).toBe('No tags here.');
+  });
+});

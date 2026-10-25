@@ -61,13 +61,11 @@ export default function Character({
     >
       <div className="char-bob">
       {expr === 'shocked' && <div className="flash-overlay" />}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        className="char-pose"
-        src={pose}
-        alt=""
-        style={mirror ? { transform: 'translateX(-50%) scaleX(-1)' } : undefined}
-      />
+      {/* Mirror on a wrapper: expression keyframes animate .char-pose's transform. */}
+      <div className="char-mirror" style={mirror ? { transform: 'scaleX(-1)' } : undefined}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img className="char-pose" src={pose} alt="" />
+      </div>
       <div
         className={`face-container${facingCls}`}
         style={{ width: face, height: face, top: faceTop }}

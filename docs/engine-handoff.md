@@ -5,7 +5,7 @@ What the trial engine (D) gives the UI, what it needs from research and voice, a
 Every call falls back to a mock built from the user's own question, so you can build against all of this with no API keys.
 
 ```
-ask → preparing (cut-scene: agenda + personas + research)
+ask → preparing (cut-scene: one setup call + research)
     → per topic: intro → YES ↔ NO (2 cycles, +1 per user interrupt) → Judge scores → spectrum moves
     → verdict → transcript with sources
 ```
@@ -68,13 +68,13 @@ For reference only: the orchestrator calls these. All are `POST` with JSON; the 
 
 | Route | Does |
 |---|---|
-| `/api/trial/agenda` | Question + profile → 1–4 weighted topics, the Judge's opening and one intro per topic |
-| `/api/trial/personas` | Question + profile → best (YES) and worst (NO) future you |
-| `/api/trial/argue` | One YES or NO line on a topic, citing evidence cards (or answering the user's interrupt; may include an AI cut-in) |
-| `/api/trial/score-argument` | Background: one line → pros/cons ledger entry |
-| `/api/trial/score-topic` | Ledger → topic score (−1…+1) and the Judge's ruling line |
+| `/api/trial/setup` | Question + profile → 1–4 weighted topics, the Judge's opening, one intro per topic, and the best (YES) / worst (NO) future you. One call. |
+| `/api/trial/topic` | One whole topic: every YES ↔ NO line (with any AI cut-in), the pros/cons ledger, the topic score and the Judge's ruling. One call per topic, plus one more each time the user interrupts YES or NO (the rest of the topic is rewritten around their point). |
 | `/api/trial/judge-interrupt` | User interrupted the Judge → add or remove a topic |
 | `/api/trial/verdict` | Final explanation and line; the spectrum itself is computed in code |
+| `/api/trial/profile` | Onboarding transcript + form → profile and the "Should I …?" question |
+
+**Why so few calls:** Gemini's free tier allows 5 calls per minute and about 20 per day per model. A trial is 1 setup + 1 per topic + 1 verdict (+1 per interrupt), roughly 5 calls. `lib/debate/ratelimit.ts` paces them and fails over between models; `GEMINI_MODELS=a,b,c` sets the order, and `DEBATE_LLM=mock` runs the trial without any calls.
 
 ---
 
@@ -144,11 +144,11 @@ The trial should feel like watching a film: no waiting after the first second. O
 | t (s) | On screen | In the background |
 |---|---|---|
 | 0 | User finishes asking | STT (≤ 2s) |
-| 1–7 | Cut-scene: "ALL RISE", pre-recorded filler audio | Agenda + Judge lines (≤ 5s) and personas (≤ 5s), in parallel |
-| ~5 | Cut-scene | Voice the opening + topic 1 intro (≤ 2s); quick research for topic 1; deep research for every topic |
-| 7–17 | Judge's opening (~10s) | Topic 1 quick cards land (≤ 5s), then YES's first argument is written and voiced (≤ 6s) |
-| 17–25 | Topic 1 intro (~8s) | Spare time |
-| 25+ | YES ↔ NO | Each next line is prepared during the current one (~10–15s each) |
+| 1–5 | Cut-scene: "ALL RISE", pre-recorded filler audio | Setup call: agenda, Judge lines and both personas (~3s) |
+| ~5 | Cut-scene | Voice the opening; quick research for topic 1; deep research for every topic |
+| 5–15 | Judge's opening (~10s) | Topic 1 quick cards land, then the whole of topic 1 is written in one call (~4s) |
+| 15–23 | Topic 1 intro (~8s) | The first lines are voiced |
+| 23+ | YES ↔ NO | Each next line is voiced during the current one; the next topic is written while this one plays (~80s) |
 
 The user hears sound about a second after asking, and the first argument starts with no gap.
 
@@ -159,15 +159,13 @@ The timeouts are in [`lib/debate/timeouts.ts`](../lib/debate/timeouts.ts). The r
 | Step | Budget (p90) | Timeout → fallback | Must beat |
 |---|---|---|---|
 | STT (question / interrupt) | 2s | 8s → typed input | — |
-| Agenda + intros | 5s | 8s → mock agenda | End of the cut-scene filler (~7s) |
-| Personas | 5s | 8s → mock personas | Same; runs in parallel with the agenda |
-| TTS per line | 2s | 7s → text only | The end of the line before it |
+| Setup (agenda + intros + personas) | 5s | 12s → mock setup | End of the cut-scene filler |
+| TTS per line | 2s | 15s → text only | The end of the line before it (also the ruling and the next intro) |
 | **Quick research** (per topic, per side) | **5s, 2–3 cards** | 6s → mock cards | Topic 1 only: before YES's first argument is written (~t = 10). Topics 2+: no pressure. |
 | **Deep research** (per topic, per side) | **45s, 3–6 cards** | 50s → skipped | Topic 1: lands around cycle 2. Topics 2+: ready long before their intro, since a topic lasts ~80s. |
-| Next argument (written + voiced) | 6s | 8s → mock line | The line playing now (~10–15s) |
-| Ledger scoring (background) | 6s | 7s → mock | The end of the topic |
-| Topic score + Judge's ruling | 5s | 8s → ledger maths | The end of the topic's last line |
-| Interrupt reply | STT 2s + 5s + TTS 2s | → generic Judge reply | Covered by a pre-voiced "The court considers your objection…" |
+| Next topic (all lines + ledger + ruling) | 5s | 50s → mock topic | The current topic (~80s); written ahead in the background |
+| A topic that wasn't written ahead (agenda just changed) | 5s | 15s → mock topic | Its intro: written with priority while the Judge confirms the change |
+| Interrupt rewrite | STT 2s + 5s + TTS 2s | 15s → mock topic | Covered by a pre-voiced "The court considers your objection…" |
 | Verdict | 6s | 9s → template | Covered by the last ruling + "The court retires…" |
 
 ### What this means for each person

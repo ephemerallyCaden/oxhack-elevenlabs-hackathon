@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import type { CollectionRecord } from "./collection";
-import { ModelRequestError, readBoundedModelJson, requestModelJson } from "./model-client";
+import { ModelRequestError, readBoundedModelJson, requestModelJson, resolveModelConfiguration } from "./model-client";
 import { createPassageSelector } from "./research-selection";
 import type { TopicResearchRequest } from "./research-contract";
 
@@ -167,4 +167,41 @@ test("bounded model reads cancel oversized bodies and an aborted stalled stream"
   controller.abort();
   await assert.rejects(pendingRead, error => error instanceof Error && error.name === "AbortError");
   assert.equal(stalledBodyCancelled, true);
+});
+
+test("Groq uses its own endpoint, key and the OpenAI json_schema options", async () => {
+  const schema = { type: "object", properties: { answer: { type: "string" } }, required: ["answer"], additionalProperties: false };
+  let seen: { url: string; init: RequestInit; body: Record<string, unknown> } | undefined;
+  const result = await requestModelJson({ provider: "groq", apiKey: "synthetic-groq-key", model: "openai/gpt-oss-20b" }, {
+    messages: [{ role: "user", content: "Return a small JSON object." }], maxTokens: 123, schema,
+  }, new AbortController().signal, async (input, init) => {
+    seen = { url: String(input), init: init ?? {}, body: JSON.parse(String(init?.body)) as Record<string, unknown> };
+    return providerResponse({ answer: "ok" });
+  });
+  assert.deepEqual(result, { answer: "ok" });
+  assert.equal(seen!.url, "https://api.groq.com/openai/v1/chat/completions");
+  assert.equal(new Headers(seen!.init.headers).get("authorization"), "Bearer synthetic-groq-key");
+  assert.equal(seen!.init.redirect, "error");
+  assert.equal(seen!.body.model, "openai/gpt-oss-20b");
+  assert.equal(seen!.body.reasoning_effort, "low");
+  assert.deepEqual(seen!.body.response_format, { type: "json_schema", json_schema: { name: "research_result", strict: true, schema } });
+});
+
+test("RESEARCH_MODEL_PROVIDER=groq uses GROQ_API_KEY and gpt-oss-20b (off the debate's gpt-oss-120b quota)", () => {
+  vi.stubEnv("RESEARCH_MODEL_PROVIDER", "groq");
+  vi.stubEnv("GROQ_API_KEY", "synthetic-groq-key");
+  vi.stubEnv("RESEARCH_MODEL", "");
+  vi.stubEnv("GROQ_RESEARCH_MODEL", "");
+  const config = resolveModelConfiguration();
+  assert.equal(config.provider, "groq");
+  assert.equal(config.apiKey, "synthetic-groq-key");
+  assert.equal(config.model, "openai/gpt-oss-20b");
+  assert.equal(config.warning, undefined);
+});
+
+test("Groq without a key sends nothing and says why", () => {
+  vi.stubEnv("RESEARCH_MODEL_PROVIDER", "groq");
+  vi.stubEnv("GROQ_API_KEY", "");
+  const config = resolveModelConfiguration();
+  assert.match(config.warning ?? "", /key is not configured/);
 });
