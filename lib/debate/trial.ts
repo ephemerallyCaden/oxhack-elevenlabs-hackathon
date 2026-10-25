@@ -197,7 +197,7 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
       P.cardsBlock(req.cards),
       P.historyBlock(req.history),
       `CUT-IN ALLOWED: ${req.cutInAllowed ? 'yes' : 'no'}`,
-      `PUNCH ALLOWED FOR: ${(['yes', 'no'] as const).filter((s) => !punchedSides(req.history, req.topic.id).has(s)).map((s) => s.toUpperCase()).join(', ') || 'nobody'}`,
+      `PUNCH ALLOWED: ${punchedSides(req.history, req.topic.id).size ? 'no' : 'yes'}`,
       P.turnsBlock(req.turns, req.userPoint),
     ].join('\n'),
     TopicSchema,

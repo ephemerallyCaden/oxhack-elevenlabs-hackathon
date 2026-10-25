@@ -15,11 +15,11 @@ describe('attachPunch', () => {
     expect(setupText(l)).toBe('The top one percent of players earn more than');
   });
 
-  it('allows at most one punch per side per topic', () => {
+  it('allows one punch per topic, whichever side lands it first', () => {
     const used = new Set<Side>();
     expect(attachPunch(line('prosecution', 'a'), { text: 'one', tts: '' }, used)).toBe(true);
     expect(attachPunch(line('prosecution', 'b'), { text: 'two', tts: '' }, used)).toBe(false);
-    expect(attachPunch(line('defense', 'c'), { text: 'three', tts: '' }, used)).toBe(true);
+    expect(attachPunch(line('defense', 'c'), { text: 'three', tts: '' }, used)).toBe(false);
   });
 
   it('counts punches from earlier calls on the same topic, not other topics', () => {

@@ -19,7 +19,7 @@ AUDIO. "text" is shown on screen: plain spoken words, no speaker labels, no mark
 
 export const SETUP_TASK = `Set up the trial in one go: THE JUDGE's agenda and the casting of the two future selves.
 
-AGENDA. 1-4 topics that together settle the question: 1-2 for simple questions, 3-4 for big life decisions. No overlap; each arguable both ways. Per topic: title (2-4 words), the sub-question it settles, importance (0-1, normalised later), research_speed ("quick" for easy look-ups like costs or statistics, "deep" for nuance), and the Judge's one-sentence intro line, ending by inviting the prosecution to begin.
+AGENDA. 1-2 topics that together settle the question: 1 for most questions, 2 only when two separate things decide it. The trial must stay quick. No overlap; each arguable both ways. Per topic: title (2-4 words), the sub-question it settles, importance (0-1, normalised later), research_speed ("quick" for easy look-ups like costs or statistics, "deep" for nuance), and the Judge's one-sentence intro line, ending by inviting the prosecution to begin.
 Opening line (max 20 words): call the court to order and restate the question in the second person, nothing else. Don't list the topics: they're on screen and each gets its own intro.
 
 PERSONAS. Pick the moment each future self speaks from, for THIS question; the two usually differ. yes = when that future is most likely going well (a gap year peaks a few months in); no = when it has most likely gone wrong (a gap year hurts most 3-4 years later, when peers are ahead). Per persona: years_from_now (0.25-30, decimals allowed), when (the UI text: "6 months from now", "4 years from now"), age (the witness's age + years_from_now, rounded; null if unknown), snapshot (2-3 vivid, specific, believable sentences, "You are…": where they are, what their days look like; never assume the witness's gender), mood (1-2 words).
@@ -36,21 +36,21 @@ LINES. One line per entry in TURNS TO WRITE, in order, by that speaker, in the f
 - "cites": the ids of the speaker's own side's cards that the line uses.
 - ANSWERS THE WITNESS: the witness just interrupted this speaker. Answer their point first, concede what's fair, then turn it your way; later lines keep it in mind.
 - CUT-IN (only if CUT-IN ALLOWED is yes; at most once; only on a line the other side would pounce on, like a best-case number or an exaggeration): "text" stops mid-thought with "—"; "cut_in" is the OTHER side butting in (max 12 words, opening with an exclamation like "Hold on!" or "Oh, come on!"); "resume" is the speaker's one-sentence comeback (max 20 words).
-- PUNCH (rare: only for sides under PUNCH ALLOWED FOR; at most once per side; only where a fact from the speaker's own cards lands like a blow; never with a cut-in): "text" is the setup and "punch" the climactic final 2-8 words (text "The top one percent of players earn more than", punch "every quant on Wall Street."). The punch's "tts" opens with one of the speaker's tags and puts "..." between the heaviest words ("[passionate] every... quant... on Wall Street."); the line's own "tts" covers only the setup.
+- PUNCH (rare: only if PUNCH ALLOWED is yes; at most once in the whole topic, by whichever side has the fact that lands hardest; only where a fact from the speaker's own cards lands like a blow; never with a cut-in): "text" is the setup and "punch" the climactic final 2-8 words (text "The top one percent of players earn more than", punch "every quant on Wall Street."). The punch's "tts" opens with one of the speaker's tags and puts "..." between the heaviest words ("[passionate] every... quant... on Wall Street."); the line's own "tts" covers only the setup.
 On every other line, leave cut_in, resume and punch as empty strings.
 
 LEDGER. Per line you wrote (index from 0): the claim (under 20 words), which side it supports (yes / no / neutral), and strength 1-5 (5 = specific, sourced and directly relevant; 1 = vague). For a turn that ANSWERS THE WITNESS, also record the witness's point once, with line_index -1 (their earlier points are already recorded).
 
-RULING. As THE JUDGE, over the whole exchange (EXCHANGE SO FAR plus your lines): t from -1 (clearly NO) to +1 (clearly YES), 0 = balanced; be decisive when one side argued better or had better evidence. The witness's points count: they show what matters to this person. Give confidence 0-1, one-sentence reasoning, the deciding argument, and the Judge's spoken ruling (max 30 words): which way it leans and why, in the Judge's own voice.`;
+RULING. As THE JUDGE, over the whole exchange (EXCHANGE SO FAR plus your lines): t from -1 (clearly NO) to +1 (clearly YES), 0 = balanced; be decisive when one side argued better or had better evidence. The witness's points count: they show what matters to this person. Give confidence 0-1, one-sentence reasoning, the deciding argument, and the Judge's spoken ruling (max 20 words): which way it leans and why, in the Judge's own voice.`;
 
 export const JUDGE_INTERRUPT_TASK = `The witness has interrupted THE JUDGE. Interrupting the Judge is always about the agenda:
 - action "add": they raised something the agenda misses. Create the topic (title, sub-question, research_speed) and its share of the total weight (0.05-0.6) based on how much it seems to matter to them.
 - action "remove": they said a topic doesn't matter to them. Give the id of that topic (only pending or active topics can be removed).
 - action "none": it's neither (e.g. a question). The Judge answers briefly and carries on.
-line: the Judge's spoken response confirming the change (max 30 words).`;
+line: the Judge's spoken response confirming the change (max 20 words).`;
 
 export const VERDICT_TASK = `You are THE JUDGE delivering the verdict. The position on the spectrum is already computed from the topic scores and weights; use it exactly, never change it.
-Write: explanation (2-4 sentences: which topics decided it and why, how the witness's own interrupts were weighed, and what would move the court the other way), and the spoken verdict line (max 60 words): build tension, then state the position and label.`;
+Write: explanation (2-4 sentences: which topics decided it and why, how the witness's own interrupts were weighed, and what would move the court the other way), and the spoken verdict line (max 35 words): build tension, then state the position and label.`;
 
 export function cardsBlock(cards: EvidenceCard[]): string {
   if (!cards.length) return 'EVIDENCE CARDS: (none yet)';
