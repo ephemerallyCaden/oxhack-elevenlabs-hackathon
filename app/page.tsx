@@ -30,6 +30,16 @@ import {
 
 type Step = "welcome" | "back" | "voice" | "selfie" | "thinking" | "confirm";
 
+/** One click fills the question box: a spread of big, arguable life decisions (study, career, place, life). */
+const SUGGESTED_QUESTIONS = [
+  "Should I take a gap year before starting work?",
+  "Should I quit my job to start my own company?",
+  "Should I move to London after I graduate?",
+  "Should I do a master's degree?",
+  "Should I move abroad for two years?",
+  "Should I get a dog?",
+];
+
 /** Forget the last person's clone / selfie / profile (their clone may already be deleted). */
 function clearSession() {
   try {
@@ -386,6 +396,16 @@ export default function Home() {
                     onKeyDown={(e) => e.key === "Enter" && toCourt()}
                   />
                 </label>
+                <div className="flex flex-col gap-2">
+                  <span className="ct-kicker">Stuck? Try one</span>
+                  <div className="ct-chips">
+                    {SUGGESTED_QUESTIONS.map((q) => (
+                      <button key={q} type="button" className="ct-chip cursor-pointer hover:border-[var(--c-brass)]" disabled={busy} onClick={() => setQuestion(q)}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="ct-htt self-start">
                   <HoldToTalk label="Hold to say your question" spacebar={false} onTranscript={setQuestion} />
                 </div>
