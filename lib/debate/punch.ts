@@ -1,6 +1,6 @@
 // Surprise punches: the emphasised ending of an argument line, played as its own shot + clip.
-// Rules (owned by code, like cut-ins): YES/NO only, max one per side per topic, never on a
-// line that gets cut off.
+// Rules (owned by code, like cut-ins): YES/NO only, max one per topic (whichever side lands it
+// first), never on a line that gets cut off.
 import type { Line, Side } from '@/types';
 import { TAG_PALETTE } from '@/lib/voice/configs';
 
@@ -43,7 +43,7 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   if (line.speaker !== 'prosecution' && line.speaker !== 'defense') return false;
   const side: Side = line.speaker === 'prosecution' ? 'yes' : 'no';
   const words = punch.split(/\s+/).length;
-  if (used.has(side) || words > MAX_WORDS || !line.text.trim()) return false;
+  if (used.size > 0 || words > MAX_WORDS || !line.text.trim()) return false;
   used.add(side);
   line.text = `${line.text.trim()} ${punch}`;
   line.punch = { text: punch, tts: punchTts(line.speaker, draft!.tts, punch) };

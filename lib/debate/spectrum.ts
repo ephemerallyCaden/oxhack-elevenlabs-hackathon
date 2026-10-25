@@ -1,7 +1,7 @@
 // Pure scoring maths: weights, topic balance, spectrum. Everything the verdict's numbers come from.
 import type { LedgerEntry, Spectrum, SpectrumLabel, Topic } from '@/types';
 
-export const MAX_TOPICS = 4;
+export const MAX_TOPICS = 2;
 
 const live = (t: Topic) => t.status !== 'removed';
 
