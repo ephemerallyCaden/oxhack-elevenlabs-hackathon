@@ -1,32 +1,33 @@
 // The trial state machine (browser side). Design: docs/design-core-loop.md
 //
-//   ask → preparing (cut-scene: agenda + quick research) → opening
-//     → OUTER LOOP per topic: intro → INNER LOOP (2 cycles of YES → NO, +1 per user interrupt) → Judge scores → spectrum
+//   ask → preparing (cut-scene: setup call + quick research) → opening
+//     → OUTER LOOP per topic: intro → INNER LOOP (2 cycles of YES → NO, +1 per user interrupt) → Judge's ruling → spectrum
 //     → verdict → done (transcript)
+//
+// Gemini's free tier allows 5 calls a minute, so lines are written in batches: one setup call, one call
+// per topic (pre-written while the previous topic plays), one per user interrupt, one verdict.
 //
 // The UI renders `state.scene` + `state.current`, plays the line (audioUrl, or durationMs as a timer)
 // and calls `lineEnded(id)` when it finishes. Interrupts: `beginInterrupt()` on hold, `endInterrupt(audio|text)` on release.
 import type {
-  AgendaResponse,
-  ArgueRequest,
-  ArgueResponse,
   EvidenceCard,
   JudgeInterruptResponse,
   LedgerEntry,
   Line,
   Personas,
-  PersonasResponse,
   ProfileRequest,
   ProfileResponse,
   ResearchResponse,
   Scene,
-  ScoreArgumentResponse,
-  ScoreTopicResponse,
+  SetupResponse,
   Side,
   Speaker,
   Spectrum,
   SttResponse,
   Topic,
+  TopicRequest,
+  TopicResponse,
+  TopicTurn,
   Transcript,
   TtsResponse,
   UserProfile,
@@ -35,7 +36,7 @@ import type {
 } from '@/types';
 import { SPEAKER_SCENE } from '@/types';
 import { estimateMs, postJson, uid, withFallback } from './fallback';
-import { mockAgenda, mockArgue, mockCards, mockJudgeInterrupt, mockPersonas, mockProfile, mockScoreArgument, mockScoreTopic, mockVerdict } from './mock';
+import { mockCards, mockJudgeInterrupt, mockProfile, mockSetup, mockTopic, mockVerdict } from './mock';
 import { addTopic, computeSpectrum, removeTopic } from './spectrum';
 import { buildTranscript } from './transcript';
 import { TIMEOUTS } from './timeouts';
@@ -86,15 +87,20 @@ export class TrialOrchestrator {
 
   private intros: Record<string, Line> = {};
   private quickResearch = new Map<string, Promise<void>>();
-  private ledgerPending: Promise<void>[] = [];
+  /** Topics written ahead of time (while the previous topic plays). */
+  private prewritten = new Map<string, Promise<TopicResponse>>();
+  /** Voice for the next line, fetched while the current one plays. */
+  private voiced = new Map<string, Promise<Line>>();
+  /** Ledger entries for lines not yet said; recorded as each line plays. */
+  private pendingLedger = new Map<string, LedgerEntry>();
   /** Resolves the line currently being said. */
   private sayResolve?: (r: SayResult) => void;
   private inputResolve?: (input: Blob | string | null) => void;
   private inputPromise?: Promise<Blob | string | null>;
   /** Bumped on every interrupt so stale prefetched lines are thrown away. */
   private epoch = 0;
-  /** User interrupts of YES/NO answered during the current turn: each adds one cycle. */
-  private userAddedCycles = 0;
+  /** Set when the user interrupts YES/NO: debate() rewrites the rest of the topic around it. */
+  private userPoint?: { text: string; side: Side };
 
   constructor(private opts: { voiceId?: string; profile?: UserProfile } = {}) {}
 
@@ -176,7 +182,8 @@ export class TrialOrchestrator {
   }
 
   private async say(line: Line): Promise<SayResult> {
-    const ready = await this.prepare(line);
+    const ready = await (this.voiced.get(line.id) ?? this.prepare(line));
+    this.voiced.delete(line.id);
     const done = new Promise<SayResult>((r) => (this.sayResolve = r));
     this.set({
       phase: 'speaking',
@@ -188,6 +195,7 @@ export class TrialOrchestrator {
     });
     const result = await done;
     this.sayResolve = undefined;
+    this.recordLedger();
     // The line is over: no interrupting it while the next one is generated/voiced.
     if (result === 'done') this.set({ canInterrupt: false });
     return result;
@@ -231,30 +239,31 @@ export class TrialOrchestrator {
   // ── the trial ─────────────────────────────────────────────────────────────
   private async run() {
     const { question, profile } = this.state;
-    // Agenda and the two future selves are independent: build both during the cut-scene.
-    const [agenda, cast] = await Promise.all([
-      this.call<AgendaResponse>('/api/trial/agenda', { question, profile }, () => mockAgenda(question), TIMEOUTS.agenda.client),
-      this.call<PersonasResponse>('/api/trial/personas', { question, profile }, () => mockPersonas({ question, profile }), TIMEOUTS.personas.client),
-    ]);
-    this.intros = agenda.intros;
-    this.set({ agenda: agenda.topics, personas: cast.personas });
-    this.research(agenda.topics);
-    // Hold the cut-scene until the first topic has its quick evidence.
-    await this.quickResearch.get(agenda.topics[0].id);
-
-    await this.sayHandled(agenda.opening);
+    // One call for the whole cut-scene: agenda, Judge lines and both future selves.
+    const setup = await this.call<SetupResponse>('/api/trial/setup', { question, profile }, () => mockSetup({ question, profile }), TIMEOUTS.setup.client);
+    this.intros = setup.intros;
+    this.set({ agenda: setup.topics, personas: setup.personas });
+    this.research(setup.topics);
+    // Write the first topic while the Judge's opening plays.
+    this.prewrite(setup.topics[0].id);
+    await this.sayHandled(setup.opening);
 
     let topic: Topic | undefined;
     while ((topic = this.state.agenda.find((t) => t.status === 'pending'))) {
       this.patchTopic(topic.id, { status: 'active' });
       this.set({ activeTopicId: topic.id, cycle: 1, totalCycles: BASE_CYCLES });
-      await this.quickResearch.get(topic.id);
+      this.prewrite(topic.id);
       const intro = this.intros[topic.id] ?? { id: uid('line'), speaker: 'judge', kind: 'intro', text: `Next: ${topic.title.toLowerCase()}. ${topic.question} Prosecution?`, cites: [], topic_id: topic.id };
       await this.sayHandled(intro);
       if (this.topic(topic.id)?.status !== 'active') continue; // removed by the user during the intro
-      await this.debate(topic.id);
-      if (this.topic(topic.id)?.status !== 'active') continue;
-      await this.score(topic.id);
+      // Pre-write the next topic while this one plays (~1 min), so its call fits the rate limit.
+      const next = this.state.agenda.find((t) => t.status === 'pending');
+      if (next) this.prewrite(next.id);
+      const res = await this.debate(topic.id);
+      if (!res || this.topic(topic.id)?.status !== 'active') continue;
+      this.patchTopic(topic.id, { status: 'done', score: res.score });
+      this.set({ spectrum: computeSpectrum(this.state.agenda) });
+      await this.sayHandled(res.ruling);
     }
 
     this.thinking('The court retires to consider its verdict…');
@@ -279,105 +288,109 @@ export class TrialOrchestrator {
     return this.state.transcript.filter((l) => l.topic_id === topicId && l.kind !== 'intro');
   }
 
-  private argueReq(topicId: string, side: Side, cycle: number, extra: Line[] = [], userPoint?: string, cutInAllowed = false): ArgueRequest {
-    return {
+  /** One call: the given turns for a topic (+ its ledger and the Judge's ruling). */
+  private writeTopic(topicId: string, turns: TopicTurn[], opts: { urgent: boolean; userPoint?: string; cutInAllowed: boolean }) {
+    const req: TopicRequest = {
       question: this.state.question,
       topic: this.topic(topicId)!,
-      side,
-      persona: this.state.personas?.[side],
+      personas: this.state.personas,
       profile: this.state.profile,
-      cycle,
-      history: [...this.topicLines(topicId), ...extra],
       cards: this.state.cards.filter((c) => c.topic_id === topicId),
-      userPoint,
-      cutInAllowed,
+      history: this.topicLines(topicId),
+      turns,
+      userPoint: opts.userPoint,
+      cutInAllowed: opts.cutInAllowed,
+      urgent: opts.urgent,
     };
+    return this.call<TopicResponse>('/api/trial/topic', req, () => mockTopic(req), opts.urgent ? TIMEOUTS.topicUrgent.client : TIMEOUTS.topic.client);
   }
 
-  private argue(req: ArgueRequest) {
-    return this.call<ArgueResponse>('/api/trial/argue', req, () => mockArgue(req), TIMEOUTS.argue.client);
+  private basePlan(): TopicTurn[] {
+    const turns: TopicTurn[] = [];
+    for (let c = 1; c <= BASE_CYCLES; c++) turns.push({ side: 'yes', cycle: c }, { side: 'no', cycle: c });
+    return turns;
+  }
+
+  /** Start writing a topic in the background (once), after its quick research has landed. */
+  private prewrite(topicId: string) {
+    if (this.prewritten.has(topicId)) return;
+    const research = this.quickResearch.get(topicId) ?? Promise.resolve();
+    this.prewritten.set(topicId, research.then(() => this.writeTopic(topicId, this.basePlan(), { urgent: false, cutInAllowed: true })));
+  }
+
+  /** Ledger entries for lines that have now been said (or the user's points) go into state. */
+  private recordLedger() {
+    const said = new Set(this.state.transcript.map((l) => l.id));
+    const now = [...this.pendingLedger.values()].filter((e) => said.has(e.line_id));
+    if (!now.length) return;
+    for (const e of now) this.pendingLedger.delete(e.line_id);
+    this.set({ ledger: [...this.state.ledger, ...now] });
+  }
+
+  private queueLedger(res: TopicResponse) {
+    for (const e of res.ledger) this.pendingLedger.set(e.line_id, e);
+    this.recordLedger();
   }
 
   /**
-   * INNER LOOP: YES → NO for BASE_CYCLES cycles; each user interrupt of a side appends one more cycle.
-   * The next line is generated (and voiced) while the current one plays.
-   * An AI cut-in plays inside the turn: speaker (cut off) → other side cuts in → speaker resumes.
+   * INNER LOOP: plays the topic's pre-written exchange. A user interrupt of YES/NO adds a cycle and
+   * rewrites the rest of the topic in one call: the interrupted side answers first, then the remaining
+   * turns, so nobody speaks twice in a row. AI cut-ins arrive as cut-off line → cut_in → resume.
+   * Returns the latest score + ruling, or null if the topic was removed.
    */
-  private async debate(topicId: string) {
-    const turns: { side: Side; cycle: number }[] = [];
-    for (let c = 1; c <= BASE_CYCLES; c++) turns.push({ side: 'yes', cycle: c }, { side: 'no', cycle: c });
+  private async debate(topicId: string): Promise<TopicResponse | null> {
+    let plan = this.basePlan();
     let total = BASE_CYCLES;
-    let cutInUsed = false;
+    let cutUsed = false;
 
-    let prefetch: { epoch: number; p: Promise<ArgueResponse> } | null = null;
-    const exhausted = new Set<Side>();
-    for (let i = 0; i < turns.length; i++) {
-      if (this.topic(topicId)?.status !== 'active') return;
-      const { side, cycle } = turns[i];
-      this.set({ cycle, totalCycles: total });
-      if (!prefetch) this.thinking(side === 'yes' ? 'The prosecution prepares…' : 'The defense prepares…', side);
-      const res =
-        prefetch && prefetch.epoch === this.epoch ? await prefetch.p : await this.argue(this.argueReq(topicId, side, cycle, [], undefined, !cutInUsed));
-      prefetch = null;
-      if (res.exhausted) exhausted.add(side);
-      const cutIn = res.cutIn && !cutInUsed ? res.cutIn : undefined;
-      if (cutIn) cutInUsed = true;
-
-      const next = turns[i + 1];
-      if (next && exhausted.size < 2) {
-        const epoch = this.epoch;
-        const said = cutIn ? [res.line, cutIn.line, cutIn.resume] : [res.line];
-        const req = this.argueReq(topicId, next.side, next.cycle, said, undefined, !cutInUsed);
-        prefetch = { epoch, p: this.argue(req).then(async (r) => ({ ...r, line: await this.prepare(r.line) })) };
-      }
-
-      const epoch = this.epoch;
-      this.userAddedCycles = 0;
-      this.scoreInBackground(topicId, res.line);
-      await this.sayHandled(res.line);
-      // Cut-in: only if the user didn't interrupt the line it cuts into.
-      if (cutIn && this.epoch === epoch && this.topic(topicId)?.status === 'active') {
-        for (const l of [cutIn.line, cutIn.resume]) {
-          if (this.epoch !== epoch) break;
-          this.scoreInBackground(topicId, l);
-          await this.sayHandled(l);
-        }
-      }
-      for (; this.userAddedCycles > 0; this.userAddedCycles--) {
-        // The user interrupted YES/NO: one more cycle at the end of the topic. The interrupted side has
-        // already answered; the other side replies as the next scheduled turn, so turns still alternate.
-        total++;
-        turns.push({ side: 'yes', cycle: total }, { side: 'no', cycle: total });
-        exhausted.clear();
-        this.set({ totalCycles: total });
-      }
-      // Both sides out of new points after a full cycle → the Judge closes the topic early.
-      if (side === 'no' && exhausted.size === 2) return;
-    }
-  }
-
-  private scoreInBackground(topicId: string, line: Line) {
-    const topic = this.topic(topicId);
-    if (!topic) return;
-    const req = { question: this.state.question, topic, line, cards: this.state.cards.filter((c) => c.topic_id === topicId) };
-    this.ledgerPending.push(
-      this.call<ScoreArgumentResponse>('/api/trial/score-argument', req, () => ({ entry: mockScoreArgument(req), fallback: true }), TIMEOUTS.scoreArgument.client).then((r) =>
-        this.set({ ledger: [...this.state.ledger, r.entry] }),
-      ),
+    let res = await this.waitFor(
+      this.prewritten.get(topicId) ?? this.writeTopic(topicId, plan, { urgent: true, cutInAllowed: true }),
+      'The court prepares the exchange…',
     );
+    this.prewritten.delete(topicId);
+    this.queueLedger(res);
+    let queue = res.lines;
+
+    for (let i = 0; i < queue.length; i++) {
+      if (this.topic(topicId)?.status !== 'active') return null;
+      const line = queue[i];
+      this.set({ cycle: line.cycle ?? this.state.cycle, totalCycles: total });
+      if (line.kind === 'cut_in') cutUsed = true;
+      const after = queue[i + 1];
+      if (after && !this.voiced.has(after.id)) this.voiced.set(after.id, this.prepare(after));
+
+      await this.sayHandled(line);
+      if (!this.userPoint) continue;
+
+      // The user interrupted this line's speaker: +1 cycle, rewrite the rest of the topic around their point.
+      const { text, side } = this.userPoint;
+      this.userPoint = undefined;
+      total++;
+      const parentSide: Side =
+        line.kind === 'cut_in' ? (line.speaker === 'prosecution' ? 'no' : 'yes') : line.speaker === 'prosecution' ? 'yes' : 'no';
+      const at = line.kind === 'answer' ? 0 : plan.findIndex((t) => !t.answer && t.cycle === line.cycle && t.side === parentSide);
+      const rest = plan.slice(at + 1).filter((t) => !t.answer);
+      plan = [{ side, cycle: line.cycle ?? 1, answer: true }, ...rest, { side: 'yes', cycle: total }, { side: 'no', cycle: total }];
+      this.set({ totalCycles: total });
+      for (const l of queue.slice(i + 1)) this.voiced.delete(l.id);
+      res = await this.waitFor(
+        this.writeTopic(topicId, plan, { urgent: true, userPoint: text, cutInAllowed: !cutUsed }),
+        'The court considers your objection…',
+        'witness',
+      );
+      this.queueLedger(res);
+      queue = res.lines;
+      i = -1;
+    }
+    return res;
   }
 
-  /** Judge closes the topic, scores it, moves the spectrum. */
-  private async score(topicId: string) {
-    this.thinking('The court weighs the arguments…');
-    await Promise.all(this.ledgerPending);
-    this.ledgerPending = [];
-    const topic = this.topic(topicId)!;
-    const req = { question: this.state.question, topic, ledger: this.state.ledger.filter((e) => e.topic_id === topicId), history: this.topicLines(topicId) };
-    const r = await this.call<ScoreTopicResponse>('/api/trial/score-topic', req, () => mockScoreTopic(req), TIMEOUTS.scoreTopic.client);
-    this.patchTopic(topicId, { status: 'done', score: r.score });
-    this.set({ spectrum: computeSpectrum(this.state.agenda) });
-    await this.sayHandled(r.line);
+  /** Await a call; show a status only if it isn't already done (pre-written topics usually are). */
+  private async waitFor<T>(p: Promise<T>, status: string, scene: Scene = 'judge'): Promise<T> {
+    const quick = await Promise.race([p, new Promise<null>((r) => setTimeout(() => r(null), 30))]);
+    if (quick !== null) return quick as T;
+    this.thinking(status, scene);
+    return p;
   }
 
   // ── interrupts ────────────────────────────────────────────────────────────
@@ -419,14 +432,8 @@ export class TrialOrchestrator {
     if (target === 'judge') return this.agendaChange(text);
     if (!topicId) return;
 
-    // A side was interrupted: it must answer the user's point. debate() then adds a cycle; the other
-    // side replies as the next scheduled turn, so nobody speaks twice in a row.
-    const side: Side = target === 'prosecution' ? 'yes' : 'no';
-    this.scoreInBackground(topicId, userLine);
-    const answer = await this.argue(this.argueReq(topicId, side, this.state.cycle, [], text));
-    this.scoreInBackground(topicId, answer.line);
-    await this.sayHandled(answer.line);
-    this.userAddedCycles++;
+    // A side was interrupted: debate() rewrites the rest of the topic so that side answers first (+1 cycle).
+    this.userPoint = { text, side: target === 'prosecution' ? 'yes' : 'no' };
   }
 
   /** User interrupted the Judge → add or remove a topic. */

@@ -1,23 +1,20 @@
-// Server-side trial calls (one Claude call each). Every one falls back to lib/debate/mock.ts.
+// Server-side trial calls. Claude when ANTHROPIC_API_KEY is set, else Gemini (rate-limited for the free
+// tier, see ratelimit.ts), else the mocks in lib/debate/mock.ts. Every call falls back to its mock.
 import { z } from 'zod';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import type {
-  AgendaResponse,
-  ArgueRequest,
-  ArgueResponse,
   JudgeInterruptRequest,
   JudgeInterruptResponse,
+  LedgerEntry,
   Line,
   Persona,
-  PersonasRequest,
-  PersonasResponse,
   ProfileRequest,
   ProfileResponse,
-  ScoreArgumentRequest,
-  ScoreArgumentResponse,
-  ScoreTopicRequest,
-  ScoreTopicResponse,
+  SetupRequest,
+  SetupResponse,
   Topic,
+  TopicRequest,
+  TopicResponse,
   UserProfile,
   VerdictRequest,
   VerdictResponse,
@@ -26,8 +23,9 @@ import { SIDE_SPEAKER } from '@/types';
 import { claude, hasClaudeKey, MODEL } from './claude';
 import { askGemini, hasGeminiKey } from './gemini';
 import { uid, withFallback } from './fallback';
+import type { Priority } from './ratelimit';
 import { TIMEOUTS } from './timeouts';
-import { mergeProfile, mockAgenda, mockArgue, mockJudgeInterrupt, mockPersonas, mockProfile, mockScoreArgument, mockScoreTopic, mockVerdict, onboardingText } from './mock';
+import { mergeProfile, mockJudgeInterrupt, mockProfile, mockSetup, mockTopic, mockVerdict, onboardingText } from './mock';
 import * as P from './prompts';
 import { computeSpectrum, MAX_TOPICS, normalise, orderAgenda } from './spectrum';
 
@@ -43,7 +41,11 @@ function debateLlm(): 'claude' | 'gemini' | 'mock' {
   return 'mock';
 }
 
-/** One structured Claude/Gemini call → parsed object, or `fallback()` if no key / error / timeout. */
+/**
+ * One structured Claude/Gemini call → parsed object, or `fallback()` if no key / error / timeout.
+ * Gemini calls go through the model pool (gemini.ts + ratelimit.ts): they wait for a free slot and fail
+ * over to the next model within the same time budget (`ms`).
+ */
 async function ask<S extends z.ZodType, R>(
   task: string,
   content: string,
@@ -52,19 +54,22 @@ async function ask<S extends z.ZodType, R>(
   label: string,
   build: (out: z.infer<S>) => R,
   fallback: () => R,
+  priority: Priority = 'interactive',
 ): Promise<{ value: R; fallback: boolean }> {
   const llm = debateLlm();
   if (llm === 'mock') return { value: fallback(), fallback: true };
+  const system = `${P.COURT}\n\n${task}`;
   if (llm === 'gemini') {
-    return withFallback(async (signal) => build(await askGemini(`${P.COURT}\n\n${task}`, content, schema, signal)), fallback, ms, label);
+    const deadline = Date.now() + ms;
+    return withFallback(async (signal) => build(await askGemini(system, content, schema, signal, priority, deadline)), fallback, ms, label);
   }
   return withFallback(
     async (signal) => {
       const res = await claude().messages.parse(
         {
           model: MODEL,
-          max_tokens: 4000,
-          system: `${P.COURT}\n\n${task}`,
+          max_tokens: 8000,
+          system,
           messages: [{ role: 'user', content }],
           output_config: { effort: 'low', format: zodOutputFormat(schema) },
         },
@@ -85,9 +90,16 @@ const judgeLine = (kind: Line['kind'], s: { text: string; tts: string }, topic_i
   return { id: uid('line'), speaker: 'judge', kind, text: s.text, tts: s.tts, cites: [], topic_id };
 };
 
-// ─── agenda ─────────────────────────────────────────────────────────────────
+// ─── setup (cut-scene): agenda + Judge lines + personas in ONE call ─────────
 
-const AgendaSchema = z.object({
+const PersonaSchema = z.object({
+  years_from_now: z.number(),
+  when: z.string(),
+  age: z.number().nullable(),
+  snapshot: z.string(),
+  mood: z.string(),
+});
+const SetupSchema = z.object({
   topics: z.array(
     z.object({
       title: z.string(),
@@ -98,17 +110,17 @@ const AgendaSchema = z.object({
     }),
   ),
   opening: Spoken,
+  personas: z.object({ yes: PersonaSchema, no: PersonaSchema }),
 });
 
-export async function buildAgenda(question: string, profile?: UserProfile): Promise<AgendaResponse> {
-  const { value, fallback } = await ask(
-    P.AGENDA_TASK,
-    `QUESTION: ${question}
-${P.profileBlock(profile)}`,
-    AgendaSchema,
-    TIMEOUTS.agenda.server,
-    'agenda',
-    (out): AgendaResponse => {
+export async function buildSetup(req: SetupRequest): Promise<SetupResponse> {
+  const { value } = await ask(
+    P.SETUP_TASK,
+    `QUESTION: ${req.question}\n${P.profileBlock(req.profile)}`,
+    SetupSchema,
+    TIMEOUTS.setup.server,
+    'setup',
+    (out): SetupResponse => {
       if (!out.topics.length) throw new Error('empty agenda');
       const withIntros = out.topics.slice(0, MAX_TOPICS).map((t, i) => ({
         topic: { id: `topic-${i + 1}`, title: t.title, question: t.question, importance: t.importance, research_speed: t.research_speed, status: 'pending', added_by: 'judge' } as Topic,
@@ -117,11 +129,128 @@ ${P.profileBlock(profile)}`,
       const topics = orderAgenda(normalise(withIntros.map((x) => x.topic)));
       const intros: Record<string, Line> = {};
       for (const x of withIntros) intros[x.topic.id] = judgeLine('intro', x.intro, x.topic.id);
-      return { topics, opening: judgeLine('opening', out.opening), intros, fallback: false };
+      const persona = (side: 'yes' | 'no', p: z.infer<typeof PersonaSchema>): Persona => {
+        if (!p.snapshot.trim()) throw new Error('empty persona');
+        const years = Math.min(30, Math.max(0.25, p.years_from_now));
+        const age = req.profile?.age != null ? Math.round(req.profile.age + years) : p.age ?? undefined;
+        return { side, age, when: p.when, years_from_now: years, snapshot: p.snapshot, mood: p.mood };
+      };
+      return {
+        topics,
+        opening: judgeLine('opening', out.opening),
+        intros,
+        personas: { yes: persona('yes', out.personas.yes), no: persona('no', out.personas.no) },
+        fallback: false,
+      };
     },
-    () => mockAgenda(question),
+    () => mockSetup(req),
   );
-  return { ...value, fallback: value.fallback || fallback };
+  return value;
+}
+
+// ─── topic: the whole YES ↔ NO exchange + ledger + Judge's ruling in ONE call ─
+
+const TopicSchema = z.object({
+  lines: z.array(
+    z.object({
+      text: z.string(),
+      tts: z.string(),
+      cites: z.array(z.string()),
+      cut_in: Spoken.describe('The other side cutting in; empty strings if none'),
+      resume: Spoken.describe("The speaker's comeback after the cut-in; empty strings if none"),
+    }),
+  ),
+  ledger: z.array(
+    z.object({
+      line_index: z.number().int().describe('Index into lines; -1 for a point the witness made earlier'),
+      claim: z.string(),
+      supports: z.enum(['yes', 'no', 'neutral']),
+      strength: z.number().int(),
+    }),
+  ),
+  t: z.number(),
+  confidence: z.number(),
+  reasoning: z.string(),
+  deciding_argument: z.string(),
+  ruling: Spoken,
+});
+
+export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
+  const valid = new Set(req.cards.map((c) => c.id));
+  const t = req.urgent ? TIMEOUTS.topicUrgent : TIMEOUTS.topic;
+  const { value } = await ask(
+    P.TOPIC_TASK,
+    [
+      P.topicBlock(req.question, req.topic),
+      P.profileBlock(req.profile),
+      P.personasBlock(req.personas),
+      P.cardsBlock(req.cards),
+      P.historyBlock(req.history),
+      `CUT-IN ALLOWED: ${req.cutInAllowed ? 'yes' : 'no'}`,
+      P.turnsBlock(req.turns, req.userPoint),
+    ].join('\n'),
+    TopicSchema,
+    t.server,
+    'topic',
+    (out): TopicResponse => {
+      // The code owns the structure: one line per planned turn, speakers from the plan.
+      if (out.lines.length < req.turns.length || req.turns.some((_, i) => !out.lines[i].text.trim()))
+        throw new Error(`topic: ${out.lines.length} lines for ${req.turns.length} turns`);
+      const lines: Line[] = [];
+      const byIndex: Line[] = [];
+      let cutUsed = !req.cutInAllowed;
+      req.turns.forEach((turn, i) => {
+        const o = out.lines[i];
+        const base = { topic_id: req.topic.id, cycle: turn.cycle };
+        const line: Line = {
+          id: uid('line'),
+          speaker: SIDE_SPEAKER[turn.side],
+          kind: turn.answer ? 'answer' : 'argument',
+          text: o.text,
+          tts: o.tts,
+          cites: o.cites.filter((c) => valid.has(c)),
+          ...base,
+        };
+        lines.push(line);
+        byIndex.push(line);
+        if (!cutUsed && !turn.answer && o.cut_in.text.trim() && o.resume.text.trim()) {
+          cutUsed = true;
+          const other = turn.side === 'yes' ? 'no' : 'yes';
+          lines.push(
+            { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in', text: o.cut_in.text, tts: o.cut_in.tts, cites: [], ...base },
+            { id: uid('line'), speaker: SIDE_SPEAKER[turn.side], kind: 'resume', text: o.resume.text, tts: o.resume.tts, cites: [], ...base },
+          );
+        } else if (line.text.trim().endsWith('—')) {
+          // No cut-in for this line: don't leave it hanging mid-sentence.
+          line.text = line.text.trim().replace(/—$/, '.');
+          if (line.tts) line.tts = line.tts.trim().replace(/—$/, '.');
+        }
+      });
+      const userLine = [...req.history].reverse().find((l) => l.speaker === 'user');
+      const ledger: LedgerEntry[] = out.ledger
+        .map((e): LedgerEntry | null => {
+          const line = e.line_index === -1 ? userLine : byIndex[e.line_index];
+          if (!line) return null;
+          return { id: uid('ledger'), line_id: line.id, topic_id: req.topic.id, by: line.speaker, supports: e.supports, claim: e.claim, strength: Math.min(5, Math.max(1, e.strength)), card_ids: line.cites };
+        })
+        .filter((e): e is LedgerEntry => e !== null);
+      return {
+        lines,
+        ledger,
+        score: {
+          t: Math.max(-1, Math.min(1, out.t)),
+          confidence: Math.max(0, Math.min(1, out.confidence)),
+          reasoning: out.reasoning,
+          deciding_argument: out.deciding_argument,
+        },
+        ruling: judgeLine('score', out.ruling, req.topic.id),
+        fallback: false,
+      };
+    },
+    () => mockTopic(req),
+    req.urgent ? 'interactive' : 'background',
+  );
+  return value;
 }
 
 // ─── profile (onboarding) ───────────────────────────────────────────────────
@@ -162,163 +291,6 @@ export async function extractProfile(req: ProfileRequest): Promise<ProfileRespon
       return { profile: mergeProfile(extracted, req.form), question: out.question?.trim() || undefined, fallback: false };
     },
     () => mockProfile(req),
-  );
-  return value;
-}
-
-// ─── personas (cut-scene) ───────────────────────────────────────────────────
-
-const PersonaSchema = z.object({
-  years_from_now: z.number(),
-  when: z.string(),
-  age: z.number().nullable(),
-  snapshot: z.string(),
-  mood: z.string(),
-});
-const PersonasSchema = z.object({ yes: PersonaSchema, no: PersonaSchema });
-
-export async function buildPersonas(req: PersonasRequest): Promise<PersonasResponse> {
-  const { value } = await ask(
-    P.PERSONAS_TASK,
-    `QUESTION: ${req.question}
-${P.profileBlock(req.profile)}`,
-    PersonasSchema,
-    TIMEOUTS.personas.server,
-    'personas',
-    (out): PersonasResponse => {
-      const persona = (side: 'yes' | 'no', p: z.infer<typeof PersonaSchema>): Persona => {
-        if (!p.snapshot.trim()) throw new Error('empty persona'); // → mock fallback
-        const years = Math.min(30, Math.max(0.25, p.years_from_now));
-        const age = req.profile?.age != null ? Math.round(req.profile.age + years) : p.age ?? undefined;
-        return { side, age, when: p.when, years_from_now: years, snapshot: p.snapshot, mood: p.mood };
-      };
-      return { personas: { yes: persona('yes', out.yes), no: persona('no', out.no) }, fallback: false };
-    },
-    () => mockPersonas(req),
-  );
-  return value;
-}
-
-// ─── argue (inner loop) ─────────────────────────────────────────────────────
-
-const ArgueSchema = z.object({
-  text: z.string(),
-  tts: z.string(),
-  cites: z.array(z.string()),
-  exhausted: z.boolean(),
-  cut_in: Spoken.describe('The other side cutting in; empty strings if none'),
-  resume: Spoken.describe('Your comeback after the cut-in; empty strings if none'),
-});
-
-export async function argue(req: ArgueRequest): Promise<ArgueResponse> {
-  const valid = new Set(req.cards.map((c) => c.id));
-  const own = req.cards.filter((c) => c.side === req.side);
-  const { value } = await ask(
-    P.ARGUE_TASK,
-    `${P.topicBlock(req.question, req.topic)}
-YOU ARE: ${req.side === 'yes' ? 'PROSECUTION (YES), the best future you' : 'DEFENSE (NO), the worst future you'} · cycle ${req.cycle}
-${P.personaBlock(req.persona)}
-${P.profileBlock(req.profile)}
-CUT-IN ALLOWED: ${req.cutInAllowed && !req.userPoint ? 'yes' : 'no'}
-${P.cardsBlock(own)}
-${P.historyBlock(req.history)}${req.userPoint ? `\n\nUSER POINT (the witness just interrupted you): "${req.userPoint}"` : ''}`,
-    ArgueSchema,
-    TIMEOUTS.argue.server,
-    'argue',
-    (out): ArgueResponse => {
-      if (!out.text.trim()) throw new Error('empty argument'); // → mock fallback
-      const other = req.side === 'yes' ? 'no' : 'yes';
-      const cutIn =
-        req.cutInAllowed && !req.userPoint && out.cut_in.text.trim() && out.resume.text.trim()
-          ? {
-              line: { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in' as const, text: out.cut_in.text, tts: out.cut_in.tts, cites: [], topic_id: req.topic.id, cycle: req.cycle },
-              resume: { id: uid('line'), speaker: SIDE_SPEAKER[req.side], kind: 'resume' as const, text: out.resume.text, tts: out.resume.tts, cites: [], topic_id: req.topic.id, cycle: req.cycle },
-            }
-          : undefined;
-      return {
-        cutIn,
-        line: {
-          id: uid('line'),
-          speaker: SIDE_SPEAKER[req.side],
-          kind: req.userPoint ? 'answer' : 'argument',
-          text: out.text,
-          tts: out.tts,
-          cites: out.cites.filter((c) => valid.has(c)),
-          topic_id: req.topic.id,
-          cycle: req.cycle,
-        },
-        exhausted: out.exhausted,
-        fallback: false,
-      };
-    },
-    () => mockArgue(req),
-  );
-  return value;
-}
-
-// ─── ledger (background) ────────────────────────────────────────────────────
-
-const LedgerSchema = z.object({
-  claim: z.string(),
-  supports: z.enum(['yes', 'no', 'neutral']),
-  strength: z.number().int(),
-  card_ids: z.array(z.string()),
-});
-
-export async function scoreArgument(req: ScoreArgumentRequest): Promise<ScoreArgumentResponse> {
-  const { value, fallback } = await ask(
-    P.SCORE_ARGUMENT_TASK,
-    `${P.topicBlock(req.question, req.topic)}
-${P.cardsBlock(req.cards)}
-LINE (by ${req.line.speaker}): ${req.line.text}`,
-    LedgerSchema,
-    TIMEOUTS.scoreArgument.server,
-    'score-argument',
-    (out) => ({
-      id: uid('ledger'),
-      line_id: req.line.id,
-      topic_id: req.topic.id,
-      by: req.line.speaker,
-      supports: out.supports,
-      claim: out.claim,
-      strength: Math.min(5, Math.max(1, out.strength)),
-      card_ids: out.card_ids,
-    }),
-    () => mockScoreArgument(req),
-  );
-  return { entry: value, fallback };
-}
-
-// ─── topic score (outer loop) ───────────────────────────────────────────────
-
-const TopicScoreSchema = z.object({
-  t: z.number(),
-  confidence: z.number(),
-  reasoning: z.string(),
-  deciding_argument: z.string(),
-  line: Spoken,
-});
-
-export async function scoreTopic(req: ScoreTopicRequest): Promise<ScoreTopicResponse> {
-  const { value } = await ask(
-    P.SCORE_TOPIC_TASK,
-    `${P.topicBlock(req.question, req.topic)}
-${P.ledgerBlock(req.ledger)}
-${P.historyBlock(req.history)}`,
-    TopicScoreSchema,
-    TIMEOUTS.scoreTopic.server,
-    'score-topic',
-    (out): ScoreTopicResponse => ({
-      score: {
-        t: Math.max(-1, Math.min(1, out.t)),
-        confidence: Math.max(0, Math.min(1, out.confidence)),
-        reasoning: out.reasoning,
-        deciding_argument: out.deciding_argument,
-      },
-      line: judgeLine('score', out.line, req.topic.id),
-      fallback: false,
-    }),
-    () => mockScoreTopic(req),
   );
   return value;
 }

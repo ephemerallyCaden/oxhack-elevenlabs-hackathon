@@ -208,80 +208,64 @@ export interface Transcript {
 
 // ─── API shapes (all POST, JSON). Every response carries `fallback: true` when it used mock data. ──
 
-/** POST /api/trial/agenda */
-export interface AgendaRequest {
+// Gemini's free tier allows 5 calls a minute, so the trial is written in a few big calls instead of
+// one per line: setup (1), each topic (1, written while the previous topic plays), verdict (1),
+// plus 1 per interrupt. lib/debate/ratelimit.ts spaces them out.
+
+/** POST /api/trial/setup — the cut-scene: agenda + Judge lines + both future selves in one call. */
+export interface SetupRequest {
   question: string;
   profile?: UserProfile;
 }
-export interface AgendaResponse {
+export interface SetupResponse {
   /** 1-4 topics, quick-to-research first, importance normalised. */
   topics: Topic[];
   /** Judge's opening: names the question and the agenda. */
   opening: Line;
   /** One intro line per topic id. */
   intros: Record<string, Line>;
-  fallback: boolean;
-}
-
-/** POST /api/trial/personas — runs in the cut-scene, in parallel with the agenda. */
-export interface PersonasRequest {
-  question: string;
-  profile?: UserProfile;
-}
-export interface PersonasResponse {
   personas: Personas;
   fallback: boolean;
 }
 
-/** POST /api/trial/argue */
-export interface ArgueRequest {
-  question: string;
-  topic: Topic;
+/** One planned turn in a topic: who speaks, in which cycle. `answer` = replying to the user's interrupt. */
+export interface TopicTurn {
   side: Side;
-  /** The future self who is speaking (argues in the first person from their moment). */
-  persona?: Persona;
-  profile?: UserProfile;
   cycle: number;
-  /** All lines so far on this topic, oldest first. */
-  history: Line[];
-  /** Cards for this topic (both sides; the speaker should use its own). */
+  answer?: boolean;
+}
+
+/**
+ * POST /api/trial/topic — write the YES ↔ NO exchange for one topic, plus the Judge's score and ruling.
+ * Called once per topic (pre-written while the previous topic plays) and once more after each user
+ * interrupt, to rewrite the rest of the topic around the user's point.
+ */
+export interface TopicRequest {
+  question: string;
+  topic: Topic;
+  personas?: Personas;
+  profile?: UserProfile;
   cards: EvidenceCard[];
-  /** Set when answering the user's interrupt: the speaker must address it first. */
+  /** Lines already said on this topic (incl. the user's interrupt), oldest first. */
+  history: Line[];
+  /** The turns to write, in order. The code decides the structure; the model writes the words. */
+  turns: TopicTurn[];
+  /** What the user just said, if `turns[0].answer`. */
   userPoint?: string;
-  /** The other side may cut into this line (at most one cut-in per topic). */
-  cutInAllowed?: boolean;
+  /** The other side may cut in once (only if no cut-in has played on this topic yet). */
+  cutInAllowed: boolean;
+  /** true = the user is waiting (after an interrupt); false = pre-writing in the background. */
+  urgent: boolean;
 }
-export interface ArgueResponse {
-  line: Line;
-  /** The side has nothing new to add on this topic (lets the Judge close early). */
-  exhausted: boolean;
-  /** The other side cut in: play `line` (cut off), then `cutIn.line`, then `cutIn.resume`. */
-  cutIn?: { line: Line; resume: Line };
-  fallback: boolean;
-}
-
-/** POST /api/trial/score-argument (background) */
-export interface ScoreArgumentRequest {
-  question: string;
-  topic: Topic;
-  line: Line;
-  cards: EvidenceCard[];
-}
-export interface ScoreArgumentResponse {
-  entry: LedgerEntry;
-  fallback: boolean;
-}
-
-/** POST /api/trial/score-topic */
-export interface ScoreTopicRequest {
-  question: string;
-  topic: Topic;
+export interface TopicResponse {
+  /** In play order: one line per turn, with any cut-in's `cut_in` + `resume` lines right after its turn. */
+  lines: Line[];
+  /** Pros/cons tally for `lines`. */
   ledger: LedgerEntry[];
-  history: Line[];
-}
-export interface ScoreTopicResponse {
+  /** The Judge's verdict on the topic, given everything said (history + lines). */
   score: TopicScore;
-  line: Line;
+  /** The Judge's spoken ruling on the topic. */
+  ruling: Line;
   fallback: boolean;
 }
 
