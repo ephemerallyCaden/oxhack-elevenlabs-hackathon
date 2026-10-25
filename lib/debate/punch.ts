@@ -145,7 +145,9 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
     ].filter((u): u is RegExp => !!u);
     const scale = /\dk$/i.test(bare) ? /^thousand$/ : /\dm$/i.test(bare) ? /^million$/ : /\d(?:bn|b)$/i.test(bare) ? /^billion$/ : null;
     const all = words(tts);
-    if (units.some((u) => u.test(all[all.length - k - 1] ?? ''))) return false; // unit already said: the overlap is the punch's
+    // The unit was already said (scale words like "thousand" don't count): the overlap is the punch's.
+    const said = all[all.length - k - 1] ?? '';
+    if (!/^(?:thousand|k|grand)$/.test(said) && units.some((u) => u.test(said))) return false;
     const ov = all.slice(-k);
     const j = ov.findIndex((w) => units.some((u) => u.test(w)));
     // Number words before the unit only belong to the setup if its digits say them ("$5m" → million).
