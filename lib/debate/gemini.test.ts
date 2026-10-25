@@ -54,6 +54,17 @@ describe('askGemini (model pool caller)', () => {
     expect(models[1]).not.toBe(models[0]); // the model that answered badly sits out the retry
   });
 
+  it('a second bad answer goes to the mock, even if its text looks like a quota error', async () => {
+    const { askGroq } = await import('./groq');
+    const groq = vi.mocked(askGroq);
+    groq.mockReset();
+    groq.mockResolvedValue('{"lines": "429 RESOURCE_EXHAUSTED high demand"}');
+    const { askGemini } = await import('./gemini');
+
+    await expect(askGemini('system', 'content', schema, new AbortController().signal)).rejects.toBeInstanceOf(z.ZodError);
+    expect(groq).toHaveBeenCalledTimes(2); // no third call from mistaking it for a quota hold
+  });
+
   it('does not retry once the request is aborted', async () => {
     const { askGroq } = await import('./groq');
     const groq = vi.mocked(askGroq);

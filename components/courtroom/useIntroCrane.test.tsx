@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
 import { useRef } from 'react';
 import { useIntroCrane, type IntroMode } from './useIntroCrane';
@@ -24,7 +24,10 @@ function Harness({ mode }: { mode: IntroMode }) {
   );
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('useIntroCrane', () => {
   it('reveals the stage (data-ready) and holds the planes at the carpet frame', () => {
@@ -32,6 +35,17 @@ describe('useIntroCrane', () => {
     expect(getByTestId('stage').hasAttribute('data-ready')).toBe(true);
     expect(getByTestId('stage').dataset.intro).toBe('hold');
     expect(container.querySelector<HTMLElement>('[data-plane]')!.style.transform).toBe(planeTransform(1, 1));
+  });
+
+  it('puts the planes back at rest if the crane is cut off mid-play (play → none)', () => {
+    // jsdom has neither: full motion, frames on a timer.
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(performance.now()), 16));
+    const { getByTestId, container, rerender } = render(<Harness mode="hold" />);
+    rerender(<Harness mode="play" />);
+    expect(getByTestId('stage').dataset.intro).toBe('crane');
+    rerender(<Harness mode={null} />);
+    expect(container.querySelector<HTMLElement>('[data-plane]')!.style.transform).toBe(planeTransform(1, 0));
   });
 
   it('puts the planes back at rest if the trial ends before the crane plays (hold → none)', () => {

@@ -53,7 +53,8 @@ export async function saveUser(u: Omit<SavedUser, "id"> & { id?: string }): Prom
 export async function getUser(id: string): Promise<SavedUser | null> {
   if (!validId(id)) return null;
   if (supabase) {
-    const { data } = await supabase.from("users").select("id, profile, voice_id, selfie").eq("id", id).maybeSingle();
+    const { data, error } = await supabase.from("users").select("id, profile, voice_id, selfie").eq("id", id).maybeSingle();
+    if (error) throw new Error(`supabase select: ${error.message}`); // a failed lookup is not "no such user"
     return data ? { id: data.id, profile: data.profile ?? {}, voiceId: data.voice_id, ...unpackFaces(data.selfie) } : null;
   }
   try {
@@ -86,7 +87,9 @@ export async function listFaces(limit = 15): Promise<{ id: string; name?: string
 export async function deleteUser(id: string): Promise<SavedUser | null> {
   const user = await getUser(id);
   if (!user) return null;
-  if (supabase) await supabase.from("users").delete().eq("id", id);
-  else await rm(join(DIR, `${id}.json`), { force: true });
+  if (supabase) {
+    const { error } = await supabase.from("users").delete().eq("id", id);
+    if (error) throw new Error(`supabase delete: ${error.message}`); // never report "forgotten" when it wasn't
+  } else await rm(join(DIR, `${id}.json`), { force: true });
   return user;
 }

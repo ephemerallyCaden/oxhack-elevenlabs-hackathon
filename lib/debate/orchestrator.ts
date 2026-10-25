@@ -134,25 +134,31 @@ export class TrialOrchestrator {
   };
   getState = () => this.state;
   private set(patch: Partial<TrialState>) {
-    if (this.stopped) return;
     this.state = { ...this.state, ...patch };
     this.listeners.forEach((fn) => fn());
   }
 
   private stopped = false;
+  private abort = new AbortController();
   /**
-   * A newer trial replaced this one (the page remounted for a new "Take it to court"). From now on it
-   * makes no network calls (they fall back to the mocks at once), shows nothing and finishes silently,
-   * so it can't compete with the new trial for the model and search rate limits.
+   * A newer trial replaced this one (the page remounted for a new "Take it to court"). It shows nothing
+   * more (listeners dropped), aborts its requests in flight, makes no new ones (they fall back to the
+   * mocks at once) and unwinds at its next line, so it can't compete with the new trial for the model
+   * and search rate limits. Its state keeps updating internally, so nothing half-built can throw.
    */
   stop() {
     if (this.stopped) return;
     this.stopped = true;
     this.listeners.clear();
+    this.abort.abort();
     this.sayResolve?.('done');
+    this.inputResolve?.(null); // stopped mid-interrupt: release the wait for the user's words
   }
-  private post = <T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> =>
-    this.stopped ? Promise.reject(new Error('trial stopped')) : postJson<T>(url, body, signal);
+  private post = <T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> => {
+    if (this.stopped) return Promise.reject(new Error('trial stopped'));
+    const both = signal && typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, this.abort.signal]) : (signal ?? this.abort.signal);
+    return postJson<T>(url, body, both);
+  };
   private initial(): TrialState {
     return { phase: 'ask', scene: 'witness', question: '', agenda: [], cycle: 0, totalCycles: BASE_CYCLES, canInterrupt: false, spectrum: { value: 0, label: 'Toss-up' }, transcript: [], cards: [], ledger: [], fallbacks: [] };
   }
@@ -173,7 +179,7 @@ export class TrialOrchestrator {
   // ── UI → orchestrator ─────────────────────────────────────────────────────
   /** The user asked their question (already transcribed). Runs the whole trial. */
   async start(question: string, profile: UserProfile | undefined = this.opts.profile) {
-    if (this.state.phase !== 'ask') return; // already running (e.g. a double submit)
+    if (this.stopped || this.state.phase !== 'ask') return; // replaced, or already running (e.g. a double submit)
     this.state = { ...this.initial(), question, profile };
     this.set({ phase: 'preparing', scene: 'cutscene', status: 'The court is preparing the case…' });
     try {
@@ -378,7 +384,7 @@ export class TrialOrchestrator {
    * written ahead; `urgent` when the user is about to reach it (it then takes the reserved slot).
    */
   private prewrite(topicId: string, urgent = false) {
-    if (this.prewritten.has(topicId)) return;
+    if (this.stopped || !this.topic(topicId) || this.prewritten.has(topicId)) return;
     const research = this.quickResearch.get(topicId) ?? Promise.resolve();
     this.prewritten.set(topicId, research.then(() => this.writeTopic(topicId, this.basePlan(), { urgent, cutInAllowed: true })));
   }

@@ -495,12 +495,55 @@ describe('stop(): a replaced trial goes quiet', () => {
     }
   });
 
-  it('a stopped trial waiting on a line is released (it never hangs)', async () => {
+  it('a stopped trial waiting on a line unwinds: start() resolves', async () => {
     const orch = new TrialOrchestrator({});
     let speaking = false;
     orch.subscribe(() => (speaking ||= orch.getState().phase === 'speaking'));
-    orch.start('Should I learn to sail?');
+    const run = orch.start('Should I learn to sail?');
     await vi.waitFor(() => expect(speaking).toBe(true), { timeout: 3000 });
-    expect(() => orch.stop()).not.toThrow();
+    orch.stop();
+    await expect(Promise.race([run, new Promise((_, r) => setTimeout(() => r(new Error('still running')), 1000))])).resolves.toBeUndefined();
+  });
+
+  it('stopped while setup is still in flight: aborts it, no crash, no unhandled rejection', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(e);
+    process.on('unhandledRejection', onUnhandled);
+    let aborted = false;
+    vi.stubGlobal('fetch', (url: string, init?: { signal?: AbortSignal }) => {
+      if (String(url) !== '/api/trial/setup') return Promise.reject(new Error('offline'));
+      return new Promise((_, reject) => init?.signal?.addEventListener('abort', () => ((aborted = true), reject(new DOMException('aborted', 'AbortError')))));
+    });
+    try {
+      const orch = new TrialOrchestrator({});
+      const run = orch.start('Should I learn to sail?');
+      await new Promise((r) => setTimeout(r, 20));
+      orch.stop();
+      await Promise.race([run, new Promise((_, r) => setTimeout(() => r(new Error('still running')), 2000))]);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(aborted).toBe(true);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
+    }
+  });
+
+  it('stopped while the user is interrupting: the wait for their words is released', async () => {
+    const orch = new TrialOrchestrator({});
+    let speaking = false;
+    orch.subscribe(() => (speaking ||= orch.getState().phase === 'speaking'));
+    const run = orch.start('Should I learn to sail?');
+    await vi.waitFor(() => expect(speaking).toBe(true), { timeout: 3000 });
+    orch.beginInterrupt();
+    orch.stop();
+    await expect(Promise.race([run, new Promise((_, r) => setTimeout(() => r(new Error('still running')), 1000))])).resolves.toBeUndefined();
+  });
+
+  it('a stopped trial never starts', async () => {
+    const orch = new TrialOrchestrator({});
+    orch.stop();
+    await orch.start('Should I learn to sail?');
+    expect(orch.getState().phase).toBe('ask');
   });
 });

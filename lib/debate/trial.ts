@@ -207,7 +207,8 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
     'topic',
     (out): TopicResponse => {
       // The code owns the structure: one line per planned turn, speakers from the plan.
-      if (out.lines.length < req.turns.length || req.turns.some((_, i) => !out.lines[i].text.trim()))
+      // (Checked after cleaning: a line that was only a speaker label or audio tags is empty too.)
+      if (out.lines.length < req.turns.length || req.turns.some((_, i) => !plain(out.lines[i].text)))
         throw new Error(`topic: ${out.lines.length} lines for ${req.turns.length} turns`);
       const lines: Line[] = [];
       const byIndex: Line[] = [];
@@ -239,7 +240,7 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
           line.text = line.text.trim().replace(/—$/, '.');
           if (line.tts) line.tts = line.tts.trim().replace(/—$/, '.');
         } else {
-          attachPunch(line, o.punch, punched);
+          attachPunch(line, o.punch && { text: plain(o.punch.text), tts: unlabel(o.punch.tts) }, punched);
         }
       });
       // The witness's point being answered (line_index -1) is recorded once; earlier points already were.

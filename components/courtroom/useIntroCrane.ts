@@ -35,9 +35,9 @@ export function useIntroCrane(refs: Refs, mode: IntroMode, onDone?: () => void) 
     const stage = refs.stage.current;
     if (!stage) return;
     if (!mode) {
-      // Held on the carpet but never played (the trial ended or crashed while preparing): put the
-      // planes and camera back at rest, or the court shows half-lifted planes at the carpet frame.
-      if (stage.dataset.intro === 'hold') render(refs, 1, 0);
+      // The intro ended early (the trial ended or crashed while holding on the carpet or mid-crane): put
+      // the planes and camera back at rest, or the court shows half-lifted planes.
+      if (stage.dataset.intro && stage.dataset.intro !== 'done') render(refs, 1, 0);
       stage.dataset.intro = 'done';
       return;
     }

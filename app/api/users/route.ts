@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { z } from "zod";
 import type { UserProfile } from "@/types";
 import { elevenlabs } from "@/lib/voice/client";
@@ -16,6 +17,15 @@ const Body = z.object({
   heads: z.object({ front: Head, side: Head.optional() }).nullable().optional(),
 });
 
+/** after() outside a request (unit tests) throws: run the work inline there. */
+function later(work: () => Promise<void>) {
+  try {
+    after(work);
+  } catch {
+    void work();
+  }
+}
+
 // POST { profile, voiceId?, selfie?, heads? } → { id } — keep the signed-in user's voice, face and
 // profile ("Remember me"). Signed-in only: the row is keyed by their Supabase user id. Renames the
 // session_* voice clone to user_<id> so scripts/delete-clones.mjs (which removes session_* after
@@ -30,7 +40,11 @@ export async function POST(req: Request) {
   try {
     const before = await getUser(user.id);
     const saved = await saveUser({ id: user.id, profile: profile as UserProfile, voiceId: voiceId ?? null, selfie: selfie ?? heads?.front.src ?? null, heads: heads ?? null });
-    if (elevenlabs) {
+    invalidateJury();
+    // Voice clone housekeeping (up to 4 ElevenLabs calls) runs after the answer: the browser gives
+    // the save 5s, and a slow voice service must not make a saved user look unsaved.
+    const housekeeping = async () => {
+      if (!elevenlabs) return;
       const mine = `user_${saved}`;
       if (voiceId) {
         const voice = await elevenlabs.voices.get(voiceId).catch(() => null);
@@ -41,8 +55,8 @@ export async function POST(req: Request) {
         const old = await elevenlabs.voices.get(before.voiceId).catch(() => null);
         if (old?.name === mine) await elevenlabs.voices.delete(before.voiceId).catch(() => {});
       }
-    }
-    invalidateJury();
+    };
+    later(housekeeping);
     return Response.json({ id: saved, juryKey: juryKey(saved) });
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 500 });

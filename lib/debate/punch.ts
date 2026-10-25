@@ -17,6 +17,23 @@ export function punchedSides(history: Line[], topicId: string): Set<Side> {
   return used;
 }
 
+const words = (s: string) => s.toLowerCase().replace(/\[[^\]]*\]/g, ' ').replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+/** Does `text` already end with `tail` (case, punctuation and audio tags ignored)? */
+function endsWithWords(text: string, tail: string): boolean {
+  const a = words(text);
+  const b = words(tail);
+  return b.length > 0 && a.length >= b.length && b.every((w, i) => a[a.length - b.length + i] === w);
+}
+/** The tail as it follows `setup`: after a full stop it starts a new sentence (capitalised). */
+const tailAfter = (setup: string, tail: string) => (/[.!?]$/.test(setup.trim()) ? tail.charAt(0).toUpperCase() + tail.slice(1) : tail);
+const joinSentence = (setup: string, tail: string) => `${setup.trim()} ${tailAfter(setup, tail)}`;
+/** `text` without its last `n` words (tokens with letters/digits; audio tags and dashes don't count). */
+function dropWords(text: string, n: number): string {
+  const tokens = text.trim().split(/\s+/);
+  while (n > 0 && tokens.length) if (/[\p{L}\p{N}]/u.test(tokens.pop()!.replace(/\[[^\]]*\]/g, ''))) n--;
+  return tokens.join(' ');
+}
+
 /** The setup half of a punch line (everything before the punch). */
 export function setupText(line: Line): string {
   if (!line.punch) return line.text;
@@ -42,18 +59,24 @@ function punchTts(speaker: 'prosecution' | 'defense', tts: string, text: string)
 export function attachPunch(line: Line, draft: { text: string; tts: string } | undefined, used: Set<Side>): boolean {
   const punch = draft?.text.trim();
   if (!punch || line.text.trim().endsWith('—') || !line.text.trim()) return false;
+  // Models sometimes leave the punch in the line's text too: never say it twice.
+  const already = endsWithWords(line.text, punch);
   const refuse = () => {
-    line.text = `${line.text.trim()} ${punch}`;
+    if (already) return false;
+    line.text = joinSentence(line.text, punch);
     const spoken = draft!.tts.replace(/^\s*\[[^\]]+\]\s*/, '').trim() || punch;
-    if (line.tts?.trim()) line.tts = `${line.tts.trim()} ${spoken}`;
+    if (line.tts?.trim() && !endsWithWords(line.tts, spoken)) line.tts = joinSentence(line.tts, spoken);
     return false;
   };
   if (line.speaker !== 'prosecution' && line.speaker !== 'defense') return refuse();
   const side: Side = line.speaker === 'prosecution' ? 'yes' : 'no';
-  const words = punch.split(/\s+/).length;
-  if (used.size > 0 || words > MAX_WORDS) return refuse();
+  const count = punch.split(/\s+/).length;
+  if (used.size > 0 || count > MAX_WORDS) return refuse();
   used.add(side);
-  line.text = `${line.text.trim()} ${punch}`;
-  line.punch = { text: punch, tts: punchTts(line.speaker, draft!.tts, punch) };
+  // The punch must be exactly the end of `text` (setupText() cuts it off by length).
+  const setup = already ? dropWords(line.text, words(punch).length) : line.text.trim();
+  const tail = tailAfter(setup, punch);
+  line.text = setup ? `${setup} ${tail}` : tail;
+  line.punch = { text: tail, tts: punchTts(line.speaker, draft!.tts, punch) };
   return true;
 }

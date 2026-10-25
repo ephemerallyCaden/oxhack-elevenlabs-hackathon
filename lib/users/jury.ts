@@ -16,10 +16,16 @@ export const juryKey = (id: string) => createHash("sha256").update(`jury:${id}`)
 
 let cache: { at: number; jurors: Juror[] } | null = null;
 let building: Promise<Juror[]> | null = null;
+let generation = 0;
 
-/** A save or "Forget me" changed the jury: rebuild on the next request (this instance). */
+/**
+ * A save or "Forget me" changed the jury: rebuild on the next request (this instance). A rebuild
+ * already running started before the change, so it is dropped rather than cached.
+ */
 export function invalidateJury() {
+  generation++;
   cache = null;
+  building = null;
 }
 
 async function thumb(dataUrl: string): Promise<string | null> {
@@ -34,17 +40,23 @@ async function thumb(dataUrl: string): Promise<string | null> {
 }
 
 async function build(): Promise<Juror[]> {
+  const gen = generation;
   const jurors: Juror[] = [];
   for (const f of await listFaces(15)) {
     const face = await thumb(f.selfie); // one at a time: bounded memory
     if (face) jurors.push({ key: juryKey(f.id), name: f.name, face });
   }
-  cache = { at: Date.now(), jurors };
+  if (gen === generation) cache = { at: Date.now(), jurors }; // stale if a save / Forget me landed meanwhile
   return jurors;
 }
 
 export async function getJury(): Promise<Juror[]> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.jurors;
-  building ??= build().finally(() => (building = null)); // concurrent misses share one rebuild
+  if (!building) {
+    const run = build().finally(() => {
+      if (building === run) building = null;
+    });
+    building = run; // concurrent misses share one rebuild
+  }
   return building;
 }

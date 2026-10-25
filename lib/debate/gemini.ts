@@ -55,16 +55,19 @@ export async function askGemini<S extends z.ZodType>(
       return schema.parse(JSON.parse(res.text ?? ''));
     } catch (err) {
       // Free models sometimes answer with JSON that breaks the schema (lines as bare strings, a missing
-      // field): ask once more instead of dropping straight to the mock lines, but only on another model
-      // (the same prompt tends to fail the same way) that is free almost at once, with time left for the
-      // call. Otherwise fail fast so the caller's mock arrives on time.
-      if ((err instanceof z.ZodError || err instanceof SyntaxError) && !malformed && !signal.aborted) {
-        malformed = true;
-        geminiPool.fail(model, { kind: 'overload', ms: RETRY_HOLD_MS });
-        const next = geminiPool.pick(priority);
-        if (next && next.wait <= RETRY_WAIT_MS && Date.now() + next.wait < deadline - CALL_BUDGET_MS) {
-          console.warn(`[gemini] ${model}: answer didn't fit the schema, asking ${next.model}`);
-          continue;
+      // field): ask once more instead of dropping straight to the mock lines. The model that failed sits
+      // out 2s, so the retry goes to another model when one is free (the same prompt tends to fail the
+      // same way), else to the same one after the pause; only if that fits the budget. A bad answer is
+      // never a quota error: past the one retry it goes straight to the caller's mock.
+      if (err instanceof z.ZodError || err instanceof SyntaxError) {
+        if (!malformed && !signal.aborted) {
+          malformed = true;
+          geminiPool.fail(model, { kind: 'overload', ms: RETRY_HOLD_MS });
+          const next = geminiPool.pick(priority);
+          if (next && next.wait <= RETRY_WAIT_MS && Date.now() + next.wait < deadline - CALL_BUDGET_MS) {
+            console.warn(`[gemini] ${model}: answer didn't fit the schema, asking ${next.model}`);
+            continue;
+          }
         }
         throw err;
       }

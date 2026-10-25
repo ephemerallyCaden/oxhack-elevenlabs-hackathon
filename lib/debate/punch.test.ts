@@ -40,6 +40,25 @@ describe('attachPunch', () => {
     expect(long.text).toBe('It pays one two three four five six seven eight nine ten eleven.');
   });
 
+  it('never says the punch twice when the model also left it in the text', () => {
+    const refused = line('defense', 'The median earns less than minimum wage.', { tts: '[concerned] The median earns less than minimum wage.' });
+    attachPunch(refused, { text: 'less than minimum wage.', tts: '[concerned] less than... minimum wage.' }, new Set<Side>(['yes']));
+    expect(refused.text).toBe('The median earns less than minimum wage.');
+    expect(refused.tts).toBe('[concerned] The median earns less than minimum wage.');
+    const landed = line('prosecution', 'Top players earn more than every quant!');
+    expect(attachPunch(landed, { text: 'every quant.', tts: '' }, new Set())).toBe(true);
+    expect(landed.text).toBe('Top players earn more than every quant.');
+    expect(setupText(landed)).toBe('Top players earn more than');
+  });
+
+  it('starts a new sentence after a full stop (capitalised, and the punch matches the text)', () => {
+    const l = line('prosecution', 'Think about it.');
+    expect(attachPunch(l, { text: 'you win big.', tts: '' }, new Set())).toBe(true);
+    expect(l.text).toBe('Think about it. You win big.');
+    expect(l.punch?.text).toBe('You win big.');
+    expect(setupText(l)).toBe('Think about it.');
+  });
+
   it('leaves a cut-off line alone (the cut-in finishes it)', () => {
     const l = line('defense', 'And the median is —');
     attachPunch(l, { text: 'nothing.', tts: '' }, new Set());

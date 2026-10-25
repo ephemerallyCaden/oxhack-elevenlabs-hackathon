@@ -17,6 +17,7 @@ import { authConfigured, authedPost, signInWithGoogle, signOut, useSession } fro
 import {
   addToRoster,
   faceThumb,
+  readRoster,
   removeFromRoster,
   restoreSession,
   saveDraft,
@@ -46,6 +47,13 @@ function sessionHeadsJson() {
 }
 
 const noSubscribe = () => () => {};
+const hasRestore = () => {
+  try {
+    return !!sessionStorage.getItem("roulette.draft") || new URLSearchParams(location.search).has("again");
+  } catch {
+    return false;
+  }
+};
 const rosterRaw = () => {
   try {
     return localStorage.getItem("roulette.roster") ?? "[]";
@@ -89,8 +97,10 @@ export default function Home() {
   const past = useMemo(() => parsePastTrials(pastJson), [pastJson]);
 
   // Back from Google mid-onboarding (the draft), or "New case" from the verdict (keeps voice + face).
-  // Hidden until checked, so "New case" doesn't flash the title page for a frame on its way to the confirm step.
+  // Only when there is something to restore (a draft, or ?again), the page waits for it, so "New case"
+  // doesn't flash the title page on its way to the confirm step. The server render is always visible.
   const [restored, setRestored] = useState(false);
+  const needsRestore = useSyncExternalStore(noSubscribe, hasRestore, () => false);
   useEffect(() => {
     void Promise.resolve().then(() => {
       const draft = takeDraft();
@@ -102,6 +112,7 @@ export default function Home() {
         setStep("confirm");
       } else if (again) {
         setProfile(sessionProfile() ?? {});
+        setQuestion("");
         setStep("confirm");
         history.replaceState(null, "", "/");
       }
@@ -110,10 +121,14 @@ export default function Home() {
   }, []);
 
   // The jury: every saved face (thumbnail + first name). Decoration: a slow or failed fetch leaves silhouettes.
+  const juryRequest = useRef(0);
   const loadJury = useCallback(() => {
+    const n = ++juryRequest.current; // a slow earlier reply must not overwrite a newer one
     fetch("/api/jury", { method: "POST", signal: AbortSignal.timeout(5000) })
       .then((r) => (r.ok ? r.json() : { jurors: [] }))
-      .then(({ jurors }: { jurors: { key: string; name?: string; face: string }[] }) => setStored(jurors.map((j) => ({ email: "", key: j.key, name: j.name, face: j.face }))))
+      .then(({ jurors }: { jurors: { key: string; name?: string; face: string }[] }) => {
+        if (n === juryRequest.current) setStored(jurors.map((j) => ({ email: "", key: j.key, name: j.name, face: j.face })));
+      })
       .catch(() => {});
   }, []);
   useEffect(loadJury, [loadJury]);
@@ -124,8 +139,14 @@ export default function Home() {
     let live = true;
     authedPost("/api/users/get", session)
       .then((r) => (r.ok ? r.json() : null))
-      .then((res: { user: SavedUser } | null) => {
+      .then((res: { user: SavedUser; juryKey?: string } | null) => {
         if (!live || !res) return;
+        // Faces kept before jury keys existed learn theirs now, so the jury stops seating them twice.
+        const mine = session.user.email && readRoster().find((r) => r.email === session.user.email);
+        if (mine && res.juryKey && mine.key !== res.juryKey) {
+          addToRoster({ ...mine, key: res.juryKey });
+          bump((n) => n + 1);
+        }
         setReturning(res.user);
         setStep((s) => (s === "welcome" ? "back" : s));
       })
@@ -178,6 +199,9 @@ export default function Home() {
       setError("The court couldn’t delete your voice and face just now. Nothing was removed; try again.");
       return;
     }
+    // Other server instances may still cache the jury for a minute: take your seat out here and now.
+    const { juryKey } = (await r.json().catch(() => ({}))) as { juryKey?: string };
+    if (juryKey) setStored((js) => js.filter((j) => j.key !== juryKey));
     if (session.user.email) removeFromRoster(session.user.email);
     await signOut();
     setReturning(null);
@@ -232,11 +256,11 @@ export default function Home() {
   const signedInAs = session?.user.email;
   const menu = step === "welcome" || step === "back";
   // The jury: faces kept on this laptop, plus yours once the photos are taken (not clickable).
-  const yours = !menu && heads ? [{ email: "", name: profile.name || "You", face: heads.front.src }] : [];
+  const yours = !menu && heads && !(signedInAs && roster.some((r) => r.email === signedInAs)) ? [{ email: "", name: profile.name || "You", face: heads.front.src }] : [];
   const pickJuror = authConfigured ? (e: RosterEntry) => e.email && e.email !== signedInAs && void signInWithGoogle(e.email) : undefined;
 
   return (
-    <main className="court-ui" style={restored ? undefined : { visibility: "hidden" }}>
+    <main className="court-ui" style={needsRestore && !restored ? { visibility: "hidden" } : undefined}>
       <div className="menu-bg" />
       {menu ? (
         <div className="menu-grid">

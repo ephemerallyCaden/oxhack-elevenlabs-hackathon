@@ -10,7 +10,6 @@
 //   5. Voice playback via engine.playVoice() with stereo panning
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import type { Scene, Speaker } from '@/types';
 import { TrialOrchestrator } from '@/lib/debate/orchestrator';
 import { sessionVoiceId } from '@/components/onboarding/VoiceStep';
@@ -98,11 +97,11 @@ function unlockSoon(ms = 1500): Promise<boolean> {
 // -- Main trial page --
 export default function TrialPage() {
   // Onboarding (/) leaves the user's cloned voice + profile in sessionStorage; none → presenter voice.
-  const orch = useMemo(() => new TrialOrchestrator({ voiceId: sessionVoiceId(), profile: sessionProfile() }), []);
+  // State, not memo: a memo is recomputed on Fast Refresh, which would orphan a running trial.
+  const [orch] = useState(() => new TrialOrchestrator({ voiceId: sessionVoiceId(), profile: sessionProfile() }));
   const s = useTrialState(orch);
   // Head cut-outs from onboarding (client-only, so the server render keeps the default heads)
   const heads = useSessionHeads();
-  const router = useRouter();
   const recorder = useRecorder();
   const [holding, setHolding] = useState(false);
   const held = useRef(false);
@@ -148,6 +147,22 @@ export default function TrialPage() {
     if (audioUnlocked) return;
     if (await unlockSoon()) setAudioUnlocked(true);
   }, [audioUnlocked]);
+  // Lines read this (not the state) so an unlock mid-line doesn't replay it.
+  const audioOn = useRef(audioUnlocked);
+  useEffect(() => {
+    audioOn.current = audioUnlocked;
+  }, [audioUnlocked]);
+  // Still locked (Safari didn't count the click on "/" as permission): any tap or key brings the sound back.
+  useEffect(() => {
+    if (audioUnlocked) return;
+    const unlock = () => void unlockAudio();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, [audioUnlocked, unlockAudio]);
 
   // -- 0. Arrived from onboarding: start straight away with the confirmed question --
   // (the "Take it to court" click on / counts as the user gesture for audio)
@@ -173,14 +188,16 @@ export default function TrialPage() {
   }, [orch]);
 
   // -- 1. Scene-based BGM: change music when scene changes --
+  const verdictMusic = useRef(false);
   useEffect(() => {
     if (!audioUnlocked) return;
     const scene = s.scene;
     const phase = s.phase;
 
-    // On verdict, switch to verdict music
+    // On verdict, switch to verdict music (once: it doesn't loop, so a Back/forward reveal mustn't restart it)
     if (s.verdict) {
-      void engine.setMusic('verdict');
+      if (!verdictMusic.current) void engine.setMusic('verdict');
+      verdictMusic.current = true;
       prevScene.current = scene;
       prevPhase.current = phase;
       return;
@@ -242,7 +259,8 @@ export default function TrialPage() {
         line,
         {
           stage: setPunchStage,
-          clip: (url, ms) => (url ? engine.playVoice(speaker, url).catch(() => {}) : sleep(ms)),
+          // Locked audio never finishes a clip: play the beat silently on its timing instead.
+          clip: (url, ms) => (url && audioOn.current ? engine.playVoice(speaker, url).catch(() => {}) : sleep(ms)),
           sfx: (name) => void engine.playSfx(name),
           shake: () => setShakeKey((k) => k + 1),
           sleep,
@@ -259,7 +277,8 @@ export default function TrialPage() {
         setPunchStage(null);
       };
     }
-    if (line.audioUrl) {
+    // Locked audio (no gesture yet) would never end the clip: fall through to the timer and play silently.
+    if (line.audioUrl && audioOn.current) {
       const speaker = line.speaker as Exclude<Speaker, 'user'>;
       let cancelled = false;
       engine.playVoice(speaker, line.audioUrl)
@@ -540,7 +559,9 @@ export default function TrialPage() {
             void engine.setMusic(null);
             void engine.setAmbience(false);
             if (href === '/') await signOut(); // back to the menu = done: the next person starts clean
-            router.push(href);
+            // A full load, not router.push: Cache Components would restore the kept-alive menu and trial
+            // pages with the last person's state. sessionStorage survives it, so New case keeps the voice + face.
+            location.assign(href);
           }}
         />
       )}
