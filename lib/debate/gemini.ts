@@ -29,6 +29,7 @@ export async function askGemini<S extends z.ZodType>(
   const json = z.toJSONSchema(schema) as Record<string, unknown>;
   delete json.$schema; // Gemini rejects the meta-schema key
 
+  let malformed = false;
   for (let attempt = 0; attempt < geminiPool.models.length + 1; attempt++) {
     // Claims a slot atomically (waits if every model is busy); leaves ~4s of the budget for the call itself.
     const model = await geminiPool.acquire(priority, deadline - 4000, signal);
@@ -49,6 +50,13 @@ export async function askGemini<S extends z.ZodType>(
       });
       return schema.parse(JSON.parse(res.text ?? ''));
     } catch (err) {
+      // Free models sometimes answer with JSON that breaks the schema (lines as bare strings, a missing
+      // field): ask once more instead of dropping straight to the mock lines.
+      if ((err instanceof z.ZodError || err instanceof SyntaxError) && !malformed && !signal.aborted) {
+        malformed = true;
+        console.warn(`[gemini] ${model}: answer didn't fit the schema, asking again`);
+        continue;
+      }
       const q = classifyGeminiError(err);
       if (!q || signal.aborted) throw err;
       console.warn(`[gemini] ${model}: ${q.kind === 'daily' ? 'daily quota used up' : q.kind === 'minute' ? 'per-minute limit' : 'overloaded'}, holding it ${Math.round(q.ms / 1000)}s, trying the next model`);
