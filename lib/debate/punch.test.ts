@@ -223,6 +223,21 @@ describe('attachPunch', () => {
     expect(refused.tts).toBe('[sad] You will be thirty and still renting.');
   });
 
+  it('recognises hyphenated, ordinal, decade and "per cent" spellings of a digit setup', () => {
+    const cases: [string, string, string, string][] = [
+      ['You will be 25', '[sad] You will be twenty-five and', 'and still renting.', '[sad] You will be twenty-five'],
+      ['Rates hit 3.5%', '[sad] Rates hit three point five per cent and', 'and keep climbing.', '[sad] Rates hit three point five per cent'],
+      ['This is the 3rd', '[sad] This is the third time and', 'and nothing changed.', '[sad] This is the third time'],
+      ['Like the 1990s', '[sad] Like the nineteen nineties and', 'and worse.', '[sad] Like the nineteen nineties'],
+      ['Prices rose 10x', '[sad] Prices rose ten times while', 'while pay stood still.', '[sad] Prices rose ten times'],
+    ];
+    for (const [text, tts, punch, clip] of cases) {
+      const l = line('defense', text, { tts });
+      expect(attachPunch(l, { text: punch, tts: '' }, new Set())).toBe(true);
+      expect(l.tts).toBe(clip);
+    }
+  });
+
   it('leaves a cut-off line alone (the cut-in finishes it)', () => {
     const l = line('defense', 'And the median is —');
     attachPunch(l, { text: 'nothing.', tts: '' }, new Set());
