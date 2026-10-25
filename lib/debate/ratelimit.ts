@@ -57,7 +57,14 @@ export type QuotaError = { kind: 'daily' | 'minute' | 'overload'; ms: number };
 /** What a failed Gemini call means for the pool, or null if it isn't a quota/overload problem. */
 export function classifyGeminiError(err: unknown): QuotaError | null {
   const msg = err instanceof Error ? err.message : String(err);
-  if (/\b503\b|UNAVAILABLE|high demand/i.test(msg)) return { kind: 'overload', ms: 2000 };
+  if (/\b503\b|UNAVAILABLE|high demand|over capacity/i.test(msg)) return { kind: 'overload', ms: 2000 };
+  if (/^Groq (429|413)/.test(msg)) {
+    // Groq: "… tokens per minute (TPM) … Please try again in 7.5s" / "requests per day (RPD) … 2h3m4.5s"
+    const t = msg.match(/try again in (?:(\d+)h)?(?:(\d+)m)?([\d.]+)s/i);
+    const ms = t ? Math.ceil(((Number(t[1] ?? 0) * 60 + Number(t[2] ?? 0)) * 60 + Number(t[3])) * 1000) : 15_000;
+    if (/per day|\bRPD\b|\bTPD\b/i.test(msg)) return { kind: 'daily', ms };
+    return { kind: 'minute', ms: Math.min(MAX_HOLD_MS, ms) };
+  }
   if (!/\b429\b|RESOURCE_EXHAUSTED/.test(msg)) return null;
   const s = msg.match(/retry in ([\d.]+)s/i)?.[1] ?? msg.match(/"retryDelay":"(\d+)s"/)?.[1];
   const ms = s ? Math.ceil(Number(s) * 1000) : 15_000;
@@ -76,10 +83,10 @@ export class ModelPool {
 
   constructor(
     readonly models: string[],
-    perMinute: number,
+    perMinute: number | ((model: string) => number),
     private now: () => number = Date.now,
   ) {
-    for (const m of models) this.limiters.set(m, new RateLimiter(perMinute, 60_000, now));
+    for (const m of models) this.limiters.set(m, new RateLimiter(typeof perMinute === 'number' ? perMinute : perMinute(m), 60_000, now));
   }
 
   /** The best model to use now: the first one free, else the one free soonest. null if all are out for the day. */
@@ -122,18 +129,40 @@ export class ModelPool {
   }
 }
 
-const DEFAULT_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemma-4-31b-it'];
+// Default order: Groq's gpt-oss-120b first (0.4s, 1,000/day), then Gemini's best (20/day), then the rest.
+const DEFAULT_MODELS = [
+  'groq:openai/gpt-oss-120b',
+  'gemini-3.6-flash',
+  'groq:openai/gpt-oss-20b',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemma-4-31b-it',
+];
 
 /**
  * Model order. GEMINI_MODELS=a,b,c sets it (e.g. a lite model first in rehearsals to save the best
  * model's daily quota for the demo). GEMINI_MODEL (one model; research reads it too) goes first if set.
+ * Only providers with a key are kept: `groq:` models need GROQ_API_KEY, the others GEMINI_API_KEY.
  */
-export function modelOrder(env: { GEMINI_MODELS?: string; GEMINI_MODEL?: string }): string[] {
+export function modelOrder(env: { GEMINI_MODELS?: string; GEMINI_MODEL?: string; groq?: boolean; gemini?: boolean }): string[] {
   const list = (env.GEMINI_MODELS ?? '').split(',');
   const single = (env.GEMINI_MODEL ?? '').split(',')[0]; // research needs a single id; never treat it as a list
-  return [single, ...list, ...DEFAULT_MODELS].map((s) => s.trim()).filter((m, i, a) => m && a.indexOf(m) === i);
+  const usable = (m: string) => (m.startsWith('groq:') ? env.groq !== false : env.gemini !== false);
+  return [single, ...list, ...DEFAULT_MODELS].map((s) => s.trim()).filter((m, i, a) => m && a.indexOf(m) === i && usable(m));
 }
+
+/** Calls per minute per model: Groq's 8,000 tokens/min fits ~3 topic calls; Gemini allows 5. */
+const paceFor = (model: string) => (model.startsWith('groq:') ? Number(process.env.GROQ_RPM) || 3 : Number(process.env.GEMINI_RPM) || 5);
 
 /** One pool per server process: on globalThis because Next bundles each API route separately. */
 const g = globalThis as unknown as { __geminiPool?: ModelPool };
-export const geminiPool = (g.__geminiPool ??= new ModelPool(modelOrder({ GEMINI_MODELS: process.env.GEMINI_MODELS, GEMINI_MODEL: process.env.GEMINI_MODEL }), Number(process.env.GEMINI_RPM) || 5));
+export const geminiPool = (g.__geminiPool ??= new ModelPool(
+  modelOrder({
+    GEMINI_MODELS: process.env.GEMINI_MODELS,
+    GEMINI_MODEL: process.env.GEMINI_MODEL,
+    groq: Boolean(process.env.GROQ_API_KEY),
+    gemini: Boolean(process.env.GEMINI_API_KEY),
+  }),
+  paceFor,
+));

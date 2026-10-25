@@ -128,3 +128,22 @@ describe('ModelPool', () => {
     expect(pool.pick('interactive')).toEqual({ model: 'best', wait: 30_000 });
   });
 });
+
+describe('Groq in the pool', () => {
+  it('a Groq per-minute token limit holds that model for the delay it asks for', () => {
+    const msg = 'Groq 429: {"error":{"message":"Rate limit reached for model `openai/gpt-oss-120b` on tokens per minute (TPM): Limit 8000, Used 7900, Requested 2100. Please try again in 7.5s."}}';
+    expect(classifyGeminiError(new Error(msg))).toEqual({ kind: 'minute', ms: 7500 });
+  });
+  it('a Groq daily limit holds the model until it resets', () => {
+    const msg = 'Groq 429: {"error":{"message":"Rate limit reached … on requests per day (RPD): Limit 1000, Used 1000. Please try again in 1h2m3.5s."}}';
+    expect(classifyGeminiError(new Error(msg))).toEqual({ kind: 'daily', ms: 3_723_500 });
+  });
+  it('a request too large for the model fails over instead of breaking the call', () => {
+    expect(classifyGeminiError(new Error('Groq 413: Request too large for model'))?.kind).toBe('minute');
+  });
+  it('only providers with a key join the pool; Groq goes first by default', () => {
+    expect(modelOrder({ groq: true, gemini: true })[0]).toBe('groq:openai/gpt-oss-120b');
+    expect(modelOrder({ groq: false, gemini: true }).some((m) => m.startsWith('groq:'))).toBe(false);
+    expect(modelOrder({ groq: true, gemini: false }).every((m) => m.startsWith('groq:'))).toBe(true);
+  });
+});

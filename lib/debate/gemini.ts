@@ -2,9 +2,11 @@
 // GEMINI_API_KEY. Same prompts and zod schemas as the Claude path (ask() in trial.ts).
 // Model tests: gemini-3.6-flash + MINIMAL thinking 1.6-2.2s (24 Oct); 3.5-flash-lite 4.5s, 3.1-flash-lite
 // 8.5s, gemma-4-31b-it 11.5s without thinking (25 Oct). 3.7/3.8-flash don't support MINIMAL (>15s on LOW).
-// Free tier: each model has its own quota (3.6-flash: 5/min, 20/day), so calls rotate through a pool.
+// Free tier: each model has its own quota (3.6-flash: 5/min, 20/day), so calls rotate through a pool that
+// also holds Groq's models (`groq:<id>`, groq.ts) when GROQ_API_KEY is set.
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { z } from 'zod';
+import { askGroq } from './groq';
 import { classifyGeminiError, geminiPool, type Priority } from './ratelimit';
 
 export const hasGeminiKey = () => Boolean(process.env.GEMINI_API_KEY);
@@ -24,7 +26,6 @@ export async function askGemini<S extends z.ZodType>(
   priority: Priority = 'interactive',
   deadline = Date.now() + 15_000,
 ): Promise<z.infer<S>> {
-  client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const json = z.toJSONSchema(schema) as Record<string, unknown>;
   delete json.$schema; // Gemini rejects the meta-schema key
 
@@ -32,6 +33,8 @@ export async function askGemini<S extends z.ZodType>(
     // Claims a slot atomically (waits if every model is busy); leaves ~4s of the budget for the call itself.
     const model = await geminiPool.acquire(priority, deadline - 4000, signal);
     try {
+      if (model.startsWith('groq:')) return schema.parse(JSON.parse(await askGroq(model.slice(5), system, content, json, signal)));
+      client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const res = await client.models.generateContent({
         model,
         contents: content,
