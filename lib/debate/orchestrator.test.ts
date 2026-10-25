@@ -261,3 +261,40 @@ describe('TrialOrchestrator', () => {
     expect(s.transcript.some((l) => l.speaker === 'user')).toBe(false);
   });
 });
+
+describe('LLM call budget (Gemini free tier: 5 calls/minute)', () => {
+  /** Runs a trial with fetch recording every LLM route it hits (all calls still fail → mocks). */
+  async function countCalls(plan?: Plan) {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', (url: string) => {
+      if (String(url).startsWith('/api/trial/')) calls.push(String(url).replace('/api/trial/', ''));
+      return Promise.reject(new Error('offline'));
+    });
+    try {
+      const s = await play('Should I learn to surf?', plan);
+      return { calls, topics: s.agenda.filter((t) => t.status === 'done').length };
+    } finally {
+      vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
+    }
+  }
+
+  it('a whole trial is 1 setup + 1 call per topic + 1 verdict', async () => {
+    const { calls, topics } = await countCalls();
+    expect(calls.filter((c) => c === 'setup')).toHaveLength(1);
+    expect(calls.filter((c) => c === 'topic')).toHaveLength(topics);
+    expect(calls.filter((c) => c === 'verdict')).toHaveLength(1);
+    expect(calls).toHaveLength(topics + 2); // nothing per line any more
+  });
+
+  it('a user interrupt of YES/NO costs exactly one more call', async () => {
+    let done = false;
+    const { calls, topics } = await countCalls((st) => {
+      if (!done && st.current?.speaker === 'defense' && st.current.kind === 'argument') {
+        done = true;
+        return 'But I live by the sea';
+      }
+    });
+    expect(calls.filter((c) => c === 'topic')).toHaveLength(topics + 1);
+    expect(calls).toHaveLength(topics + 3);
+  });
+});

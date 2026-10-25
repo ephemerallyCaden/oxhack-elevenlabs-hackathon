@@ -1,24 +1,22 @@
 // Deterministic stand-ins for every Claude/research call, built from the user's OWN question.
 // Used when a key is missing or a call is slow — so the trial always runs, for any decision.
 import type {
-  AgendaResponse,
-  ArgueRequest,
-  ArgueResponse,
   EvidenceCard,
   JudgeInterruptRequest,
   JudgeInterruptResponse,
   LedgerEntry,
   Line,
-  PersonasRequest,
-  PersonasResponse,
+  Personas,
   ProfileRequest,
   ProfileResponse,
   UserProfile,
   ResearchRequest,
-  ScoreArgumentRequest,
-  ScoreTopicRequest,
-  ScoreTopicResponse,
+  SetupRequest,
+  SetupResponse,
   Topic,
+  TopicRequest,
+  TopicResponse,
+  TopicTurn,
   VerdictRequest,
   VerdictResponse,
 } from '@/types';
@@ -38,7 +36,7 @@ export function actionOf(question: string): string {
 
 const judge = (kind: Line['kind'], text: string, topic_id?: string): Line => ({ id: uid('line'), speaker: 'judge', kind, text, cites: [], topic_id });
 
-export function mockAgenda(question: string): AgendaResponse {
+function mockAgenda(question: string) {
   const act = actionOf(question);
   const raw: Topic[] = [
     { id: 'topic-cost', title: 'Cost and money', question: `What does it cost you to ${act}, and can you afford it?`, importance: 0.35, research_speed: 'quick', status: 'pending', added_by: 'judge' },
@@ -54,7 +52,6 @@ export function mockAgenda(question: string): AgendaResponse {
     topics,
     opening: judge('opening', `Order! The court is in session. The question before us: should you ${act}? The court will consider ${topics.map((t) => t.title.toLowerCase()).join(', ')}.`),
     intros,
-    fallback: true,
   };
 }
 
@@ -92,12 +89,11 @@ export function mockProfile(req: ProfileRequest): ProfileResponse {
   return { profile: mergeProfile(p, req.form), question, fallback: true };
 }
 
-export function mockPersonas(req: PersonasRequest): PersonasResponse {
+function mockPersonas(req: SetupRequest): Personas {
   const act = actionOf(req.question);
   const age = req.profile?.age;
   const at = (years: number) => (age != null ? Math.round(age + years) : undefined);
   return {
-    personas: {
       yes: {
         side: 'yes', years_from_now: 1, when: '1 year from now', age: at(1), mood: 'thriving',
         snapshot: `A year after deciding to ${act}, things are going well. The early doubts have faded and the choice feels like it was made for the right reasons.`,
@@ -106,9 +102,12 @@ export function mockPersonas(req: PersonasRequest): PersonasResponse {
         side: 'no', years_from_now: 4, when: '4 years from now', age: at(4), mood: 'worn down',
         snapshot: `Four years after deciding to ${act}, the costs have piled up. Some of the things that were given up turned out to matter more than expected.`,
       },
-    },
-    fallback: true,
   };
+}
+
+/** The cut-scene in one go: agenda + Judge lines + both future selves. */
+export function mockSetup(req: SetupRequest): SetupResponse {
+  return { ...mockAgenda(req.question), personas: mockPersonas(req), fallback: true };
 }
 
 export function mockCards(req: ResearchRequest): EvidenceCard[] {
@@ -131,48 +130,59 @@ const OPENERS = {
   no: ['Objection to the optimism.', 'An inspiring speech. Unfortunately, reality disagrees.', 'Allow me to bring us back to earth.'],
 };
 
-export function mockArgue(req: ArgueRequest): ArgueResponse {
-  const own = req.cards.filter((c) => c.side === req.side);
-  const card = own[(req.cycle - 1) % Math.max(1, own.length)];
-  const point = card ? card.claim : `the evidence ${req.side === 'yes' ? 'favours' : 'argues against'} it`;
-  const opener = OPENERS[req.side][(req.cycle - 1) % 3];
-  // Offline, YES gets cut off once per topic (cycle 2) so the cut-in path is exercised.
-  const cut = req.cutInAllowed && !req.userPoint && req.side === 'yes' && req.cycle === 2;
-  const text = req.userPoint
-    ? `You say "${req.userPoint}". A fair point, and I'll answer it: ${point.toLowerCase()}.`
+/** One line for one planned turn. */
+function mockLine(req: TopicRequest, turn: TopicTurn, cut: boolean): Line {
+  const own = req.cards.filter((c) => c.side === turn.side);
+  const card = own[(turn.cycle - 1) % Math.max(1, own.length)];
+  const point = card ? card.claim : `the evidence ${turn.side === 'yes' ? 'favours' : 'argues against'} it`;
+  const opener = OPENERS[turn.side][(turn.cycle - 1) % 3];
+  const persona = req.personas?.[turn.side];
+  const topic = req.topic.title.toLowerCase();
+  const text = turn.answer
+    ? `You say "${req.userPoint ?? ''}". A fair point, and I'll answer it: ${point.toLowerCase()}.`
     : cut
-      ? `${opener} On ${req.topic.title.toLowerCase()}, the best case is simply—`
-      : req.cycle === 1 && req.persona
-        ? `It's ${req.persona.when}, and here's what I know about ${req.topic.title.toLowerCase()}: ${point.toLowerCase()}.`
-        : `${opener} On ${req.topic.title.toLowerCase()}: ${point.toLowerCase()}.`;
-  const base = { topic_id: req.topic.id, cycle: req.cycle, cites: [] as string[] };
-  return {
-    line: { id: uid('line'), speaker: SIDE_SPEAKER[req.side], kind: req.userPoint ? 'answer' : 'argument', text, cites: card ? [card.id] : [], topic_id: req.topic.id, cycle: req.cycle },
-    cutIn: cut
-      ? {
-          line: { ...base, id: uid('line'), speaker: 'defense', kind: 'cut_in', text: "Hold on! That's the best case, not the likely one." },
-          resume: { ...base, id: uid('line'), speaker: 'prosecution', kind: 'resume', text: `Then let's talk likely: ${point.toLowerCase()}.` },
-        }
-      : undefined,
-    exhausted: false,
-    fallback: true,
-  };
+      ? `${opener} On ${topic}, the best case is simply—`
+      : turn.cycle === 1 && persona
+        ? `It's ${persona.when}, and here's what I know about ${topic}: ${point.toLowerCase()}.`
+        : `${opener} On ${topic}: ${point.toLowerCase()}.`;
+  return { id: uid('line'), speaker: SIDE_SPEAKER[turn.side], kind: turn.answer ? 'answer' : 'argument', text, cites: card ? [card.id] : [], topic_id: req.topic.id, cycle: turn.cycle };
 }
 
-export function mockScoreArgument(req: ScoreArgumentRequest): LedgerEntry {
-  const supports = req.line.speaker === 'prosecution' ? 'yes' : req.line.speaker === 'defense' ? 'no' : 'neutral';
+function mockLedgerEntry(topicId: string, line: Line): LedgerEntry {
+  const supports = line.speaker === 'prosecution' ? 'yes' : line.speaker === 'defense' ? 'no' : 'neutral';
   // Deterministic 2-4 from the text, so offline trials don't always land on a dead-even toss-up.
-  const strength = 2 + ([...req.line.text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 3);
-  return { id: uid('ledger'), line_id: req.line.id, topic_id: req.topic.id, by: req.line.speaker, supports, claim: req.line.text.slice(0, 140), strength, card_ids: req.line.cites };
+  const strength = 2 + ([...line.text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 3);
+  return { id: uid('ledger'), line_id: line.id, topic_id: topicId, by: line.speaker, supports, claim: line.text.slice(0, 140), strength, card_ids: line.cites };
 }
 
-export function mockScoreTopic(req: ScoreTopicRequest): ScoreTopicResponse {
-  const t = ledgerBalance(req.ledger);
+/** A whole planned exchange + its tally + the Judge's ruling. Offline, YES gets cut off once (cycle 2). */
+export function mockTopic(req: TopicRequest): TopicResponse {
+  const lines: Line[] = [];
+  let cutUsed = !req.cutInAllowed;
+  for (const turn of req.turns) {
+    const cut = !cutUsed && !turn.answer && turn.side === 'yes' && turn.cycle === 2;
+    const line = mockLine(req, turn, cut);
+    lines.push(line);
+    if (cut) {
+      cutUsed = true;
+      const base = { topic_id: req.topic.id, cycle: turn.cycle, cites: [] as string[] };
+      lines.push(
+        { ...base, id: uid('line'), speaker: 'defense', kind: 'cut_in', text: "Hold on! That's the best case, not the likely one." },
+        { ...base, id: uid('line'), speaker: 'prosecution', kind: 'resume', text: "Then let's talk likely: the evidence still favours it." },
+      );
+    }
+  }
+  const said = [...req.history, ...lines].filter((l) => l.speaker !== 'judge');
+  const ledger = said.map((l) => mockLedgerEntry(req.topic.id, l));
+  const t = ledgerBalance(ledger);
   const way = t > 0.15 ? 'leans yes' : t < -0.15 ? 'leans no' : 'is evenly balanced';
-  const best = [...req.ledger].sort((a, b) => b.strength - a.strength)[0];
+  const best = [...ledger].sort((a, b) => b.strength - a.strength)[0];
   return {
+    lines,
+    // This exchange's lines, plus the witness's point it was written around (like line_index -1 live).
+    ledger: ledger.filter((e) => lines.some((l) => l.id === e.line_id) || (req.userPoint && e.line_id === [...req.history].reverse().find((l) => l.speaker === 'user')?.id)),
     score: { t, confidence: 0.4, reasoning: `On ${req.topic.title.toLowerCase()}, the court ${way}.`, deciding_argument: best?.claim ?? 'No decisive argument.' },
-    line: judge('score', `Hmm. On ${req.topic.title.toLowerCase()}, the court ${way}.`, req.topic.id),
+    ruling: judge('score', `Hmm. On ${req.topic.title.toLowerCase()}, the court ${way}.`, req.topic.id),
     fallback: true,
   };
 }

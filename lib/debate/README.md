@@ -6,7 +6,8 @@ The trial engine. Design: `docs/design-core-loop.md`. Contract: `types.ts`.
 |---|---|
 | `orchestrator.ts` | Browser-side state machine: agenda → per-topic inner loop (2 YES/NO cycles, +1 per user interrupt, at most one AI cut-in per topic) → Judge scores → spectrum → verdict → transcript. Interrupts: a side must answer you; the Judge changes the agenda. |
 | `useTrial.ts` | `useTrialState(orch)` React binding |
-| `trial.ts` | Server-side Claude calls behind `app/api/trial/*` |
+| `trial.ts` | Server-side LLM calls behind `app/api/trial/*`: `setup` (agenda + personas), `topic` (whole exchange + ledger + ruling), `judge-interrupt`, `verdict`, `profile` |
+| `gemini.ts` · `ratelimit.ts` | Gemini path: a pool of models, each with its own per-minute limiter and daily quota; calls fail over to the next model. `GEMINI_MODELS=a,b,c` sets the order |
 | `prompts.ts` | All prompts (generic: any "Should I …?") |
 | `spectrum.ts` | Weights, topic balance, spectrum maths (pure, tested) |
 | `transcript.ts` | Transcript + numbered sources |
