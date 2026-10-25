@@ -171,6 +171,21 @@ function resample(m: Mask, w: number, h: number): Mask {
 
 let loading: Promise<Vision | null> | null = null;
 
+/** MediaPipe's wasm prints "INFO: Created TensorFlow Lite XNNPACK delegate…" via console.error on its
+ * first run, which the Next dev overlay shows as an error. Drop its INFO lines; real errors still log. */
+function quiet<T>(run: () => T): T {
+  const error = console.error;
+  console.error = (...args: unknown[]) => {
+    if (typeof args[0] === 'string' && args[0].startsWith('INFO:')) return;
+    error(...args);
+  };
+  try {
+    return run();
+  } finally {
+    console.error = error;
+  }
+}
+
 export function loadVision(): Promise<Vision | null> {
   loading ??= (async () => {
     try {
@@ -187,7 +202,7 @@ export function loadVision(): Promise<Vision | null> {
       ]);
       return {
         segment(photo) {
-          const r = seg.segment(photo);
+          const r = quiet(() => seg.segment(photo));
           const masks = r.confidenceMasks ?? [];
           const m = masks[masks.length - 1]; // single-channel model: person confidence
           const out = m && resample({ data: new Float32Array(m.getAsFloat32Array()), width: m.width, height: m.height }, photo.width, photo.height);
@@ -195,7 +210,7 @@ export function loadVision(): Promise<Vision | null> {
           return out ?? null;
         },
         face(photo) {
-          const p = lm.detect(photo).faceLandmarks[0];
+          const p = quiet(() => lm.detect(photo)).faceLandmarks[0];
           if (!p) return null;
           const P = (i: number) => ({ x: p[i].x * photo.width, y: p[i].y * photo.height });
           const mid = (a: Pt, b: Pt) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
