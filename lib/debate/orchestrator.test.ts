@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { UserProfile } from '@/types';
-import { TrialOrchestrator, type TrialState } from './orchestrator';
+import { planAfterInterrupt, TrialOrchestrator, type TrialState } from './orchestrator';
 import { computeSpectrum } from './spectrum';
 
 // Offline: every API call fails, so the whole trial runs on the decision-aware mocks.
@@ -296,6 +296,97 @@ describe('LLM call budget (Gemini free tier: 5 calls/minute)', () => {
     });
     expect(calls.filter((c) => c === 'topic')).toHaveLength(topics + 1);
     expect(calls).toHaveLength(topics + 3);
+  });
+});
+
+describe('planAfterInterrupt', () => {
+  const order = (turns: { side: string; answer?: boolean }[]) => turns.map((t) => t.side);
+
+  it('interrupting YES in cycle 1: YES answers, then NO, YES, NO… until NO closes the last cycle', () => {
+    const turns = planAfterInterrupt('yes', 1, 3);
+    expect(turns[0]).toEqual({ side: 'yes', cycle: 1, answer: true });
+    expect(order(turns)).toEqual(['yes', 'no', 'yes', 'no', 'yes', 'no']);
+    expect(turns.at(-1)).toEqual({ side: 'no', cycle: 3 });
+  });
+
+  it("interrupting NO's cut-in on YES's line: NO answers, then YES (never NO twice)", () => {
+    const turns = planAfterInterrupt('no', 2, 3);
+    expect(order(turns)).toEqual(['no', 'yes', 'no']);
+    expect(turns.at(-1)).toEqual({ side: 'no', cycle: 3 });
+  });
+
+  it('turns always alternate, whichever side and cycle is interrupted', () => {
+    for (const side of ['yes', 'no'] as const)
+      for (let cycle = 1; cycle <= 4; cycle++) {
+        const sides = order(planAfterInterrupt(side, cycle, cycle + 1));
+        sides.slice(1).forEach((s, k) => expect(s).not.toBe(sides[k]));
+      }
+  });
+});
+
+describe('fixes from the PR #79 review', () => {
+  /** Speakers on a topic in order, including the user. */
+  const speakers = (s: TrialState, topicId: string) =>
+    s.transcript.filter((l) => l.topic_id === topicId && l.kind !== 'intro' && l.kind !== 'score').map((l) => l.speaker);
+
+  it('interrupting a cut-in: the cut-in side answers, and nobody speaks twice in a row', async () => {
+    let done = false;
+    const s = await play('Should I start a podcast?', (st) => {
+      if (!done && st.current?.kind === 'cut_in') {
+        done = true;
+        return "But I've already bought the microphone";
+      }
+    });
+    const user = s.transcript.find((l) => l.speaker === 'user')!;
+    const after = s.transcript[s.transcript.indexOf(user) + 1];
+    expect(after).toMatchObject({ speaker: 'defense', kind: 'answer' });
+    const order = speakers(s, user.topic_id!);
+    order.slice(1).forEach((who, k) => expect(who, order.join(' → ')).not.toBe(order[k]));
+  });
+
+  it("after an agenda change, the next topic's call starts before its intro has finished (no waiting)", async () => {
+    const events: string[] = [];
+    vi.stubGlobal('fetch', (url: string, init?: { body?: string }) => {
+      if (String(url) === '/api/trial/topic') events.push(`call:${JSON.parse(init?.body ?? '{}').topic?.id}`);
+      return Promise.reject(new Error('offline'));
+    });
+    try {
+      let done = false;
+      const s = await play('Should I learn to sail?', (st) => {
+        if (st.current) events.push(`line:${st.current.kind}:${st.current.topic_id ?? ''}`);
+        // Remove the 2nd topic while the 1st topic's ruling plays: the 3rd must be written right away.
+        if (!done && st.current?.kind === 'score') {
+          done = true;
+          return "honestly I don't care about happiness here";
+        }
+      });
+      // The call for what is now next starts while the Judge is still confirming the change,
+      // i.e. before the confirmation line plays, not when the topic's intro starts.
+      const third = s.agenda.filter((t) => t.status === 'done').at(-1)!;
+      const call = events.indexOf(`call:${third.id}`);
+      const confirmation = events.findIndex((e) => e.startsWith('line:agenda_change'));
+      expect(call).toBeGreaterThanOrEqual(0);
+      expect(confirmation).toBeGreaterThan(0);
+      expect(call).toBeLessThan(confirmation);
+      expect(s.agenda.some((t) => t.status === 'removed')).toBe(true);
+    } finally {
+      vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
+    }
+  });
+
+  it('two interrupts on one topic: each of your points is in the tally exactly once', async () => {
+    let n = 0;
+    const s = await play('Should I get a tattoo?', (st) => {
+      if (n < 2 && st.current?.kind === 'argument' && st.agenda[0]?.id === st.activeTopicId) {
+        n++;
+        return n === 1 ? 'I have wanted one for years' : 'My job is fine with tattoos';
+      }
+    });
+    const userIds = s.transcript.filter((l) => l.speaker === 'user').map((l) => l.id);
+    expect(userIds).toHaveLength(2);
+    for (const id of userIds) expect(s.ledger.filter((e) => e.line_id === id)).toHaveLength(1);
+    const ids = s.ledger.map((e) => e.line_id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
 

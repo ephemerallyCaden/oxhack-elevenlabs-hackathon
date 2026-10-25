@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { classifyGeminiError, ModelPool, RateLimiter } from './ratelimit';
+import { describe, expect, it, vi } from 'vitest';
+import { classifyGeminiError, ModelPool, modelOrder, RateLimiter } from './ratelimit';
 
 function clock(start = 0) {
   let t = start;
@@ -19,7 +19,6 @@ describe('RateLimiter', () => {
     expect(rl.waitFor('interactive')).toBe(55_000);
     c.advance(55_000);
     expect(rl.waitFor('interactive')).toBe(0);
-    expect(rl.available()).toBe(1);
   });
 
   it('keeps the last slot for interactive calls', () => {
@@ -30,23 +29,26 @@ describe('RateLimiter', () => {
     expect(rl.waitFor('background')).toBe(60_000);
   });
 
-  it('acquire takes a slot immediately when one is free, and refuses waits longer than allowed', async () => {
-    const c = clock();
-    const rl = new RateLimiter(2, 60_000, c.now);
-    await rl.acquire('interactive', 0);
-    await rl.acquire('interactive', 0);
-    expect(rl.available()).toBe(0);
-    await expect(rl.acquire('interactive', 1000)).rejects.toThrow(/next slot in 60s/);
-  });
-
   it('a 429 holds everything until its retry delay', () => {
     const c = clock();
     const rl = new RateLimiter(5, 60_000, c.now);
     rl.penalize(12_000);
-    expect(rl.available()).toBe(0);
     expect(rl.waitFor('interactive')).toBe(12_000);
     c.advance(12_000);
     expect(rl.waitFor('interactive')).toBe(0);
+  });
+});
+
+describe('modelOrder', () => {
+  it('GEMINI_MODEL is one model (research reads it too), even if someone wrote a list there', () => {
+    const order = modelOrder({ GEMINI_MODEL: 'gemini-3.5-flash-lite,gemini-3.6-flash' });
+    expect(order[0]).toBe('gemini-3.5-flash-lite');
+    expect(order).toContain('gemini-3.6-flash');
+  });
+  it('GEMINI_MODELS sets the order, then the defaults follow without duplicates', () => {
+    const order = modelOrder({ GEMINI_MODELS: 'gemini-3.1-flash-lite, gemini-3.6-flash' });
+    expect(order.slice(0, 2)).toEqual(['gemini-3.1-flash-lite', 'gemini-3.6-flash']);
+    expect(new Set(order).size).toBe(order.length);
   });
 });
 
@@ -90,6 +92,33 @@ describe('ModelPool', () => {
     expect(pool.pick('interactive')).toBeNull();
   });
 
+  it('acquire claims a free slot at once and refuses to wait past the deadline', async () => {
+    const c = clock();
+    const pool = new ModelPool(['best'], 2, c.now);
+    expect(await pool.acquire('interactive', 0)).toBe('best');
+    expect(await pool.acquire('interactive', 0)).toBe('best');
+    await expect(pool.acquire('interactive', 1000)).rejects.toThrow(/next: best in 60s/);
+  });
+
+  it("two callers waiting for the same freed slot don't both get it", async () => {
+    vi.useFakeTimers();
+    try {
+      const pool = new ModelPool(['best'], 1, () => Date.now());
+      await pool.acquire('interactive', Date.now()); // the only slot is used
+      let got = 0;
+      const deadline = Date.now() + 200_000;
+      const a = pool.acquire('interactive', deadline).then(() => got++);
+      const b = pool.acquire('interactive', deadline).then(() => got++);
+      await vi.advanceTimersByTimeAsync(61_000); // one slot frees up
+      expect(got).toBe(1); // the second caller re-checked and kept waiting
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(got).toBe(2);
+      await Promise.all([a, b]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('when every model is busy, waits for whichever frees up first', () => {
     const c = clock();
     const pool = new ModelPool(['best', 'lite'], 1, c.now);
@@ -97,5 +126,24 @@ describe('ModelPool', () => {
     c.advance(30_000);
     pool.take('lite');
     expect(pool.pick('interactive')).toEqual({ model: 'best', wait: 30_000 });
+  });
+});
+
+describe('Groq in the pool', () => {
+  it('a Groq per-minute token limit holds that model for the delay it asks for', () => {
+    const msg = 'Groq 429: {"error":{"message":"Rate limit reached for model `openai/gpt-oss-120b` on tokens per minute (TPM): Limit 8000, Used 7900, Requested 2100. Please try again in 7.5s."}}';
+    expect(classifyGeminiError(new Error(msg))).toEqual({ kind: 'minute', ms: 7500 });
+  });
+  it('a Groq daily limit holds the model until it resets', () => {
+    const msg = 'Groq 429: {"error":{"message":"Rate limit reached … on requests per day (RPD): Limit 1000, Used 1000. Please try again in 1h2m3.5s."}}';
+    expect(classifyGeminiError(new Error(msg))).toEqual({ kind: 'daily', ms: 3_723_500 });
+  });
+  it('a request too large for the model fails over instead of breaking the call', () => {
+    expect(classifyGeminiError(new Error('Groq 413: Request too large for model'))?.kind).toBe('minute');
+  });
+  it('only providers with a key join the pool; Groq goes first by default', () => {
+    expect(modelOrder({ groq: true, gemini: true })[0]).toBe('groq:openai/gpt-oss-120b');
+    expect(modelOrder({ groq: false, gemini: true }).some((m) => m.startsWith('groq:'))).toBe(false);
+    expect(modelOrder({ groq: true, gemini: false }).every((m) => m.startsWith('groq:'))).toBe(true);
   });
 });
