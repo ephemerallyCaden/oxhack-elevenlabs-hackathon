@@ -1,0 +1,23 @@
+name: deploy
+
+# Pushes no longer deploy (vercel.json: git.deploymentEnabled false), so the Hobby cap of
+# 100 deploys a day only counts deploys someone asked for.
+# Run it from the Actions tab: "deploy" → "Run workflow" → pick main.
+# Needs repo secrets VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID, all from the Vercel account
+# that owns the project (R's account from 2026-10-25, not the old roulette5 team).
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # Uploads the source and builds on Vercel with the project's own env vars.
+      - run: npx --yes vercel@latest deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
