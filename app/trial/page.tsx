@@ -402,7 +402,6 @@ export default function TrialPage() {
 
   const line = s.current;
   const active = s.agenda.find((t) => t.id === s.activeTopicId);
-  const pos = `${(s.spectrum.value + 100) / 2}%`;
   const canTalk = s.phase === 'ask' || (s.phase === 'speaking' && s.canInterrupt) || holding;
 
 
@@ -513,6 +512,13 @@ export default function TrialPage() {
           shot={shot}
           punch={punch}
           shakeKey={shakeKey}
+          spectrum={{
+            value: s.spectrum.value,
+            scored: s.agenda.filter((t) => t.score != null).length,
+            verdict: !!s.verdict,
+            visible: !introMode && s.phase !== 'ask',
+          }}
+          sfx={(name, volume) => void engine.playSfx(name, { volume })}
         />
       </div>
 
@@ -531,18 +537,11 @@ export default function TrialPage() {
         </header>
       )}
 
-      {/* Top-right: spectrum + agenda (hidden through the intro) */}
-      {!introMode && (
+      {/* Top-right: agenda (hidden through the intro); the spectrum is the HUD in the courtroom */}
+      {!introMode && (s.agenda.length > 0 || s.fallbacks.length > 0) && (
         <aside className="absolute right-4 top-4 z-50 w-72 rounded-lg bg-black/70 p-3">
-          <div className="relative h-2 rounded-full bg-gradient-to-r from-red-600 via-zinc-600 to-blue-600">
-            <div className="absolute -top-1 h-4 w-1 rounded bg-white transition-all" style={{ left: pos }} />
-          </div>
-          <p className="mt-1 text-center text-xs font-bold">
-            {s.spectrum.value > 0 ? '+' : ''}
-            {s.spectrum.value} · {s.spectrum.label}
-          </p>
           {s.agenda.length > 0 && (
-            <ul className="mt-2 flex flex-col gap-1 text-xs">
+            <ul className="flex flex-col gap-1 text-xs">
               {s.agenda.map((t) => (
                 <li
                   key={t.id}

@@ -15,6 +15,8 @@ import { PLANES } from './intro';
 import { useIntroCrane, type IntroMode } from './useIntroCrane';
 import PunchShot, { PUNCH_BG } from './PunchShot';
 import { shake } from './shake';
+import SpectrumBar, { type BarSfx } from './SpectrumBar';
+import type { BarState } from './spectrumRules';
 import { useWhipCamera } from './useWhipCamera';
 import { OBJECTION, SHOT, vignetteAt, vignetteCss } from './whip';
 
@@ -70,6 +72,8 @@ export default function Courtroom({
   shot,
   punch,
   shakeKey = 0,
+  spectrum,
+  sfx,
 }: {
   scene: Scene;
   moods: Record<CourtActor, CharacterMood>;
@@ -95,6 +99,10 @@ export default function Courtroom({
   punch?: { who: 'prosecution' | 'defense'; stage: 'cut' | 'punch' | 'out' | 'gone'; mood: CharacterMood; typeMs?: number };
   /** Bump to shake the screen once. */
   shakeKey?: number;
+  /** The spectrum HUD (top centre); omitted = no HUD. */
+  spectrum?: BarState & { visible: boolean };
+  /** Sound effects for the HUD (the audio engine). */
+  sfx?: BarSfx;
 }) {
   const stage = useRef<HTMLDivElement>(null);
   const camera = useRef<HTMLDivElement>(null);
@@ -207,6 +215,7 @@ export default function Courtroom({
         {/* Viewport-fixed overlays (not affected by camera) */}
         <div className="manga-scanlines" />
         <div className="manga-vignette" />
+        {spectrum && <SpectrumBar {...spectrum} sfx={sfx} />}
         {pullBack && <div key={`flash-${hit.n}`} className="objection-flash" />}
         {pullBack && (
           <div key={`word-${hit.n}`} className="objection-word" role="img" aria-label="Objection!">
