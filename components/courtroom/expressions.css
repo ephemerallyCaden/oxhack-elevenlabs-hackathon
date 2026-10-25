@@ -6,6 +6,10 @@
 .char {
   position: relative;
 }
+.char .char-mirror {
+  position: absolute;
+  inset: 0;
+}
 .char .char-pose {
   position: absolute;
   bottom: 0;
