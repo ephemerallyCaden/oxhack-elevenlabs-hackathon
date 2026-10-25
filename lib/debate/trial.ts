@@ -22,6 +22,7 @@ import type {
 import { SIDE_SPEAKER } from '@/types';
 import { claude, hasClaudeKey, MODEL } from './claude';
 import { askGemini, hasGeminiKey } from './gemini';
+import { hasGroqKey } from './groq';
 import { uid, withFallback } from './fallback';
 import type { Priority } from './ratelimit';
 import { TIMEOUTS } from './timeouts';
@@ -37,7 +38,8 @@ function debateLlm(): 'claude' | 'gemini' | 'mock' {
   const want = process.env.DEBATE_LLM ?? 'auto';
   if (want === 'mock') return 'mock';
   if ((want === 'claude' || want === 'auto') && hasClaudeKey()) return 'claude';
-  if ((want === 'gemini' || want === 'auto') && hasGeminiKey()) return 'gemini';
+  // 'gemini' = the free-tier model pool: Groq and/or Gemini, whichever keys are set (DEBATE_LLM=groq works too).
+  if ((want === 'gemini' || want === 'groq' || want === 'auto') && (hasGroqKey() || hasGeminiKey())) return 'gemini';
   return 'mock';
 }
 
@@ -85,9 +87,11 @@ async function ask<S extends z.ZodType, R>(
 }
 
 const Spoken = z.object({ text: z.string(), tts: z.string() });
+/** Display text never shows voice cues: models sometimes put audio tags like [confident] in `text` too. */
+export const plain = (s: string) => s.replace(/\[[^\]\n]{1,40}\]\s*/g, '').replace(/\s{2,}/g, ' ').trim();
 const judgeLine = (kind: Line['kind'], s: { text: string; tts: string }, topic_id?: string): Line => {
   if (!s.text.trim()) throw new Error(`empty ${kind} line`); // → mock fallback
-  return { id: uid('line'), speaker: 'judge', kind, text: s.text, tts: s.tts, cites: [], topic_id };
+  return { id: uid('line'), speaker: 'judge', kind, text: plain(s.text), tts: s.tts, cites: [], topic_id };
 };
 
 // ─── setup (cut-scene): agenda + Judge lines + personas in ONE call ─────────
@@ -206,7 +210,7 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
           id: uid('line'),
           speaker: SIDE_SPEAKER[turn.side],
           kind: turn.answer ? 'answer' : 'argument',
-          text: o.text,
+          text: plain(o.text),
           tts: o.tts,
           cites: o.cites.filter((c) => valid.has(c)),
           ...base,
@@ -217,8 +221,8 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
           cutUsed = true;
           const other = turn.side === 'yes' ? 'no' : 'yes';
           lines.push(
-            { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in', text: o.cut_in.text, tts: o.cut_in.tts, cites: [], ...base },
-            { id: uid('line'), speaker: SIDE_SPEAKER[turn.side], kind: 'resume', text: o.resume.text, tts: o.resume.tts, cites: [], ...base },
+            { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in', text: plain(o.cut_in.text), tts: o.cut_in.tts, cites: [], ...base },
+            { id: uid('line'), speaker: SIDE_SPEAKER[turn.side], kind: 'resume', text: plain(o.resume.text), tts: o.resume.tts, cites: [], ...base },
           );
         } else if (line.text.trim().endsWith('—')) {
           // No cut-in for this line: don't leave it hanging mid-sentence.
@@ -226,11 +230,15 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
           if (line.tts) line.tts = line.tts.trim().replace(/—$/, '.');
         }
       });
-      const userLine = [...req.history].reverse().find((l) => l.speaker === 'user');
+      // The witness's point being answered (line_index -1) is recorded once; earlier points already were.
+      const userLine = req.userPoint ? [...req.history].reverse().find((l) => l.speaker === 'user') : undefined;
+      let userRecorded = false;
       const ledger: LedgerEntry[] = out.ledger
         .map((e): LedgerEntry | null => {
+          if (e.line_index === -1 && userRecorded) return null;
           const line = e.line_index === -1 ? userLine : byIndex[e.line_index];
           if (!line) return null;
+          if (e.line_index === -1) userRecorded = true;
           return { id: uid('ledger'), line_id: line.id, topic_id: req.topic.id, by: line.speaker, supports: e.supports, claim: e.claim, strength: Math.min(5, Math.max(1, e.strength)), card_ids: line.cites };
         })
         .filter((e): e is LedgerEntry => e !== null);
@@ -361,7 +369,7 @@ WITNESS INTERRUPTS: ${req.userLines.length ? req.userLines.map((l) => `"${l.text
     TIMEOUTS.verdict.server,
     'verdict',
     (out): VerdictResponse => ({
-      verdict: { spectrum, explanation: out.explanation, breakdown, line: judgeLine('verdict', out.line) },
+      verdict: { spectrum, explanation: plain(out.explanation), breakdown, line: judgeLine('verdict', out.line) },
       fallback: false,
     }),
     () => mockVerdict(req),

@@ -1,7 +1,12 @@
-// Server-side request budget for Gemini's free tier: N calls per rolling 60s (GEMINI_RPM, default 5).
-// A trial lasts several minutes, so the window keeps refilling: calls wait for a free slot instead of
-// failing with 429. Background calls (pre-writing the next topic) never take the last slot, so a user's
-// interrupt is never stuck behind them. One process only: fine for `next dev` and a single demo instance.
+// Gemini free-tier budget: each model allows N calls per rolling 60s (GEMINI_RPM, default 5) and a
+// small daily quota (20/day for 3.6-flash). A trial lasts several minutes, so the window keeps refilling:
+// calls wait for a free slot instead of failing with 429, and fail over to the next model when one is
+// busy or out for the day. Background calls (pre-writing the next topic) never take a model's last
+// slot, so a user's interrupt is never stuck behind them.
+//
+// State is per server process (globalThis, shared by every API route in it). On Vercel each function
+// instance has its own copy: they still pace themselves and fail over on a real 429, just without
+// seeing each other's calls.
 
 export type Priority = 'interactive' | 'background';
 
@@ -20,13 +25,6 @@ export class RateLimiter {
     while (this.stamps.length && t - this.stamps[0] >= this.windowMs) this.stamps.shift();
   }
 
-  /** Free slots right now. */
-  available(): number {
-    const t = this.now();
-    this.prune(t);
-    return t < this.blockedUntil ? 0 : this.perMinute - this.stamps.length;
-  }
-
   /** How long until a call of this priority may go, or 0 if it may go now. */
   waitFor(priority: Priority): number {
     const t = this.now();
@@ -40,24 +38,7 @@ export class RateLimiter {
     return Math.max(block, oldest + this.windowMs - t);
   }
 
-  /** Wait for a slot, then take it. Throws if that would take longer than maxWaitMs. */
-  async acquire(priority: Priority, maxWaitMs: number, signal?: AbortSignal): Promise<void> {
-    for (;;) {
-      const wait = this.waitFor(priority);
-      if (wait === 0) {
-        this.stamps.push(this.now());
-        return;
-      }
-      if (wait > maxWaitMs) throw new Error(`rate limit: next slot in ${Math.ceil(wait / 1000)}s`);
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, wait + 25);
-        signal?.addEventListener('abort', () => (clearTimeout(timer), reject(new Error('aborted'))), { once: true });
-      });
-      maxWaitMs -= wait + 25;
-    }
-  }
-
-  /** Record a call as sent (when the caller did its own waiting). */
+  /** Record a call as sent. */
   record() {
     this.stamps.push(this.now());
   }
@@ -71,17 +52,19 @@ export class RateLimiter {
 /** Never hold a model longer than this for a per-minute limit: those clear within a minute. */
 export const MAX_HOLD_MS = 65_000;
 
-// ─── Several models, several quotas ─────────────────────────────────────────
-// Each Gemini model has its OWN free-tier quotas (per minute AND per day, e.g. 20/day for 3.6-flash).
-// The pool sends each call to the first model in preference order that has a free slot, skips models
-// whose daily quota is used up until it resets, and moves on when one is busy instead of waiting.
-
 export type QuotaError = { kind: 'daily' | 'minute' | 'overload'; ms: number };
 
 /** What a failed Gemini call means for the pool, or null if it isn't a quota/overload problem. */
 export function classifyGeminiError(err: unknown): QuotaError | null {
   const msg = err instanceof Error ? err.message : String(err);
-  if (/\b503\b|UNAVAILABLE|high demand/i.test(msg)) return { kind: 'overload', ms: 2000 };
+  if (/\b503\b|UNAVAILABLE|high demand|over capacity/i.test(msg)) return { kind: 'overload', ms: 2000 };
+  if (/^Groq (429|413)/.test(msg)) {
+    // Groq: "… tokens per minute (TPM) … Please try again in 7.5s" / "requests per day (RPD) … 2h3m4.5s"
+    const t = msg.match(/try again in (?:(\d+)h)?(?:(\d+)m)?([\d.]+)s/i);
+    const ms = t ? Math.ceil(((Number(t[1] ?? 0) * 60 + Number(t[2] ?? 0)) * 60 + Number(t[3])) * 1000) : 15_000;
+    if (/per day|\bRPD\b|\bTPD\b/i.test(msg)) return { kind: 'daily', ms };
+    return { kind: 'minute', ms: Math.min(MAX_HOLD_MS, ms) };
+  }
   if (!/\b429\b|RESOURCE_EXHAUSTED/.test(msg)) return null;
   const s = msg.match(/retry in ([\d.]+)s/i)?.[1] ?? msg.match(/"retryDelay":"(\d+)s"/)?.[1];
   const ms = s ? Math.ceil(Number(s) * 1000) : 15_000;
@@ -89,15 +72,21 @@ export function classifyGeminiError(err: unknown): QuotaError | null {
   return { kind: 'minute', ms: Math.min(MAX_HOLD_MS, ms) };
 }
 
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => (clearTimeout(t), reject(new Error('aborted'))), { once: true });
+  });
+
 export class ModelPool {
   private limiters = new Map<string, RateLimiter>();
 
   constructor(
     readonly models: string[],
-    perMinute: number,
+    perMinute: number | ((model: string) => number),
     private now: () => number = Date.now,
   ) {
-    for (const m of models) this.limiters.set(m, new RateLimiter(perMinute, 60_000, now));
+    for (const m of models) this.limiters.set(m, new RateLimiter(typeof perMinute === 'number' ? perMinute : perMinute(m), 60_000, now));
   }
 
   /** The best model to use now: the first one free, else the one free soonest. null if all are out for the day. */
@@ -111,7 +100,25 @@ export class ModelPool {
     return best;
   }
 
-  /** Record a call as sent. */
+  /**
+   * Claim a slot: returns the model to call, already counted. Re-checks after every wait, so callers
+   * that were waiting for the same freed slot can't both take it (only one wakes to a free model).
+   * Throws if no model frees up before `deadline` (epoch ms).
+   */
+  async acquire(priority: Priority, deadline: number, signal?: AbortSignal): Promise<string> {
+    for (;;) {
+      const pick = this.pick(priority);
+      if (!pick) throw new Error('every Gemini model is out of quota for today');
+      if (pick.wait === 0) {
+        this.limiters.get(pick.model)!.record();
+        return pick.model;
+      }
+      if (this.now() + pick.wait > deadline) throw new Error(`no Gemini model free in time (next: ${pick.model} in ${Math.ceil(pick.wait / 1000)}s)`);
+      await sleep(pick.wait + 25, signal);
+    }
+  }
+
+  /** Record a call as sent (tests; acquire() does this itself). */
   take(model: string) {
     this.limiters.get(model)?.record();
   }
@@ -122,15 +129,40 @@ export class ModelPool {
   }
 }
 
-const DEFAULT_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemma-4-31b-it'];
+// Default order: Groq's gpt-oss-120b first (0.4s, 1,000/day), then Gemini's best (20/day), then the rest.
+const DEFAULT_MODELS = [
+  'groq:openai/gpt-oss-120b',
+  'gemini-3.6-flash',
+  'groq:openai/gpt-oss-20b',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemma-4-31b-it',
+];
 
 /**
- * GEMINI_MODELS=a,b,c sets the order (e.g. a lite model first in rehearsals to save the best model's quota
- * for the demo). One pool per server process: kept on globalThis because Next bundles each API route
- * separately, and every route must see the same quota state.
+ * Model order. GEMINI_MODELS=a,b,c sets it (e.g. a lite model first in rehearsals to save the best
+ * model's daily quota for the demo). GEMINI_MODEL (one model; research reads it too) goes first if set.
+ * Only providers with a key are kept: `groq:` models need GROQ_API_KEY, the others GEMINI_API_KEY.
  */
+export function modelOrder(env: { GEMINI_MODELS?: string; GEMINI_MODEL?: string; groq?: boolean; gemini?: boolean }): string[] {
+  const list = (env.GEMINI_MODELS ?? '').split(',');
+  const single = (env.GEMINI_MODEL ?? '').split(',')[0]; // research needs a single id; never treat it as a list
+  const usable = (m: string) => (m.startsWith('groq:') ? env.groq !== false : env.gemini !== false);
+  return [single, ...list, ...DEFAULT_MODELS].map((s) => s.trim()).filter((m, i, a) => m && a.indexOf(m) === i && usable(m));
+}
+
+/** Calls per minute per model: Groq's 8,000 tokens/min fits ~3 topic calls; Gemini allows 5. */
+const paceFor = (model: string) => (model.startsWith('groq:') ? Number(process.env.GROQ_RPM) || 3 : Number(process.env.GEMINI_RPM) || 5);
+
+/** One pool per server process: on globalThis because Next bundles each API route separately. */
 const g = globalThis as unknown as { __geminiPool?: ModelPool };
 export const geminiPool = (g.__geminiPool ??= new ModelPool(
-  (process.env.GEMINI_MODELS ?? process.env.GEMINI_MODEL ?? '').split(',').map((s) => s.trim()).filter(Boolean).concat(DEFAULT_MODELS).filter((m, i, a) => a.indexOf(m) === i),
-  Number(process.env.GEMINI_RPM) || 5,
+  modelOrder({
+    GEMINI_MODELS: process.env.GEMINI_MODELS,
+    GEMINI_MODEL: process.env.GEMINI_MODEL,
+    groq: Boolean(process.env.GROQ_API_KEY),
+    gemini: Boolean(process.env.GEMINI_API_KEY),
+  }),
+  paceFor,
 ));
