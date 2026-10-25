@@ -8,6 +8,8 @@ import { VOICE_SETTINGS, type VoiceRole } from "./configs";
 // so the typewriter can follow the voice exactly.
 export type TtsResult = TtsResponse & {
   alignment?: { characters: string[]; startSeconds: number[]; endSeconds: number[] };
+  /** Set when the requested voice failed and the presenter voice was used instead: why. */
+  voiceFallback?: string;
 };
 
 // Server-only: generates one line of speech for a courtroom role. audioUrl is a data: URL, playable as-is.
@@ -26,8 +28,10 @@ export async function synthesize(text: string, role: VoiceRole, voiceId?: string
       outputFormat: "mp3_44100_128",
     });
   } catch (e) {
-    if (voiceId) return synthesize(text, role, undefined, settings);
-    throw e;
+    if (!voiceId) throw e;
+    const detail = (e as { body?: { detail?: { message?: string } } }).body?.detail?.message ?? (e as Error).message;
+    console.error(`[voice/tts] voice ${voiceId} failed, using the presenter voice for this line: ${detail}`);
+    return { ...(await synthesize(text, role, undefined, settings)), voiceFallback: detail };
   }
   const a = res.alignment;
   return {

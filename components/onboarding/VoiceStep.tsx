@@ -9,6 +9,8 @@ export type VoiceStepResult = {
   /** What they said — feeds the profile (D10). */
   transcript: string;
   fallback: boolean;
+  /** Why the user's own voice couldn't be used (shown to them; the default voice is used instead). */
+  error?: string;
 };
 
 const MIN_SECONDS = 45;
@@ -94,10 +96,12 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
       return f;
     };
     const [clone, stt] = await Promise.all([
-      fetch("/api/voice/clone", { method: "POST", body: form() }).then((r) => r.json()).catch(() => ({ voiceId: null, fallback: true })),
+      fetch("/api/voice/clone", { method: "POST", body: form() })
+        .then((r) => r.json() as Promise<{ voiceId: string | null; fallback: boolean; error?: string }>)
+        .catch(() => ({ voiceId: null, fallback: true, error: "Couldn't reach the voice cloning service." })),
       fetch("/api/voice/stt", { method: "POST", body: form() }).then((r) => r.json() as Promise<SttResponse>).catch(() => ({ transcript: "", fallback: true })),
     ]);
-    const res: VoiceStepResult = { voiceId: clone.voiceId, transcript: stt.transcript, fallback: clone.fallback || stt.fallback };
+    const res: VoiceStepResult = { voiceId: clone.voiceId, transcript: stt.transcript, fallback: clone.fallback || stt.fallback, error: clone.error };
     try {
       if (res.voiceId) sessionStorage.setItem(SESSION_KEY, res.voiceId);
       else sessionStorage.removeItem(SESSION_KEY);
@@ -115,7 +119,7 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
     })
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null);
-    finish(res, res.voiceId ? "That's your voice, from the future." : "Using the default voice for your future selves.");
+    finish(res, res.voiceId ? "That's your voice, from the future." : "Your future selves will use the default voice.");
     if (tts?.audioUrl) {
       preview.current = new Audio(tts.audioUrl);
       preview.current.play().catch(() => {});
@@ -172,6 +176,11 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
       )}
 
       {(phase === "processing" || phase === "preview") && <p className="text-2xl text-zinc-200" data-testid="voice-status">{status}</p>}
+      {phase === "preview" && result?.error && (
+        <p role="alert" data-testid="voice-error" className="max-w-xl rounded-xl border border-amber-500/60 bg-amber-500/10 px-4 py-3 text-left text-amber-200">
+          ⚠️ We couldn’t use your voice: {result.error}
+        </p>
+      )}
 
       {phase === "preview" && result && (
         <div className="flex gap-3">

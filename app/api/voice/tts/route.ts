@@ -28,8 +28,9 @@ export async function POST(req: Request) {
   const { text, speaker, role, voiceId, voiceSettings } = parsed.data;
   try {
     return Response.json(await synthesize(text, (speaker ?? role)!, voiceId, voiceSettings));
-  } catch {
+  } catch (e) {
     // ElevenLabs down / out of credits: silent audio of the right length, so the trial keeps going.
+    console.error(`[voice/tts] ElevenLabs failed, returning silent audio: ${(e as Error).message}`);
     return Response.json(mockSpeech(text));
   }
 }
