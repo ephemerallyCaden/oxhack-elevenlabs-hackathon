@@ -78,6 +78,11 @@
 .pc-pedestal { position: absolute; pointer-events: none; user-select: none; transform-origin: 50% 0; }
 
 /* ===== MANGA-NOIR STAGE (tuned in public/mockups/intro-crane.html) ===== */
+/* Hidden until useIntroCrane has painted its first frame: the server-rendered court must never flash
+   before the crane-up intro. */
+.manga-stage:not([data-ready]) {
+  visibility: hidden;
+}
 .manga-stage {
   position: relative;
   width: 960px;
