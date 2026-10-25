@@ -35,7 +35,7 @@ import type {
   VerdictResponse,
 } from '@/types';
 import { SPEAKER_SCENE } from '@/types';
-import { estimateMs, postJson, uid, withFallback } from './fallback';
+import { anySignal, estimateMs, postJson, uid, withFallback } from './fallback';
 import { setupText } from './punch';
 import { punchVoiceSettings } from '@/lib/voice/configs';
 import type { VoiceSettings } from '@elevenlabs/elevenlabs-js/api';
@@ -156,8 +156,7 @@ export class TrialOrchestrator {
   }
   private post = <T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> => {
     if (this.stopped) return Promise.reject(new Error('trial stopped'));
-    const both = signal && typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, this.abort.signal]) : (signal ?? this.abort.signal);
-    return postJson<T>(url, body, both);
+    return postJson<T>(url, body, signal ? anySignal(signal, this.abort.signal) : this.abort.signal);
   };
   private initial(): TrialState {
     return { phase: 'ask', scene: 'witness', question: '', agenda: [], cycle: 0, totalCycles: BASE_CYCLES, canInterrupt: false, spectrum: { value: 0, label: 'Toss-up' }, transcript: [], cards: [], ledger: [], fallbacks: [] };
@@ -495,7 +494,7 @@ export class TrialOrchestrator {
     form.append('audio', input, 'interrupt.webm');
     const r = await withFallback(
       async (signal) => {
-        const res = await fetch('/api/voice/stt', { method: 'POST', body: form, signal });
+        const res = await fetch('/api/voice/stt', { method: 'POST', body: form, signal: anySignal(signal, this.abort.signal) });
         if (!res.ok) throw new Error(`stt ${res.status}`);
         return ((await res.json()) as SttResponse).transcript;
       },

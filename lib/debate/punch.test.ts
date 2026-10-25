@@ -59,6 +59,34 @@ describe('attachPunch', () => {
     expect(setupText(l)).toBe('Think about it.');
   });
 
+  it('counts words the same way on both sides: numbers, contractions, hyphens', () => {
+    for (const [text, punch, setup] of [
+      ['The bill comes to £12,000.', '£12,000.', 'The bill comes to'],
+      ['And you just cannot afford it.', "can't afford it.", 'And you just cannot afford it.'],
+      ['This is a life-changing move.', 'life-changing move.', 'This is a'],
+      ["Face it, you just can't afford it.", "can't afford it.", 'Face it, you just'],
+    ]) {
+      const l = line('prosecution', text);
+      attachPunch(l, { text: punch, tts: '' }, new Set());
+      if (l.punch) expect(setupText(l)).toBe(setup);
+      else expect(l.text).toBe(`${text} ${punch}`); // different words: appended, never a word lost
+    }
+  });
+
+  it('never voices the punch in the setup clip too', () => {
+    const l = line('defense', 'The median earns less than minimum wage.', { tts: '[concerned] The median earns less than minimum wage.' });
+    expect(attachPunch(l, { text: 'less than minimum wage.', tts: '[concerned] less than... minimum wage.' }, new Set())).toBe(true);
+    expect(l.tts).toBe('[concerned] The median earns');
+    expect(setupText(l)).toBe('The median earns');
+  });
+
+  it('keeps a whole-line punch as a plain line (no empty setup beat)', () => {
+    const l = line('prosecution', 'Everything.');
+    expect(attachPunch(l, { text: 'Everything.', tts: '' }, new Set())).toBe(false);
+    expect(l.text).toBe('Everything.');
+    expect(l.punch).toBeUndefined();
+  });
+
   it('leaves a cut-off line alone (the cut-in finishes it)', () => {
     const l = line('defense', 'And the median is —');
     attachPunch(l, { text: 'nothing.', tts: '' }, new Set());

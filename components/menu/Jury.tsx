@@ -61,13 +61,13 @@ export default function Jury({
           const entry = s.entry;
           return (
             <span key={i} className={`juror kept${s.signedIn ? ' me' : ''}`} style={style}>
-              {onPick && entry.email ? (
-                <button className="juror-pick" onClick={() => onPick(entry)} aria-label={s.signedIn ? `${name} (signed in)` : `Sign in as ${name}`}>{face}</button>
+              {onPick && entry.email && !s.signedIn ? (
+                <button className="juror-pick" onClick={() => onPick(entry)} aria-label={`Sign in as ${name}`}>{face}</button>
               ) : (
                 face
               )}
               {onRemove && entry.email && (
-                <button className="juror-x" onClick={() => onRemove(entry)} aria-label={`Remove ${name} from this laptop`}>×</button>
+                <button className="juror-x" onClick={() => onRemove(entry)} aria-label={`Remove ${name} from this laptop (they stay in the public jury until they use Forget me)`} title="Remove from this laptop">×</button>
               )}
             </span>
           );

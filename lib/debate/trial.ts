@@ -58,6 +58,8 @@ async function ask<S extends z.ZodType, R>(
   build: (out: z.infer<S>) => R,
   fallback: () => R,
   priority: Priority = 'interactive',
+  /** The caller's request signal: a client that gave up (e.g. a stopped trial) frees the model slot too. */
+  signal?: AbortSignal,
 ): Promise<{ value: R; fallback: boolean }> {
   const llm = debateLlm();
   if (llm === 'mock') return { value: fallback(), fallback: true };
@@ -65,10 +67,10 @@ async function ask<S extends z.ZodType, R>(
   const system = task === P.PROFILE_TASK ? task : `${P.COURT}\n\n${task}`;
   if (llm === 'gemini') {
     const deadline = Date.now() + ms;
-    return withFallback(async (signal) => build(await askGemini(system, content, schema, signal, priority, deadline)), fallback, ms, label);
+    return withFallback(async (s) => build(await askGemini(system, content, schema, s, priority, deadline)), fallback, ms, label, signal);
   }
   return withFallback(
-    async (signal) => {
+    async (s) => {
       const res = await claude().messages.parse(
         {
           model: MODEL,
@@ -77,7 +79,7 @@ async function ask<S extends z.ZodType, R>(
           messages: [{ role: 'user', content }],
           output_config: { effort: 'low', format: zodOutputFormat(schema) },
         },
-        { signal },
+        { signal: s },
       );
       if (!res.parsed_output) throw new Error(`no parsed output (stop_reason ${res.stop_reason})`);
       return build(res.parsed_output as z.infer<S>);
@@ -85,6 +87,7 @@ async function ask<S extends z.ZodType, R>(
     fallback,
     ms,
     label,
+    signal,
   );
 }
 
@@ -97,7 +100,7 @@ export const unlabel = (s: string) => s.replace(SPEAKER_LABEL, '$1').replace(SID
 /** Display text never shows voice cues: models sometimes put audio tags like [confident] in `text` too. */
 export const plain = (s: string) => unlabel(s).replace(/\[[^\]\n]{1,40}\]\s*/g, '').replace(/\s{2,}/g, ' ').trim();
 const judgeLine = (kind: Line['kind'], s: { text: string; tts: string }, topic_id?: string): Line => {
-  if (!s.text.trim()) throw new Error(`empty ${kind} line`); // → mock fallback
+  if (!plain(s.text)) throw new Error(`empty ${kind} line`); // → mock fallback (a bare label or tags is empty too)
   return { id: uid('line'), speaker: 'judge', kind, text: plain(s.text), tts: unlabel(s.tts), cites: [], topic_id };
 };
 
@@ -124,7 +127,7 @@ const SetupSchema = z.object({
   personas: z.object({ yes: PersonaSchema, no: PersonaSchema }),
 });
 
-export async function buildSetup(req: SetupRequest): Promise<SetupResponse> {
+export async function buildSetup(req: SetupRequest, signal?: AbortSignal): Promise<SetupResponse> {
   const { value } = await ask(
     P.SETUP_TASK,
     `QUESTION: ${req.question}\n${P.profileBlock(req.profile)}`,
@@ -155,6 +158,8 @@ export async function buildSetup(req: SetupRequest): Promise<SetupResponse> {
       };
     },
     () => mockSetup(req),
+    'interactive',
+    signal,
   );
   return value;
 }
@@ -187,7 +192,7 @@ const TopicSchema = z.object({
   ruling: Spoken,
 });
 
-export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
+export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promise<TopicResponse> {
   const valid = new Set(req.cards.map((c) => c.id));
   const t = req.urgent ? TIMEOUTS.topicUrgent : TIMEOUTS.topic;
   const { value } = await ask(
@@ -228,7 +233,7 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
         };
         lines.push(line);
         byIndex.push(line);
-        if (!cutUsed && !turn.answer && o.cut_in.text.trim() && o.resume.text.trim()) {
+        if (!cutUsed && !turn.answer && plain(o.cut_in.text) && plain(o.resume.text)) {
           cutUsed = true;
           const other = turn.side === 'yes' ? 'no' : 'yes';
           lines.push(
@@ -270,6 +275,7 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
     },
     () => mockTopic(req),
     req.urgent ? 'interactive' : 'background',
+    signal,
   );
   return value;
 }
@@ -291,7 +297,7 @@ const ProfileSchema = z.object({
   question: z.string().nullable().describe('The decision they described, as "Should I …?"; null if none'),
 });
 
-export async function extractProfile(req: ProfileRequest): Promise<ProfileResponse> {
+export async function extractProfile(req: ProfileRequest, signal?: AbortSignal): Promise<ProfileResponse> {
   const text = onboardingText(req);
   if (!text) return { profile: mergeProfile({}, req.form), fallback: true };
   const { value } = await ask(
@@ -312,6 +318,8 @@ export async function extractProfile(req: ProfileRequest): Promise<ProfileRespon
       return { profile: mergeProfile(extracted, req.form), question: out.question?.trim() || undefined, fallback: false };
     },
     () => mockProfile(req),
+    'interactive',
+    signal,
   );
   return value;
 }
@@ -328,7 +336,7 @@ const JudgeInterruptSchema = z.object({
   line: Spoken,
 });
 
-export async function judgeInterrupt(req: JudgeInterruptRequest): Promise<JudgeInterruptResponse> {
+export async function judgeInterrupt(req: JudgeInterruptRequest, signal?: AbortSignal): Promise<JudgeInterruptResponse> {
   const removable = new Set(req.agenda.filter((t) => t.status === 'pending' || t.status === 'active').map((t) => t.id));
   const { value } = await ask(
     P.JUDGE_INTERRUPT_TASK,
@@ -358,6 +366,8 @@ THE WITNESS SAYS: "${req.text}"`,
       return { action: 'none', line, fallback: false };
     },
     () => mockJudgeInterrupt(req),
+    'interactive',
+    signal,
   );
   return value;
 }
@@ -366,7 +376,7 @@ THE WITNESS SAYS: "${req.text}"`,
 
 const VerdictSchema = z.object({ explanation: z.string(), line: Spoken });
 
-export async function verdict(req: VerdictRequest): Promise<VerdictResponse> {
+export async function verdict(req: VerdictRequest, signal?: AbortSignal): Promise<VerdictResponse> {
   const spectrum = computeSpectrum(req.agenda);
   const scored = req.agenda.filter((t) => t.status !== 'removed' && t.score);
   const breakdown = scored.map((t) => ({ topic_id: t.id, title: t.title, weight: t.importance, t: t.score!.t, deciding_argument: t.score!.deciding_argument, added_by: t.added_by }));
@@ -386,6 +396,8 @@ WITNESS INTERRUPTS: ${req.userLines.length ? req.userLines.map((l) => `"${l.text
       fallback: false,
     }),
     () => mockVerdict(req),
+    'interactive',
+    signal,
   );
   return value;
 }

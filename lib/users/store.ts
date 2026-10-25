@@ -69,7 +69,8 @@ export async function listFaces(limit = 15): Promise<{ id: string; name?: string
   type Row = { id: string; profile: UserProfile | null; selfie: string | null };
   let rows: Row[] = [];
   if (supabase) {
-    const { data } = await supabase.from("users").select("id, profile, selfie").not("selfie", "is", null).order("updated_at", { ascending: false }).limit(limit);
+    const { data, error } = await supabase.from("users").select("id, profile, selfie").not("selfie", "is", null).order("updated_at", { ascending: false }).limit(limit);
+    if (error) throw new Error(`supabase select: ${error.message}`); // not "nobody saved": don't cache an empty jury
     rows = (data ?? []) as Row[];
   } else {
     const files = await readdir(DIR).catch(() => [] as string[]);

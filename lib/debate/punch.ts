@@ -17,7 +17,9 @@ export function punchedSides(history: Line[], topicId: string): Set<Side> {
   return used;
 }
 
-const words = (s: string) => s.toLowerCase().replace(/\[[^\]]*\]/g, ' ').replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+// Words = whitespace tokens with their punctuation removed ("£12,000." → "12000", "can't" → "cant"), so
+// this and dropWords() count the same tokens.
+const words = (s: string) => s.toLowerCase().replace(/\[[^\]]*\]/g, ' ').replace(/[^\p{L}\p{N}\s]/gu, '').split(/\s+/).filter(Boolean);
 /** Does `text` already end with `tail` (case, punctuation and audio tags ignored)? */
 function endsWithWords(text: string, tail: string): boolean {
   const a = words(text);
@@ -72,11 +74,14 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   const side: Side = line.speaker === 'prosecution' ? 'yes' : 'no';
   const count = punch.split(/\s+/).length;
   if (used.size > 0 || count > MAX_WORDS) return refuse();
-  used.add(side);
-  // The punch must be exactly the end of `text` (setupText() cuts it off by length).
+  // The punch must be exactly the end of `text` (setupText() cuts it off by length), after a real setup.
   const setup = already ? dropWords(line.text, words(punch).length) : line.text.trim();
+  if (!words(setup).length) return false; // the punch would be the whole line: keep it as a plain line
+  used.add(side);
   const tail = tailAfter(setup, punch);
-  line.text = setup ? `${setup} ${tail}` : tail;
+  line.text = `${setup} ${tail}`;
   line.punch = { text: tail, tts: punchTts(line.speaker, draft!.tts, punch) };
+  // The setup clip is voiced from `tts`: if the model also left the punch there, cut it, or it's said twice.
+  if (line.tts?.trim() && endsWithWords(line.tts, punch)) line.tts = dropWords(line.tts, words(punch).length);
   return true;
 }

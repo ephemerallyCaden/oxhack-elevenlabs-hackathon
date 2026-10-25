@@ -48,7 +48,8 @@ export async function POST(req: Request) {
       const mine = `user_${saved}`;
       if (voiceId) {
         const voice = await elevenlabs.voices.get(voiceId).catch(() => null);
-        if (voice?.name?.startsWith("session_")) await elevenlabs.voices.update(voiceId, { name: mine }).catch(() => {});
+        if (voice?.name?.startsWith("session_"))
+          await elevenlabs.voices.update(voiceId, { name: mine }).catch((e) => console.warn(`[users] couldn't rename ${voiceId} to ${mine} (scripts/delete-clones.mjs would remove it):`, e));
       }
       // Re-onboarding replaced their clone: delete the old one (only if it is theirs), or clones pile up.
       if (before?.voiceId && before.voiceId !== voiceId) {

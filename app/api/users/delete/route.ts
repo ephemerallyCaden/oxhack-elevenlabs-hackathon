@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { elevenlabs } from "@/lib/voice/client";
 import { authAvailable, authUnavailable, requireUser, unauthorized } from "@/lib/auth/server";
 import { deleteUser } from "@/lib/users/store";
@@ -18,9 +19,20 @@ export async function POST(req: Request) {
     return Response.json({ error: (e as Error).message }, { status: 500 });
   }
   invalidateJury();
-  if (user?.voiceId && elevenlabs) {
-    const voice = await elevenlabs.voices.get(user.voiceId).catch(() => null);
-    if (voice?.name === `user_${me.id}`) await elevenlabs.voices.delete(user.voiceId).catch(() => {}); // only their own clone
+  // The row is gone: answer now, delete the clone after (a slow voice service must not turn a done
+  // "Forget me" into a client timeout, whose retry would find no row and orphan the clone).
+  const voiceId = user?.voiceId;
+  if (voiceId && elevenlabs) {
+    const client = elevenlabs;
+    const cleanup = async () => {
+      const voice = await client.voices.get(voiceId).catch(() => null);
+      if (voice?.name === `user_${me.id}`) await client.voices.delete(voiceId).catch(() => {}); // only their own clone
+    };
+    try {
+      after(cleanup);
+    } catch {
+      void cleanup(); // outside a request (unit tests)
+    }
   }
   return Response.json({ deleted: !!user, juryKey: juryKey(me.id) });
 }

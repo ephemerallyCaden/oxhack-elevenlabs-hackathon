@@ -122,12 +122,14 @@ export default function Home() {
 
   // The jury: every saved face (thumbnail + first name). Decoration: a slow or failed fetch leaves silhouettes.
   const juryRequest = useRef(0);
+  const forgotten = useRef(new Set<string>()); // seats removed by Forget me: other instances may still cache them
+  const [myKey, setMyKey] = useState<string | undefined>(); // your own seat, while signed in
   const loadJury = useCallback(() => {
     const n = ++juryRequest.current; // a slow earlier reply must not overwrite a newer one
     fetch("/api/jury", { method: "POST", signal: AbortSignal.timeout(5000) })
       .then((r) => (r.ok ? r.json() : { jurors: [] }))
       .then(({ jurors }: { jurors: { key: string; name?: string; face: string }[] }) => {
-        if (n === juryRequest.current) setStored(jurors.map((j) => ({ email: "", key: j.key, name: j.name, face: j.face })));
+        if (n === juryRequest.current) setStored(jurors.filter((j) => !forgotten.current.has(j.key)).map((j) => ({ email: "", key: j.key, name: j.name, face: j.face })));
       })
       .catch(() => {});
   }, []);
@@ -141,6 +143,7 @@ export default function Home() {
       .then((r) => (r.ok ? r.json() : null))
       .then((res: { user: SavedUser; juryKey?: string } | null) => {
         if (!live || !res) return;
+        setMyKey(res.juryKey);
         // Faces kept before jury keys existed learn theirs now, so the jury stops seating them twice.
         const mine = session.user.email && readRoster().find((r) => r.email === session.user.email);
         if (mine && res.juryKey && mine.key !== res.juryKey) {
@@ -191,17 +194,28 @@ export default function Home() {
     setStep("voice");
   }
 
+  const forgetting = useRef(false);
   async function forgetMe() {
-    if (!session) return;
+    if (!session || forgetting.current) return; // a double click sends one request
+    forgetting.current = true;
     setError("");
     const r = await authedPost("/api/users/delete", session, {}, AbortSignal.timeout(8000)).catch(() => null);
+    forgetting.current = false;
     if (!r?.ok) {
-      setError("The court couldn’t delete your voice and face just now. Nothing was removed; try again.");
+      setError(
+        r?.status === 401
+          ? "Your sign-in has expired. Sign in with Google again, then use Forget me."
+          : "The court couldn’t delete your voice and face just now. Nothing was removed; try again.",
+      );
       return;
     }
     // Other server instances may still cache the jury for a minute: take your seat out here and now.
     const { juryKey } = (await r.json().catch(() => ({}))) as { juryKey?: string };
-    if (juryKey) setStored((js) => js.filter((j) => j.key !== juryKey));
+    if (juryKey) {
+      forgotten.current.add(juryKey);
+      setStored((js) => js.filter((j) => j.key !== juryKey));
+    }
+    setMyKey(undefined);
     if (session.user.email) removeFromRoster(session.user.email);
     await signOut();
     setReturning(null);
@@ -378,7 +392,7 @@ export default function Home() {
       )}
       {/* Kept faces are also saved users: seat each person once. Taps only on the title page (mid-onboarding a tap would throw the progress away). */}
       <Jury
-        roster={[...yours, ...roster, ...stored.filter((j) => !roster.some((r) => r.key && r.key === j.key))]}
+        roster={[...yours, ...roster, ...stored.filter((j) => !roster.some((r) => r.key && r.key === j.key) && !(signedInAs && myKey && j.key === myKey && yours.length))]}
         signedInAs={signedInAs}
         onPick={menu ? pickJuror : undefined}
         onRemove={menu ? (e) => forgetFace(e.email) : undefined}

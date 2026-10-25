@@ -16,6 +16,7 @@ import { sessionVoiceId } from '@/components/onboarding/VoiceStep';
 import { useSessionHeads } from '@/components/onboarding/sessionHeads';
 import VerdictScreen from '@/components/menu/VerdictScreen';
 import { signOut } from '@/lib/auth/browser';
+import { leaveCourt } from '@/components/menu/leaveCourt';
 import { sessionProfile, takeSessionQuestion } from '@/lib/onboarding/session';
 import { useTrialState } from '@/lib/debate/useTrial';
 import * as engine from '@/lib/audio/engine';
@@ -138,14 +139,28 @@ export default function TrialPage() {
       engine.stopVoice();
       prevScene.current = undefined;
       prevPhase.current = undefined;
+      if (held.current) {
+        // Left mid-hold: turn the mic off (and don't come back half-holding).
+        held.current = false;
+        setHolding(false);
+        void recorder.stop();
+      }
     },
-    [],
+    [], // eslint-disable-line react-hooks/exhaustive-deps -- unmount/hide only
   );
+
+  // Leaving the court (verdict screen, or a broken trial): silence, then a full load (leaveCourt.ts).
+  const leave = (href: string) => {
+    void engine.setMusic(null);
+    void engine.setAmbience(false);
+    void leaveCourt(href, { signOut, assign: (h) => location.assign(h) });
+  };
 
   // -- Audio unlock on first user gesture --
   const unlockAudio = useCallback(async () => {
     if (audioUnlocked) return;
     if (await unlockSoon()) setAudioUnlocked(true);
+    else void engine.unlock().then(() => setAudioUnlocked(true), () => {}); // a late resume() still counts
   }, [audioUnlocked]);
   // Lines read this (not the state) so an unlock mid-line doesn't replay it.
   const audioOn = useRef(audioUnlocked);
@@ -155,12 +170,12 @@ export default function TrialPage() {
   // Still locked (Safari didn't count the click on "/" as permission): any tap or key brings the sound back.
   useEffect(() => {
     if (audioUnlocked) return;
+    // Every gesture tries again until it works (iOS only counts touchend/click, not pointerdown).
     const unlock = () => void unlockAudio();
-    window.addEventListener('pointerdown', unlock, { once: true });
-    window.addEventListener('keydown', unlock, { once: true });
+    const events = ['pointerdown', 'pointerup', 'click', 'keydown'] as const;
+    for (const e of events) window.addEventListener(e, unlock);
     return () => {
-      window.removeEventListener('pointerdown', unlock);
-      window.removeEventListener('keydown', unlock);
+      for (const e of events) window.removeEventListener(e, unlock);
     };
   }, [audioUnlocked, unlockAudio]);
 
@@ -261,7 +276,7 @@ export default function TrialPage() {
           stage: setPunchStage,
           // Locked audio never finishes a clip: play the beat silently on its timing instead.
           clip: (url, ms) => (url && audioOn.current ? engine.playVoice(speaker, url).catch(() => {}) : sleep(ms)),
-          sfx: (name) => void engine.playSfx(name),
+          sfx: (name) => void (audioOn.current && engine.playSfx(name)), // locked: they'd all fire at once on unlock
           shake: () => setShakeKey((k) => k + 1),
           sleep,
         },
@@ -312,12 +327,12 @@ export default function TrialPage() {
   // -- 2. OBJECTION sting on interrupt --
   async function down() {
     if (held.current) return;
-    await unlockAudio();
+    void unlockAudio(); // not awaited: a locked unlock can take 1.5s, and a quick release must still end the hold
     const phase = orch.getState().phase;
     if (phase === 'speaking') {
       if (!orch.beginInterrupt()) return;
       // Play OBJECTION sting (cuts voice, plays sfx, ducks music)
-      engine.objection();
+      if (audioOn.current) engine.objection();
     } else if (phase !== 'ask') return;
     held.current = true;
     setHolding(true);
@@ -478,7 +493,7 @@ export default function TrialPage() {
           text={introMode && !asking ? undefined : box?.text}
           objection={s.phase === 'listening'}
           status={introMode === 'play' ? undefined : s.phase === 'preparing' || s.phase === 'thinking' ? s.status : undefined}
-          controls={introMode && !asking ? undefined : controls}
+          controls={(introMode && !asking) || s.result ? undefined : controls}
           heads={heads}
           interrupting={s.phase === 'listening'}
           interrupted={s.interruptTarget === 'user' ? undefined : s.interruptTarget}
@@ -555,15 +570,20 @@ export default function TrialPage() {
           value={(s.result.verdict?.spectrum ?? s.spectrum).value}
           label={(s.result.verdict?.spectrum ?? s.spectrum).label}
           heads={heads}
-          onLeave={async (href) => {
-            void engine.setMusic(null);
-            void engine.setAmbience(false);
-            if (href === '/') await signOut(); // back to the menu = done: the next person starts clean
-            // A full load, not router.push: Cache Components would restore the kept-alive menu and trial
-            // pages with the last person's state. sessionStorage survives it, so New case keeps the voice + face.
-            location.assign(href);
-          }}
+          onLeave={leave}
         />
+      )}
+
+      {/* The trial broke (no verdict): still a way out, same as the verdict screen's. */}
+      {s.phase === 'done' && !s.result && (
+        <div className="absolute inset-x-0 bottom-[24%] z-[60] flex justify-center gap-3">
+          <button type="button" className="min-h-11 rounded bg-zinc-100 px-5 font-mono text-sm font-bold text-black" onClick={() => leave('/?again=1')}>
+            Try a new case
+          </button>
+          <button type="button" className="min-h-11 rounded border border-zinc-500 px-5 font-mono text-sm text-zinc-100" onClick={() => leave('/')}>
+            Main menu
+          </button>
+        </div>
       )}
     </main>
   );
