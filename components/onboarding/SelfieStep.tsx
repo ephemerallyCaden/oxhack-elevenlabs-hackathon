@@ -34,6 +34,32 @@ type Kind = "front" | "side";
 const FRAME = { front: FRONT_FRAME, side: SIDE_FRAME };
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 
+/**
+ * Profile outline to line up with, facing right (the mirrored preview shows a right turn that way).
+ * Drawn in side-frame px so its eye, mouth (the jaw split, lipY) and chin sit where the cut-out
+ * expects them; lining up the mouth keeps the talking jaw on the mouth, not the neck.
+ */
+function SideGuide() {
+  const { w, h, chin } = SIDE_FRAME;
+  const [[ex, ey]] = DEFAULT_HEADS.side.eyes;
+  const lip = DEFAULT_HEADS.side.lipY * h;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="absolute inset-0 h-full w-full" aria-hidden>
+      <path
+        d={`M150 8 C215 8 270 40 283 100 L286 140 C288 158 292 172 301 192 C297 200 290 204 283 206 L284 ${lip - 8}
+           L279 ${lip} L283 ${lip + 10} C278 262 268 280 252 ${chin + 1} C238 293 222 296 214 304 L208 ${h} L72 ${h}
+           L76 260 C48 240 26 200 24 150 C22 70 80 8 150 8 Z`}
+        className="fill-[var(--c-brass)]/10 stroke-[var(--c-brass)]"
+        strokeWidth={4}
+        strokeDasharray="10 6"
+        strokeLinejoin="round"
+      />
+      <circle cx={ex * w} cy={ey * h} r={9} className="fill-none stroke-[var(--c-brass)]" strokeWidth={4} />
+      <line x1={252} x2={300} y1={lip} y2={lip} className="stroke-[var(--c-brass)]" strokeWidth={4} />
+    </svg>
+  );
+}
+
 /** The current video frame, mirrored like the preview the user sees. */
 function grab(v: HTMLVideoElement): HTMLCanvasElement {
   const c = document.createElement("canvas");
@@ -125,14 +151,15 @@ export default function SelfieStep({ onDone }: { onDone: (dataUrl: string | null
     } else finish(shot.spec);
   }
 
-  // Guide: the head frame (hair to chin), with the default eye + mouth marks to line up with.
+  // Guide: the head frame (hair to chin) with eye + mouth marks; for the side photo, a profile outline.
   const guide = DEFAULT_HEADS[kind];
-  const chin = kind === "side" ? SIDE_FRAME.chin / SIDE_FRAME.h : 1;
 
   return (
     <div className="flex w-full flex-col items-start gap-5">
       <p className="ct-body">
-        {kind === "front" ? "Look at the camera: hair at the top of the box, chin on the bottom." : "Now turn to your right, so the camera sees your profile."}
+        {kind === "front"
+          ? "Look at the camera: hair at the top of the box, chin on the bottom."
+          : "Now turn to your right and fit your profile to the outline: eye in the circle, mouth on the line."}
       </p>
       {error ? (
         <p className="ct-small">{error}</p>
@@ -143,13 +170,17 @@ export default function SelfieStep({ onDone }: { onDone: (dataUrl: string | null
             <img src={shot.spec.src} alt={kind === "front" ? "Your face" : "Your profile"} className="absolute left-1/2 top-1/2 z-10 h-[55%] -translate-x-1/2 -translate-y-1/2" />
           )}
           <video ref={video} autoPlay playsInline muted onLoadedData={() => setReady(true)} className={`h-full w-full -scale-x-100 object-cover ${shot ? "opacity-20" : ""}`} />
-          {!shot && (
+          {!shot && kind === "side" && (
+            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[55%] -translate-x-1/2 -translate-y-1/2" style={{ aspectRatio: `${guide.w} / ${guide.h}` }}>
+              <SideGuide />
+            </div>
+          )}
+          {!shot && kind === "front" && (
             <div className="pointer-events-none absolute left-1/2 top-1/2 h-[55%] -translate-x-1/2 -translate-y-1/2 border-2 border-dashed border-[var(--c-brass)]/70" style={{ aspectRatio: `${guide.w} / ${guide.h}` }}>
               {guide.eyes.map(([x, y], i) => (
                 <span key={i} className="absolute size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--c-brass)]" style={{ left: pct(x), top: pct(y) }} />
               ))}
               <span className="absolute left-1/4 h-0.5 w-1/2 bg-[var(--c-brass)]" style={{ top: pct(guide.lipY) }} />
-              {kind === "side" && <span className="absolute inset-x-0 h-0.5 bg-[var(--c-brass)]/60" style={{ top: pct(chin) }} />}
             </div>
           )}
         </div>
