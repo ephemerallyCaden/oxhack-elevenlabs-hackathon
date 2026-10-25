@@ -170,8 +170,9 @@ that ignores cancellation. Browser/platform workers belong outside this route.
   `runtime` export: this installed version rejects it with Cache Components.
 - The route exports `maxDuration = 60`; internal deadlines remain shorter.
   `vercel.json` selects Next.js, `npm run build` and `.next` output.
-- Server model selection: `RESEARCH_MODEL_PROVIDER=agnes` (default), `gemini`, `groq`,
-  `openrouter`, or `openai` for any other OpenAI-compatible server. Named providers need
+- Server model selection: `RESEARCH_MODEL_PROVIDER` = `groq`, `gemini`, `agnes`,
+  `openrouter`, or `openai` for any other OpenAI-compatible server. Unset, the first
+  provider with a configured key is used, in that order. Named providers need
   their key (`AGNES_API_KEY` / `AGNES_API_KEY_1`, `GEMINI_API_KEY`, `GROQ_API_KEY`,
   `OPENROUTER_API_KEY`); `openai` needs `RESEARCH_MODEL_BASE_URL` (https; API root or full
   chat-completions URL), `RESEARCH_MODEL_API_KEY` and `RESEARCH_MODEL`. Keys never fall back

@@ -248,3 +248,15 @@ test("the generic provider sends nothing without an https endpoint or a model na
   assert.equal(selection.status, "not_configured");
   assert.equal(calls, 0);
 });
+
+test("with no RESEARCH_MODEL_PROVIDER, the first provider that has a key is used", () => {
+  for (const key of ["RESEARCH_MODEL_PROVIDER", "GROQ_API_KEY", "GEMINI_API_KEY", "AGNES_API_KEY", "AGNES_API_KEY_1", "OPENROUTER_API_KEY", "RESEARCH_MODEL_API_KEY", "RESEARCH_MODEL"]) vi.stubEnv(key, "");
+  assert.equal(resolveModelConfiguration().provider, "agnes"); // nothing configured: the old default, with its warning
+  assert.match(resolveModelConfiguration().warning ?? "", /key is not configured/);
+  vi.stubEnv("GEMINI_API_KEY", "synthetic-gemini-key");
+  assert.deepEqual([resolveModelConfiguration().provider, resolveModelConfiguration().warning], ["gemini", undefined]);
+  vi.stubEnv("GROQ_API_KEY", "synthetic-groq-key");
+  assert.equal(resolveModelConfiguration().provider, "groq"); // groq wins when both are present
+  vi.stubEnv("RESEARCH_MODEL_PROVIDER", "gemini");
+  assert.equal(resolveModelConfiguration().provider, "gemini"); // an explicit choice always wins
+});

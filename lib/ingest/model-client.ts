@@ -30,10 +30,16 @@ function chatCompletionsUrl(base: string | undefined): string | undefined {
   return value.endsWith("/chat/completions") ? value : `${value}/chat/completions`;
 }
 
+// With no RESEARCH_MODEL_PROVIDER, use the first provider that has a key: teammates' and
+// Vercel's existing GROQ/GEMINI keys then work for research without extra configuration.
+const AUTO_ORDER: ModelProvider[] = ["groq", "gemini", "agnes", "openrouter", "openai"];
+const hasCredentials = (name: ModelProvider) => providers[name].keyEnv.some(key => process.env[key]?.trim())
+  && Boolean(providers[name].endpoint ?? chatCompletionsUrl(process.env.RESEARCH_MODEL_BASE_URL));
+
 /** Server configuration only. Request bodies cannot choose an endpoint or credentials. */
 export function resolveModelConfiguration(options: ModelOptions = {}): ModelConfiguration {
   if (typeof window !== "undefined") throw new Error("Model credentials must stay on the server");
-  const name = options.provider ?? (process.env.RESEARCH_MODEL_PROVIDER?.trim() || "agnes");
+  const name = options.provider ?? (process.env.RESEARCH_MODEL_PROVIDER?.trim() || AUTO_ORDER.find(hasCredentials) || "agnes");
   if (!isProvider(name)) return { provider: null, model: "unconfigured", apiKey: "",
     warning: "Unsupported research model provider; no request sent." };
   const spec = providers[name];
