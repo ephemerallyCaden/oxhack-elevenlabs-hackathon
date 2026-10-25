@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spectrum bar — blocky yellow HUD, every animation</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #050507; color: #ccc; font-family: system-ui, sans-serif; }
+  body { display: flex; overflow: hidden; }
+  #fit { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  #stageBox { width: 960px; height: 540px; flex: none; }
+  #panel { width: 340px; flex: none; height: 100%; overflow-y: auto; background: #0d0d12; border-left: 1px solid #222; padding: 14px; font-size: 12px; }
+
+  /* ── stage: the courtroom as backdrop (same manga-noir treatment as the build) ── */
+  .stage { position: relative; width: 960px; height: 540px; overflow: hidden; background: #000; }
+  .fill { position: absolute; inset: 0; pointer-events: none; }
+  .bg { background: url(/assets/courtroom-bg.png) center / cover; filter: saturate(0.3) contrast(1.25) brightness(0.55); }
+  .halftone { background-image: radial-gradient(circle, rgba(0,0,0,.15) 1px, transparent 1px); background-size: 4px 4px; mix-blend-mode: multiply; }
+  .ink { background: radial-gradient(ellipse 80% 80% at 50% 45%, transparent 40%, rgba(0,0,0,.6) 100%); }
+  .scan { z-index: 50; background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,.06) 2px 3px); }
+  .textbox { position: absolute; left: 0; right: 0; bottom: 0; height: 22%; z-index: 30; background: #08080e; border-top: 3px solid #2a3050; padding: 12px 24px; display: flex; flex-direction: column; justify-content: center; }
+  .tb-name { font-family: 'Press Start 2P', monospace; font-size: 10px; letter-spacing: .2em; margin-bottom: 8px; }
+  .tb-text { font-family: 'VT323', monospace; font-size: 22px; color: #e0e0e0; line-height: 1.3; }
+
+  /* ════════ THE HUD ════════
+     Blocky, yellow-framed, Press Start 2P (the ROUND box + bar from the courtroom-manga mockups).
+     Diverging meter: 10 blocks each side of a fixed centre notch; each block = 10 points.
+     The fill grows from the centre toward whoever is winning: NO (red) left, YES (blue) right. */
+  :root { --yes: #3b82f6; --no: #ef4444; --gold: #f0b830; --ink: #08080e; --dark: #16161f; }
+  #hud { position: absolute; left: 50%; top: 22px; z-index: 20; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px;
+    font-family: 'Press Start 2P', monospace; image-rendering: pixelated; }
+  #hud.hidden { visibility: hidden; }
+  .hud-top { display: flex; align-items: center; gap: 10px; }
+  .end { font-size: 9px; letter-spacing: 2px; width: 40px; }
+  .end.no { color: var(--no); text-align: right; } .end.yes { color: var(--yes); }
+  #label { font-size: 9px; letter-spacing: 2px; color: var(--gold); padding: 5px 12px; background: var(--ink); border: 2px solid var(--gold); min-width: 132px; text-align: center; }
+  #frame { position: relative; padding: 4px; background: var(--ink); border: 2px solid var(--gold); box-shadow: 0 0 0 2px var(--ink); }
+  #bar { position: relative; display: flex; gap: 2px; }
+  .blk { width: 12px; height: 14px; background: var(--dark); }
+  .blk.side-no { box-shadow: inset 0 -2px 0 rgba(239,68,68,.22); } .blk.side-yes { box-shadow: inset 0 -2px 0 rgba(59,130,246,.22); }
+  .blk.on-no { background: var(--no); box-shadow: inset 0 -3px 0 rgba(0,0,0,.28), inset 0 3px 0 rgba(255,255,255,.22); }
+  .blk.on-yes { background: var(--yes); box-shadow: inset 0 -3px 0 rgba(0,0,0,.28), inset 0 3px 0 rgba(255,255,255,.22); }
+  .blk.pop { background: #fff !important; }
+  .blk.out { background: #fff !important; opacity: .5; }
+  .blk.dim { filter: brightness(.35) saturate(.4); }
+  #notch { position: absolute; left: 50%; top: -6px; bottom: -6px; width: 2px; margin-left: -1px; background: var(--gold); opacity: .55; }
+  #marker { position: absolute; top: -7px; width: 6px; height: 28px; margin-left: -3px; background: var(--gold); box-shadow: 0 0 0 2px var(--ink); z-index: 2; }
+  #marker::before { content: ''; position: absolute; left: -3px; top: -6px; border: 6px solid transparent; border-top: 6px solid var(--gold); border-bottom: 0; }
+  #value { font-size: 10px; color: #e8e8ee; letter-spacing: 1px; min-height: 10px; }
+  #chip { position: absolute; top: 88px; font-size: 9px; letter-spacing: 1px; padding: 4px 6px; background: var(--ink); border: 2px solid currentColor; white-space: nowrap; opacity: 0; pointer-events: none; transform: translateX(-50%); }
+  #chip.go { animation: chip var(--chipMs, 900ms) steps(9) forwards; }
+  #chip.big { font-size: 12px; padding: 6px 8px; }
+  /* below the number, rising toward it without reaching it */
+  @keyframes chip { 0% { opacity: 1; translate: 0 8px; } 15% { opacity: 1; translate: 0 0; } 75% { opacity: 1; translate: 0 -4px; } 100% { opacity: 0; translate: 0 -8px; } }
+
+  /* ── one-shot effects ── */
+  .shake { animation: hudShake .26s steps(4); }
+  .shake-big { animation: hudShakeBig .4s steps(6); }
+  @keyframes hudShake { 25% { translate: -3px 1px; } 50% { translate: 3px -1px; } 75% { translate: -2px 0; } }
+  @keyframes hudShakeBig { 16% { translate: -6px 2px; } 33% { translate: 6px -2px; } 50% { translate: -5px 1px; } 66% { translate: 4px -1px; } 83% { translate: -2px 0; } }
+  #label.flip { animation: flip .2s steps(4); }
+  @keyframes flip { 50% { transform: scaleY(0); } }
+  #label.tint-yes { color: #fff; background: var(--yes); border-color: #fff; } #label.tint-no { color: #fff; background: var(--no); border-color: #fff; }
+  .end.flash { animation: endFlash .3s steps(2) 2; } @keyframes endFlash { 50% { color: #fff; } }
+  #notch.burst { animation: notchBurst .32s steps(4); } @keyframes notchBurst { 0% { opacity: 1; background: #fff; box-shadow: 0 0 0 4px #fff, 0 0 16px 6px var(--gold); } 100% { opacity: .55; } }
+  #marker.land { animation: land .16s steps(2); } @keyframes land { 50% { transform: scaleY(.7) translateY(4px); } }
+  #frame.wall-no { animation: wallNo .3s steps(3); } #frame.wall-yes { animation: wallYes .3s steps(3); }
+  @keyframes wallNo { 0% { border-left-color: #fff; box-shadow: -6px 0 0 0 var(--no), 0 0 0 2px var(--ink); } }
+  @keyframes wallYes { 0% { border-right-color: #fff; box-shadow: 6px 0 0 0 var(--yes), 0 0 0 2px var(--ink); } }
+  #bar.reweigh .blk.on-no, #bar.reweigh .blk.on-yes { background-image: repeating-linear-gradient(90deg, rgba(255,255,255,.35) 0 2px, transparent 2px 6px); animation: march .4s steps(3) infinite; }
+  @keyframes march { to { background-position: 6px 0; } }
+  #frame.pulse { animation: pulse .18s steps(2); } @keyframes pulse { 0% { background: #fff; } }
+  #hud.verdict-yes #frame { border-color: var(--yes); } #hud.verdict-no #frame { border-color: var(--no); }
+  #hud.verdict-yes .blk.on-yes, #hud.verdict-no .blk.on-no { animation: win .5s steps(2) 3; } @keyframes win { 50% { filter: brightness(1.8); } }
+  #hud.verdict-tie #label { animation: tieBlink .6s steps(2) 3; } @keyframes tieBlink { 50% { opacity: .2; } }
+  #hud.locked #marker { height: 34px; top: -10px; width: 8px; margin-left: -4px; }
+  .glint { position: absolute; top: 0; bottom: 0; width: 6px; background: rgba(255,255,255,.55); mix-blend-mode: overlay; pointer-events: none; display: none; }
+  .glint.go { display: block; animation: glint .7s steps(14) forwards; } @keyframes glint { from { left: 0; } to { left: calc(100% - 6px); } }
+  /* appear / hide: power-on from the top in hard steps */
+  #hud.in { animation: hudIn .32s steps(4) forwards; } @keyframes hudIn { from { translate: 0 -70px; } to { translate: 0 0; } }
+  #hud.leave { animation: hudOut .24s steps(3) forwards; } @keyframes hudOut { to { translate: 0 -80px; } }
+
+  #phaseTag { position: absolute; right: 8px; top: 8px; z-index: 90; font: 10px monospace; color: #999; background: rgba(0,0,0,.6); padding: 2px 6px; border-radius: 3px; }
+
+  #panel h2 { font-size: 13px; color: #fff; margin: 14px 0 6px; } #panel h2:first-child { margin-top: 0; }
+  #panel p { color: #888; line-height: 1.45; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .row label { width: 118px; flex: none; color: #999; } .row input[type=range] { flex: 1; }
+  .row output { width: 44px; text-align: right; color: #f0b830; font-family: monospace; }
+  button { background: #16161d; color: #ddd; border: 1px solid #333; border-radius: 4px; padding: 6px 9px; font-size: 12px; cursor: pointer; }
+  button.on { border-color: #f0b830; color: #f0b830; }
+  .btns { display: flex; flex-wrap: wrap; gap: 4px; }
+  .go-btn { background: #a11; border-color: #f44; color: #fff; font-weight: 700; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .grid button { text-align: left; }
+  .yes-b { border-color: #3b82f6; } .no-b { border-color: #ef4444; }
+  textarea { width: 100%; height: 100px; background: #08080b; color: #8fd; border: 1px solid #222; font: 10px monospace; padding: 6px; }
+</style>
+</head>
+<body>
+<div id="fit"><div id="stageBox">
+<div class="stage" id="stage">
+  <div class="fill bg"></div><div class="fill halftone"></div><div class="fill ink"></div>
+
+  <div id="hud" class="hidden">
+    <div class="hud-top"><span class="end no" id="endNo">NO</span><div id="label">TOSS-UP</div><span class="end yes" id="endYes">YES</span></div>
+    <div id="frame"><div id="bar"></div><div id="notch"></div><div id="marker"></div><div class="glint" id="glint"></div></div>
+    <div id="value">0</div>
+    <div id="chip"></div>
+  </div>
+
+  <div class="fill scan"></div>
+  <div class="textbox"><div class="tb-name" id="tbName"></div><div class="tb-text" id="tbText"></div></div>
+  <div id="phaseTag">hidden</div>
+</div>
+</div></div>
+
+<div id="panel">
+  <h2>Spectrum bar · every animation</h2>
+  <p>The tug-of-war bar in the blocky yellow HUD style. Each block is 10 points; the fill grows from the centre toward whoever is winning.</p>
+  <div class="btns" style="margin-top:8px">
+    <button class="go-btn" id="demo">▶ Whole trial</button>
+    <button id="stop">Stop</button>
+    <button id="slow">Slow-mo ×4</button>
+    <button id="sound" class="on">🔊 Sound</button>
+  </div>
+
+  <h2>Cases</h2>
+  <div class="grid">
+    <button data-case="appear">Appear</button>
+    <button data-case="hide">Hide</button>
+    <button data-case="yesSmall" class="yes-b">YES +12</button>
+    <button data-case="noSmall" class="no-b">NO −12</button>
+    <button data-case="yesSwing" class="yes-b">YES swing +34</button>
+    <button data-case="noSwing" class="no-b">NO swing −34</button>
+    <button data-case="shrink">Lead shrinks</button>
+    <button data-case="lead">Lead change</button>
+    <button data-case="hold">No change (holds)</button>
+    <button data-case="reweigh">Re-weigh (agenda)</button>
+    <button data-case="wallYes" class="yes-b">Hit the wall +100</button>
+    <button data-case="wallNo" class="no-b">Hit the wall −100</button>
+    <button data-case="verdict">Verdict (current)</button>
+    <button data-case="tie">Verdict: toss-up</button>
+    <button data-case="glint">Idle glint</button>
+    <button data-case="reset">Reset to 0</button>
+  </div>
+
+  <h2>Any value</h2>
+  <div class="row"><label>Move to</label><input type="range" id="to" min="-100" max="100" step="1" value="30"><output id="toOut">30</output></div>
+  <div class="btns"><button id="goRuling">Topic ruling →</button><button id="goReweigh">Re-weigh →</button></div>
+
+  <h2>Tuning</h2>
+  <div id="sliders"></div>
+  <h2>Values (copy to share)</h2>
+  <textarea id="out" readonly></textarea>
+</div>
+
+<script>
+// ─── Model: the build's spectrumLabel (lib/debate/spectrum.ts) ───
+const label = v => v <= -60 ? 'STRONG NO' : v <= -20 ? 'LEAN NO' : v < 20 ? 'TOSS-UP' : v < 60 ? 'LEAN YES' : 'STRONG YES';
+const blocksOf = v => Math.sign(v) * Math.round(Math.abs(v) / 10);   // −10 … +10, from the centre
+const N = 10, PITCH = 14;                                              // blocks per side; block 12px + 2px gap
+
+const T = { blockMs: 45, reweighMs: 85, swingAt: 25, chipMs: 900, gavelGap: 300, glintEvery: 4500 };
+const SLIDERS = [['blockMs', 'Per block (ms)', 15, 150, 5], ['reweighMs', 'Re-weigh per block', 30, 250, 5], ['swingAt', 'Swing at (pts)', 10, 60, 1],
+                 ['chipMs', 'Chip float (ms)', 300, 2000, 50], ['gavelGap', 'Verdict gavel gap', 150, 600, 10], ['glintEvery', 'Idle glint every', 1500, 12000, 250]];
+
+const $ = id => document.getElementById(id);
+let slow = 1, soundOn = true, value = 0, shown = 0, busy = Promise.resolve();
+const sfx = Object.fromEntries(['needle_up', 'needle_down', 'gavel', 'blip', 'gasp'].map(n => [n, `/audio/sfx/${n}.mp3`]));
+function play(name, vol = 1) { if (!soundOn) return; const a = new Audio(sfx[name]); a.volume = vol; a.play().catch(() => {}); }
+const wait = ms => new Promise(r => setTimeout(r, ms * slow));
+function once(el, cls) { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+
+// ─── Bar ───
+$('bar').innerHTML = Array.from({ length: 2 * N }, (_, i) => `<div class="blk ${i < N ? 'side-no' : 'side-yes'}" data-i="${i}"></div>`).join('');
+const blk = [...document.querySelectorAll('.blk')];
+// block index for "k-th block from the centre" on a side: NO side k=1 → index 9; YES side k=1 → index 10
+const at = (side, k) => blk[side < 0 ? N - k : N - 1 + k];
+function paint(n) {
+  blk.forEach((b, i) => { const k = i < N ? N - i : i - N + 1, side = i < N ? -1 : 1;
+    b.classList.toggle('on-no', side < 0 && n < 0 && k <= -n); b.classList.toggle('on-yes', side > 0 && n > 0 && k <= n); });
+  $('marker').style.left = `${4 + N * PITCH - 1 + n * PITCH}px`;   // frame padding + centre gap + n blocks
+}
+function setLabel(v, tint) {
+  const t = label(v), el = $('label');
+  if (el.textContent !== t) { once(el, 'flip'); setTimeout(() => (el.textContent = t), 100 * slow);
+    el.classList.remove('tint-yes', 'tint-no'); if (tint) { el.classList.add(tint); setTimeout(() => el.classList.remove(tint), 700 * slow); } }
+}
+function setValueText(v) { $('value').textContent = `${v > 0 ? '+' : ''}${v}`; }
+function chip(text, color, big = false) {
+  const c = $('chip'); c.textContent = text; c.style.color = color; c.classList.toggle('big', big);
+  c.style.setProperty('--chipMs', `${T.chipMs * slow}ms`); c.style.left = $('marker').style.left; once(c, 'go');
+}
+/** Tick the number from `from` to `to` over `ms`. */
+function tickNumber(from, to, ms) {
+  const t0 = performance.now();
+  return new Promise(done => { const step = () => { const p = Math.min(1, (performance.now() - t0) / (ms * slow || 1));
+    setValueText(Math.round(from + (to - from) * p)); if (p < 1) requestAnimationFrame(step); else done(); }; requestAnimationFrame(step); });
+}
+/** Step the fill block by block from `shown` to `n`; each block that lights (or goes out) flashes white. */
+async function stepTo(n, perMs, tick = true) {
+  while (shown !== n) {
+    const dir = Math.sign(n - shown), growing = Math.abs(shown + dir) > Math.abs(shown);
+    const b = growing ? at(Math.sign(shown + dir), Math.abs(shown + dir)) : at(Math.sign(shown), Math.abs(shown));
+    shown += dir; paint(shown);
+    if (b) { b.classList.add(growing ? 'pop' : 'out'); setTimeout(() => b.classList.remove('pop', 'out'), perMs * 0.6 * slow); }
+    if (tick) play('blip', 0.18);
+    await wait(perMs);
+  }
+  once($('marker'), 'land');
+}
+
+// ─── The cases ───
+const side = v => (v > 0 ? 'yes' : v < 0 ? 'no' : '');
+const col = v => (v > 0 ? 'var(--yes)' : v < 0 ? 'var(--no)' : 'var(--gold)');
+/** A topic ruling (or, with reweigh, an agenda change) moves the spectrum to `v`. */
+async function moveTo(v, { reweigh = false } = {}) {
+  v = Math.max(-100, Math.min(100, Math.round(v)));
+  const from = value, d = v - from, n = blocksOf(v), per = reweigh ? T.reweighMs : T.blockMs;
+  value = v; unlockVerdict();
+  $('phaseTag').textContent = reweigh ? 're-weigh' : `ruling ${d >= 0 ? '+' : ''}${d}`;
+  if (n === shown) {                                   // same block: the marker strains both ways and holds
+    tickNumber(from, v, 300); chip(d === 0 ? 'HOLDS' : `${d > 0 ? '+' : ''}${d}`, d === 0 ? 'var(--gold)' : col(d));
+    for (const k of [1, 0, -1, 0, 1, 0]) { paint(shown + k * 0.35); await wait(55); }
+    paint(shown); setLabel(v); return;
+  }
+  const lead = Math.sign(from) && Math.sign(v) && Math.sign(from) !== Math.sign(v) && shown !== 0;
+  const swing = !reweigh && Math.abs(d) >= T.swingAt;
+  play(reweigh ? 'blip' : d > 0 ? 'needle_up' : 'needle_down', reweigh ? 0.5 : 1);
+  if (reweigh) $('bar').classList.add('reweigh');
+  if (swing) once($('hud'), lead ? 'shake-big' : 'shake');
+  if (lead) {                                           // drain back to the centre, burst, then fill the other side
+    await Promise.all([stepTo(0, per * 0.7, !reweigh), tickNumber(from, 0, Math.abs(shown) * per * 0.7)]);
+    once($('notch'), 'burst'); play('gasp', 0.5); chip('LEAD CHANGE!', 'var(--gold)', true);
+    await wait(180);
+  }
+  const startShown = shown;
+  await Promise.all([stepTo(n, per, !reweigh), tickNumber(lead ? 0 : from, v, Math.abs(n - startShown) * per)]);
+  $('bar').classList.remove('reweigh');
+  if (!lead) chip(reweigh ? 'RE-WEIGHED' : swing ? `SWING! ${d > 0 ? '+' : ''}${d}` : `${d > 0 ? '+' : ''}${d}`, reweigh ? '#9a9aa8' : col(d), swing);
+  if (Math.abs(n) === N) { once($('frame'), v > 0 ? 'wall-yes' : 'wall-no'); once($('hud'), 'shake');   // crashed into the end
+    paint(shown - Math.sign(shown) * 0.5); await wait(70); paint(shown); }
+  const e = d > 0 ? $('endYes') : $('endNo'); if (!reweigh) once(e, 'flash');
+  setLabel(v, reweigh ? null : `tint-${side(d)}`);
+}
+async function appear() {
+  const hud = $('hud'); hud.classList.remove('hidden', 'leave'); once(hud, 'in'); play('blip', 0.6);
+  paint(0); shown = 0; setValueText(value); $('label').textContent = label(value);
+  await wait(340);
+  for (let k = 1; k <= N; k++) { at(-1, k).classList.add('pop'); at(1, k).classList.add('pop'); await wait(18); }   // power-on sweep
+  await wait(60); blk.forEach(b => b.classList.remove('pop'));
+  await stepTo(blocksOf(value), 25, false);
+  $('phaseTag').textContent = 'shown';
+}
+async function hide() { const hud = $('hud'); once(hud, 'leave'); await wait(260); hud.classList.add('hidden'); $('phaseTag').textContent = 'hidden'; }
+function unlockVerdict() { $('hud').classList.remove('locked', 'verdict-yes', 'verdict-no', 'verdict-tie'); blk.forEach(b => b.classList.remove('dim')); }
+/** The verdict: three gavel thumps pulse the bar, the losing side dims, the winner blinks and locks. */
+async function verdict(v = value) {
+  if (v !== value) await moveTo(v);
+  $('phaseTag').textContent = 'verdict';
+  for (let i = 0; i < 3; i++) { play('gavel'); once($('frame'), 'pulse'); once($('hud'), 'shake'); await wait(T.gavelGap); }
+  const s = Math.abs(value) < 20 ? 'tie' : side(value);
+  blk.forEach(b => b.classList.toggle('dim', s === 'tie' ? !b.matches('.on-no,.on-yes') : !b.matches(s === 'yes' ? '.on-yes' : '.on-no')));
+  $('hud').classList.add('locked', `verdict-${s}`);
+  chip(label(value), s === 'tie' ? 'var(--gold)' : col(value), true);
+}
+function glint() { once($('glint'), 'go'); }
+
+// ─── Textbox ───
+function say(who, text) { const c = { judge: ['THE JUDGE', '#a16207'], you: ['YOU', '#e4e4e7'] }[who]; $('tbName').textContent = c[0]; $('tbName').style.color = c[1]; $('tbText').textContent = text; }
+
+// ─── Whole-trial demo: every case in the order a real trial hits them ───
+let demoId = 0;
+async function demo() {
+  const id = ++demoId, alive = () => id === demoId; $('demo').classList.add('on');
+  value = 0; shown = 0; unlockVerdict(); paint(0); $('hud').classList.add('hidden');
+  const step = async (fn, who, text, pause = 1600) => { if (!alive()) return false; if (text) say(who, text); await fn(); await wait(pause); return alive(); };
+  const ok = await step(appear, 'judge', 'The court is in session. Let us weigh the evidence.', 1200)
+    && await step(() => moveTo(12), 'judge', 'Hmm. On your finances, the court leans yes, but only just.')
+    && await step(() => moveTo(-28), 'judge', 'On your relationships the court is not convinced. It leans no.', 2000)
+    && await step(() => moveTo(-28), 'judge', 'On your health, the arguments cancel out. Nothing moves.')
+    && await step(() => moveTo(-8, { reweigh: true }), 'you', 'Honestly, money doesn’t matter to me here. (the Judge drops the topic)', 2000)
+    && await step(() => moveTo(64), 'judge', 'On your own happiness: overwhelmingly, yes.', 2000)
+    && await step(glint, 'judge', 'The court retires to consider its verdict…', 1400)
+    && await step(() => verdict(), 'judge', 'The court has reached its verdict.', 2200);
+  if (ok) $('phaseTag').textContent = 'demo done';
+  $('demo').classList.remove('on');
+}
+
+// ─── Panel ───
+const CASES = {
+  appear, hide, glint,
+  yesSmall: () => moveTo(value + 12), noSmall: () => moveTo(value - 12),
+  yesSwing: () => moveTo(value + 34), noSwing: () => moveTo(value - 34),
+  shrink: async () => { if (Math.abs(value) < 40) { await moveTo(52); await wait(500); } return moveTo(value - Math.sign(value) * 30); },
+  lead: async () => { if (Math.abs(value) < 15) { await moveTo(-32); await wait(500); } return moveTo(-Math.sign(value) * 36); },
+  hold: () => moveTo(value), reweigh: () => moveTo(value > 0 ? value - 22 : value + 22, { reweigh: true }),
+  wallYes: () => moveTo(100), wallNo: () => moveTo(-100),
+  verdict: () => verdict(), tie: () => verdict(6),
+  reset: async () => { unlockVerdict(); await moveTo(0, { reweigh: true }); },
+};
+async function run(fn) { demoId++; if ($('hud').classList.contains('hidden') && fn !== appear && fn !== hide) await appear(); return fn(); }
+document.querySelectorAll('[data-case]').forEach(b => (b.onclick = () => (busy = busy.then(() => run(CASES[b.dataset.case])))));
+$('to').oninput = e => ($('toOut').value = e.target.value);
+$('goRuling').onclick = () => (busy = busy.then(() => run(() => moveTo(+$('to').value))));
+$('goReweigh').onclick = () => (busy = busy.then(() => run(() => moveTo(+$('to').value, { reweigh: true }))));
+$('demo').onclick = () => { busy = Promise.resolve(); demo(); };
+$('stop').onclick = () => { demoId++; $('phaseTag').textContent = 'stopped'; };
+$('slow').onclick = e => { slow = slow > 1 ? 1 : 4; e.target.classList.toggle('on', slow > 1); };
+$('sound').onclick = e => { soundOn = !soundOn; e.target.classList.toggle('on', soundOn); e.target.textContent = soundOn ? '🔊 Sound' : '🔇 Muted'; };
+$('sliders').innerHTML = SLIDERS.map(([k, l, min, max, s]) => `<div class="row"><label>${l}</label><input type="range" id="s_${k}" min="${min}" max="${max}" step="${s}" value="${T[k]}"><output id="o_${k}">${T[k]}</output></div>`).join('');
+for (const [k] of SLIDERS) $('s_' + k).oninput = e => { T[k] = +e.target.value; $('o_' + k).value = T[k]; out(); };
+function out() { $('out').value = JSON.stringify(T, null, 1); }
+setInterval(() => { if (!$('hud').classList.contains('hidden') && !$('hud').classList.contains('locked')) glint(); }, T.glintEvery);
+function fit() { const f = $('fit').getBoundingClientRect(); $('stageBox').style.transform = `scale(${Math.min(f.width / 960, f.height / 540) * 0.96})`; }
+addEventListener('resize', fit);
+window.__bar = { demo, moveTo, appear, hide, verdict, glint, state: () => ({ value, shown, label: $('label').textContent }) };
+paint(0); out(); say('judge', 'Press ▶ Whole trial, or try each case on the right.'); fit(); document.body.dataset.ready = '1';
+</script>
+</body>
+</html>
