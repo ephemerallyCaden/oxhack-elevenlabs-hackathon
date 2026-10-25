@@ -51,6 +51,30 @@ describe('writeTopic: a model punch with a label and tags is cleaned like the li
     expect(res.lines[0].punch).toBeUndefined();
   });
 
+  it('the "—" branch still ends the sentence when the text already said the punch', async () => {
+    askGemini.mockImplementation(async (_s: string, _c: string, schema: { parse: (x: unknown) => unknown }) => {
+      const o = out({ text: 'every quant.', tts: '' });
+      o.lines[0].text = 'The top players earn more than every quant —';
+      o.lines[0].tts = '[confident] The top players earn more than every quant —';
+      return schema.parse(o);
+    });
+    const res = await writeTopic({ question: 'Should I?', topic, cards: [], history: [], turns: [{ side: 'yes', cycle: 1 }, { side: 'no', cycle: 1 }], cutInAllowed: false, urgent: true });
+    expect(res.lines[0].text).toBe('The top players earn more than every quant.');
+    expect(res.lines[0].tts).toBe('[confident] The top players earn more than every quant.');
+  });
+
+  it('a cut-in always follows a line that ends cut off', async () => {
+    askGemini.mockImplementation(async (_s: string, _c: string, schema: { parse: (x: unknown) => unknown }) => {
+      const o = out(empty);
+      o.lines[0].cut_in = { text: 'Hold on!', tts: '[interrupting] Hold on!' };
+      o.lines[0].resume = { text: 'Let me finish.', tts: '[confident] Let me finish.' };
+      return schema.parse(o);
+    });
+    const res = await writeTopic({ question: 'Should I?', topic, cards: [], history: [], turns: [{ side: 'yes', cycle: 1 }, { side: 'no', cycle: 1 }], cutInAllowed: true, urgent: true });
+    expect(res.lines[0].text.endsWith('—')).toBe(true);
+    expect(res.lines[1].kind).toBe('cut_in');
+  });
+
   it('a line that is only a speaker label counts as empty (→ the mock)', async () => {
     askGemini.mockImplementation(async (_s: string, _c: string, schema: { parse: (x: unknown) => unknown }) => {
       const o = out(empty);

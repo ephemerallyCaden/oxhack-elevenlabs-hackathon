@@ -187,6 +187,21 @@ describe('attachPunch', () => {
     expect(l.tts).toBe('[passionate] What you get is freedom');
   });
 
+  it('cuts the start of the punch from a setup clip that runs into it', () => {
+    const l = line('prosecution', 'Top players earn more than', { tts: '[confident] Top players earn more than every quant' });
+    expect(attachPunch(l, { text: 'every quant on Wall Street.', tts: '[passionate] every... quant... on Wall Street.' }, new Set())).toBe(true);
+    expect(l.tts).toBe('[confident] Top players earn more than');
+    const money = line('defense', 'It costs', { tts: '[concerned] It costs two thousand pounds' });
+    expect(attachPunch(money, { text: '£2,000 a month.', tts: '[concerned] two thousand pounds a month.' }, new Set())).toBe(true);
+    expect(money.tts).toBe('[concerned] It costs');
+  });
+
+  it('an overlapping word keeps the case the text gave it', () => {
+    const l = line('prosecution', 'I said no');
+    attachPunch(l, { text: 'No more excuses.', tts: '' }, new Set());
+    expect(l.text).toBe('I said no more excuses.');
+  });
+
   it('leaves a cut-off line alone (the cut-in finishes it)', () => {
     const l = line('defense', 'And the median is —');
     attachPunch(l, { text: 'nothing.', tts: '' }, new Set());

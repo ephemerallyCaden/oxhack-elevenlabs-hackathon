@@ -265,6 +265,7 @@ export default function Home() {
         const { juryKey } = (await r.json().catch(() => ({}))) as { juryKey?: string };
         addToRoster({ email: session.user.email, name: profile.name, face: selfie ? await faceThumb(selfie) : undefined, key: juryKey });
       } else if (r?.status === 503) console.warn("[menu] sign-in isn't configured on the server: your voice and face weren't kept");
+      else console.warn(`[menu] couldn't keep your voice and face (${r ? r.status : "timed out"}); the trial goes ahead without saving`);
     }
     router.push("/trial");
   }
@@ -373,6 +374,7 @@ export default function Home() {
                     className="ct-input"
                     placeholder="Should I …?"
                     value={question}
+                    disabled={busy} // already handed to the trial: typing now would be lost
                     autoFocus
                     onChange={(e) => setQuestion(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && toCourt()}

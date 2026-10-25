@@ -63,15 +63,23 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
       stream.getTracks().forEach((t) => t.stop()); // they left while the permission prompt was up
       return;
     }
-    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "";
-    const recorder = new MediaRecorder(stream, { ...(mimeType && { mimeType }), audioBitsPerSecond: 128_000 });
+    let recorder: MediaRecorder, ctx: AudioContext, analyser: AnalyserNode;
+    try {
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "";
+      recorder = new MediaRecorder(stream, { ...(mimeType && { mimeType }), audioBitsPerSecond: 128_000 });
+      ctx = new AudioContext();
+      analyser = ctx.createAnalyser();
+      ctx.createMediaStreamSource(stream).connect(analyser);
+    } catch {
+      // A browser that can't record this way (older Safari): mic off, default voice.
+      stream.getTracks().forEach((t) => t.stop());
+      finish({ voiceId: null, transcript: "", fallback: true }, "This browser can't record here, so your future selves will use the default voice.");
+      return;
+    }
     const chunks: Blob[] = [];
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     recorder.onstop = () => process(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
 
-    const ctx = new AudioContext();
-    const analyser = ctx.createAnalyser();
-    ctx.createMediaStreamSource(stream).connect(analyser);
     const buf = new Float32Array(analyser.fftSize);
     const started = now();
     const timer = window.setInterval(() => {

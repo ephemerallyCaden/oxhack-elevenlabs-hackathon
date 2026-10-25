@@ -213,7 +213,7 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
     (out): TopicResponse => {
       // The code owns the structure: one line per planned turn, speakers from the plan.
       // (Checked after cleaning: a line that was only a speaker label or audio tags is empty too.)
-      if (out.lines.length < req.turns.length || req.turns.some((_, i) => !plain(out.lines[i].text)))
+      if (out.lines.length < req.turns.length || req.turns.some((_, i) => !plain(out.lines[i].text).replace(/—/g, '').trim()))
         throw new Error(`topic: ${out.lines.length} lines for ${req.turns.length} turns`);
       const lines: Line[] = [];
       const byIndex: Line[] = [];
@@ -235,6 +235,8 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
         byIndex.push(line);
         if (!cutUsed && !turn.answer && plain(o.cut_in.text) && plain(o.resume.text)) {
           cutUsed = true;
+          // The cut-in interrupts this line: it must end cut off (a punch on it is dropped by design).
+          if (!line.text.trim().endsWith('—')) line.text = `${line.text.trim()} —`;
           const other = turn.side === 'yes' ? 'no' : 'yes';
           lines.push(
             { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in', text: plain(o.cut_in.text), tts: unlabel(o.cut_in.tts), cites: [], ...base },
@@ -247,6 +249,9 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
           line.text = line.text.trim().replace(/\s*—$/, draft ? '' : '.');
           if (line.tts) line.tts = line.tts.trim().replace(/\s*—$/, draft ? '' : '.');
           if (draft) attachPunch(line, draft, new Set(['yes', 'no'])); // refused → appended
+          // (If the text already said the punch, nothing was appended: still end the sentence.)
+          if (!/[.!?…]["”’')»]*$/.test(line.text.trim())) line.text = `${line.text.trim()}.`;
+          if (line.tts && !/[.!?…]["”’')»]*$/.test(line.tts.trim())) line.tts = `${line.tts.trim()}.`;
         } else {
           attachPunch(line, o.punch && { text: plain(o.punch.text), tts: unlabel(o.punch.tts) }, punched);
         }

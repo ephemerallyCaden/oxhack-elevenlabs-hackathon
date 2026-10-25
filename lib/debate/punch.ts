@@ -56,22 +56,24 @@ const capitalise = (tail: string) => tail.replace(/^([^\p{L}\p{N}]*)(\p{Ll})(?!\
 const tailAfter = (setup: string, tail: string) => (!untagged(setup) || endsSentence(setup) ? capitalise(tail) : tail);
 const joinSentence = (setup: string, tail: string) => (setup.trim() ? `${setup.trim()} ${tailAfter(setup, tail)}` : capitalise(tail));
 /** `text` without its last `n` words, plus any opening quote the first dropped word carried. */
-function dropWords(text: string, n: number): { rest: string; lead: string } {
+function dropWords(text: string, n: number): { rest: string; lead: string; first: string } {
   const tokens = tokensOf(text);
   let lead = '';
+  let first = ''; // the first dropped word as the text wrote it (its case wins over the punch's)
   while (n > 0 && tokens.length) {
     const tok = tokens.pop()!;
     if (norm(tok)) {
       n--;
-      lead = OPEN_QUOTE.exec(tok.replace(/\[[^\]]*\]/g, ''))?.[0] ?? '';
+      first = tok.replace(/\[[^\]]*\]/g, '');
+      lead = OPEN_QUOTE.exec(first)?.[0] ?? '';
     }
   }
-  return { rest: tokens.join(' ').replaceAll(JOIN, ' '), lead };
+  return { rest: tokens.join(' ').replaceAll(JOIN, ' '), lead, first };
 }
 /** `text` with whatever it already says of `tail` taken off its end (so joining never repeats words). */
-function before(text: string, tail: string): { rest: string; lead: string } {
+function before(text: string, tail: string): { rest: string; lead: string; first: string } {
   const k = overlap(text, tail);
-  return k ? dropWords(text, k) : { rest: text.trim(), lead: '' };
+  return k ? dropWords(text, k) : { rest: text.trim(), lead: '', first: '' };
 }
 
 /** The setup half of a punch line (everything before the punch). */
@@ -104,7 +106,10 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   // Did the text itself say (part of) the punch? (Measured before `line.text` is rewritten below.)
   const textOverlap = already || overlap(line.text, punch) > 0;
   const cut = before(line.text, punch);
-  const shown = cut.lead && !OPEN_QUOTE.test(punch) ? cut.lead + punch : punch; // keep an opening quote
+  // Keep an opening quote, and the case the text gave the overlapping word ("I said no." + "No." → "I said no.").
+  const quoted = cut.lead && !OPEN_QUOTE.test(punch) ? cut.lead + punch : punch;
+  const textLetter = cut.first.match(/\p{L}/u)?.[0];
+  const shown = textLetter ? quoted.replace(/\p{L}/u, textLetter) : quoted;
   // The punch's spoken form (numbers written out, "..." beats), without its delivery tag.
   const spoken = draft!.tts.replace(/^\s*\[[^\]]+\]\s*/, '').trim() || punch;
   const refuse = () => {
@@ -127,8 +132,9 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   // The setup clip is voiced from `tts`: if it also says (part of) the punch, in either form, cut it.
   if (line.tts?.trim()) {
     const t = line.tts;
-    // Partial overlaps only when the text had one too (else "freedom, freedom to fail" would lose a word in the clip).
-    const partial = textOverlap;
+    // Partial overlaps when the text had one too, or the clip runs past the setup into the punch (else
+    // "freedom, freedom to fail" — same word count in clip and text — would lose a word in the clip).
+    const partial = textOverlap || words(t).length > words(cut.rest).length;
     const rest = endsWithWords(t, spoken)
       ? before(t, spoken).rest
       : endsWithWords(t, punch)
