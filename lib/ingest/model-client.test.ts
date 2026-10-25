@@ -205,3 +205,46 @@ test("Groq without a key sends nothing and says why", () => {
   const config = resolveModelConfiguration();
   assert.match(config.warning ?? "", /key is not configured/);
 });
+
+test("openrouter and any OpenAI-compatible endpoint are configured from the environment", async () => {
+  vi.stubEnv("RESEARCH_MODEL_PROVIDER", "openrouter");
+  vi.stubEnv("OPENROUTER_API_KEY", "synthetic-openrouter-key");
+  vi.stubEnv("RESEARCH_MODEL", "");
+  vi.stubEnv("OPENROUTER_RESEARCH_MODEL", "");
+  const openrouter = resolveModelConfiguration();
+  assert.equal(openrouter.endpoint, "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(openrouter.model, "openai/gpt-oss-20b:free");
+  assert.equal(openrouter.warning, undefined);
+
+  vi.stubEnv("RESEARCH_MODEL_PROVIDER", "openai");
+  vi.stubEnv("RESEARCH_MODEL_BASE_URL", "https://llm.example.test/v1/");
+  vi.stubEnv("RESEARCH_MODEL_API_KEY", "synthetic-generic-key");
+  vi.stubEnv("RESEARCH_MODEL", "vendor/some-model");
+  const generic = resolveModelConfiguration();
+  assert.equal(generic.endpoint, "https://llm.example.test/v1/chat/completions");
+  let seenUrl = "";
+  const result = await requestModelJson(generic, { messages: [{ role: "user", content: "x" }], maxTokens: 5, schema: { type: "object" } },
+    new AbortController().signal, async (input, init) => {
+      seenUrl = String(input);
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer synthetic-generic-key");
+      assert.equal(JSON.parse(String(init?.body)).response_format.type, "json_schema");
+      return providerResponse({ ok: true });
+    });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(seenUrl, "https://llm.example.test/v1/chat/completions");
+});
+
+test("the generic provider sends nothing without an https endpoint or a model name", async () => {
+  vi.stubEnv("RESEARCH_MODEL_PROVIDER", "openai");
+  vi.stubEnv("RESEARCH_MODEL_API_KEY", "synthetic-generic-key");
+  vi.stubEnv("RESEARCH_MODEL", "vendor/some-model");
+  vi.stubEnv("RESEARCH_MODEL_BASE_URL", "http://llm.example.test/v1");
+  assert.match(resolveModelConfiguration().warning ?? "", /endpoint/);
+  vi.stubEnv("RESEARCH_MODEL_BASE_URL", "https://llm.example.test/v1");
+  vi.stubEnv("RESEARCH_MODEL", "");
+  assert.match(resolveModelConfiguration().warning ?? "", /model name/);
+  let calls = 0;
+  const selection = await createPassageSelector({ fetchImpl: async () => { calls++; throw new Error("must not fetch"); } })(researchRequest, [record], new AbortController().signal);
+  assert.equal(selection.status, "not_configured");
+  assert.equal(calls, 0);
+});

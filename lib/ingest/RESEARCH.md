@@ -170,11 +170,14 @@ that ignores cancellation. Browser/platform workers belong outside this route.
   `runtime` export: this installed version rejects it with Cache Components.
 - The route exports `maxDuration = 60`; internal deadlines remain shorter.
   `vercel.json` selects Next.js, `npm run build` and `.next` output.
-- Server model selection: `RESEARCH_MODEL_PROVIDER=agnes` (default), `gemini` or `groq`.
-  Set `AGNES_API_KEY` (also accepts `AGNES_API_KEY_1`), `GEMINI_API_KEY` or `GROQ_API_KEY`
-  for the chosen provider. Keys never fall back across providers. `RESEARCH_MODEL` overrides
-  the provider-specific `AGNES_MODEL` / `GEMINI_MODEL` / `GROQ_RESEARCH_MODEL` default
-  (Groq defaults to `openai/gpt-oss-20b`, off the debate's `gpt-oss-120b` daily quota). See `.env.example`.
+- Server model selection: `RESEARCH_MODEL_PROVIDER=agnes` (default), `gemini`, `groq`,
+  `openrouter`, or `openai` for any other OpenAI-compatible server. Named providers need
+  their key (`AGNES_API_KEY` / `AGNES_API_KEY_1`, `GEMINI_API_KEY`, `GROQ_API_KEY`,
+  `OPENROUTER_API_KEY`); `openai` needs `RESEARCH_MODEL_BASE_URL` (https; API root or full
+  chat-completions URL), `RESEARCH_MODEL_API_KEY` and `RESEARCH_MODEL`. Keys never fall back
+  across providers. `RESEARCH_MODEL` overrides the provider default (`AGNES_MODEL`,
+  `GEMINI_MODEL`, `GROQ_RESEARCH_MODEL`, `OPENROUTER_RESEARCH_MODEL`). The endpoint is
+  never taken from a request body. See `.env.example`.
   `GEMINI_MODEL` is also used by the debate engine. Keep its compatible
   `gemini-3.6-flash` default there; use `RESEARCH_MODEL` to change only research.
 - The passage selector reads this configuration. Endpoint and wire options live
