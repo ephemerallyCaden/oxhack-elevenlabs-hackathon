@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LedgerEntry, Topic } from '@/types';
-import { addTopic, computeSpectrum, ledgerBalance, normalise, orderAgenda, removeTopic, spectrumLabel, sway, BAR_GAIN } from './spectrum';
+import { addTopic, computeSpectrum, ledgerBalance, normalise, orderAgenda, removeTopic, spectrumLabel, sway, BAR_GAIN, MIN_SWING } from './spectrum';
 
 const topic = (id: string, importance: number, extra: Partial<Topic> = {}): Topic => ({
   id, title: id, question: `${id}?`, importance, research_speed: 'quick', status: 'pending', added_by: 'judge', ...extra,
@@ -51,6 +51,28 @@ describe('spectrum', () => {
     // a mild lean reads as a lean, not a toss-up: +0.15 → +27
     expect(computeSpectrum([scored('a', 1, 0.15)]).label).toBe('Lean yes');
     expect(computeSpectrum([scored('a', 1, -0.8)]).value).toBe(-100);
+  });
+
+  it('moves at least MIN_SWING (25 points) for any decided topic, but an exact 0 stays neutral', () => {
+    expect(MIN_SWING).toBe(0.25);
+    // +0.05 × 1.8 = +9 would read as a toss-up; the floor makes it +25, a lean
+    expect(computeSpectrum([scored('a', 1, 0.05)])).toEqual({ value: 25, label: 'Lean yes' });
+    expect(computeSpectrum([scored('a', 1, -0.02)])).toEqual({ value: -25, label: 'Lean no' });
+    expect(computeSpectrum([scored('a', 1, 0)])).toEqual({ value: 0, label: 'Toss-up' });
+    // two near-even topics on the same side add up: 0.5 × 25 + 0.5 × 25 = +25
+    expect(computeSpectrum([scored('a', 0.5, 0.03), scored('b', 0.5, 0.01)]).value).toBe(25);
+    // the floor never weakens a strong ruling
+    expect(computeSpectrum([scored('a', 1, 0.4)]).value).toBe(Math.round(0.4 * BAR_GAIN * 100));
+  });
+
+  it('gives a verdict when topics split: at least 25 towards the side ahead, Toss-up only on a tie', () => {
+    // +0.4 YES vs -0.3 NO: 0.5 × 72 − 0.5 × 54 = +9 → floored to +25
+    expect(computeSpectrum([scored('a', 0.5, 0.4), scored('b', 0.5, -0.3)])).toEqual({ value: 25, label: 'Lean yes' });
+    expect(computeSpectrum([scored('a', 0.5, -0.4), scored('b', 0.5, 0.3)])).toEqual({ value: -25, label: 'Lean no' });
+    // an even split is a genuine tie
+    expect(computeSpectrum([scored('a', 0.5, 0.2), scored('b', 0.5, -0.2)])).toEqual({ value: 0, label: 'Toss-up' });
+    // a clear win is untouched: 0.5 × (0.6 × 1.8) − 0.5 × (0.2 × 1.8) = +0.36 → +36
+    expect(computeSpectrum([scored('a', 0.5, 0.6), scored('b', 0.5, -0.2)]).value).toBe(36);
   });
 
   it('ignores removed topics even if they were scored', () => {
