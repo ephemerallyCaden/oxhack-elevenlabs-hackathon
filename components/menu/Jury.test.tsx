@@ -43,6 +43,26 @@ describe('Jury', () => {
   });
 });
 
+describe('Jury gallery (title page)', () => {
+  it('seats any number of pews, filling the front pew from the middle before the pew behind it', () => {
+    const roster = Array.from({ length: 5 }, (_, i) => ({ email: `p${i}@x.com`, name: `P${i}`, face: 'x' }));
+    const { container } = render(<Jury roster={roster} pews={[3, 4, 3]} />);
+    expect(container.querySelector('.jury.gallery')).toBeTruthy();
+    const pews = [...container.querySelectorAll('.jury-pew')];
+    expect(pews.map((p) => p.querySelectorAll('.jury-heads > *').length)).toEqual([3, 4, 3]);
+    const keptIn = (p: Element) => [...p.querySelectorAll('.jury-heads > *')].map((el, i) => (el.classList.contains('kept') ? i : -1)).filter((i) => i >= 0);
+    expect(keptIn(pews[2])).toEqual([0, 1, 2]); // the front pew is full
+    expect(keptIn(pews[1])).toEqual([1, 2]); // then the middle of the next one back
+    expect(keptIn(pews[0])).toEqual([]);
+    expect(pews[2].classList.contains('jury-front')).toBe(true);
+  });
+
+  it('compact keeps just the front pew of a gallery', () => {
+    const { container } = render(<Jury roster={[]} pews={[3, 4, 5]} compact />);
+    expect([...container.querySelectorAll('.jury-pew')].map((p) => p.querySelectorAll('.jury-heads > *').length)).toEqual([5]);
+  });
+});
+
 describe('Jury stored faces', () => {
   it('shows a stored face without a name as a plain juror (no empty nameplate, not clickable)', () => {
     const { container } = render(<Jury roster={[{ email: '', face: 'x' }]} onPick={vi.fn()} onRemove={vi.fn()} />);
