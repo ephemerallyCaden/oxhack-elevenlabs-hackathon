@@ -4,17 +4,10 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createClient } from "@supabase/supabase-js";
+import { LOCAL_DIR, supabase } from "@/lib/supabase";
 import type { Transcript } from "@/types";
 
-const supabase =
-  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
-    ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
-    : null;
-
-// Vercel's filesystem is read-only except /tmp, and /tmp isn't shared between instances:
-// the local fallback is for development; deployed sharing needs Supabase.
-const DIR = process.env.VERCEL ? "/tmp/roulette-trials" : join(process.cwd(), ".cache", "trials");
+const DIR = join(LOCAL_DIR, "trials");
 
 export const storage = supabase ? "supabase" : "local";
 
