@@ -8,8 +8,8 @@ import { footnotes } from "@/lib/debate/transcript";
 export const metadata: Metadata = { title: "Court of Future Selves — your trial" };
 
 const WHO: Record<Speaker, { name: string; color: string }> = {
-  prosecution: { name: "Future you (YES)", color: "#ef4444" },
-  defense: { name: "Future you (NO)", color: "#3b82f6" },
+  prosecution: { name: "Future you (YES)", color: "#3b82f6" },
+  defense: { name: "Future you (NO)", color: "#ef4444" },
   judge: { name: "The Judge", color: "#eab308" },
   user: { name: "You", color: "#e4e4e7" },
 };
@@ -40,7 +40,7 @@ async function Trial({ id }: { id: string }) {
           <p className="text-3xl font-black">
             {v.spectrum.label} <span className="text-zinc-400">({v.spectrum.value > 0 ? "+" : ""}{v.spectrum.value})</span>
           </p>
-          <div className="relative h-2 rounded-full bg-gradient-to-r from-blue-600 via-zinc-600 to-red-600">
+          <div className="relative h-2 rounded-full bg-gradient-to-r from-red-600 via-zinc-600 to-blue-600">
             <span className="absolute -top-1 h-4 w-1 rounded bg-white" style={{ left: `${(v.spectrum.value + 100) / 2}%` }} />
           </div>
           <p className="text-zinc-300">{v.explanation}</p>

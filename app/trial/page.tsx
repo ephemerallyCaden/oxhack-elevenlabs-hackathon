@@ -9,11 +9,11 @@
 //   4. Crowd ambience via engine.setAmbience() during debate
 //   5. Voice playback via engine.playVoice() with stereo panning
 
-import { useEffect, useMemo, useRef, useState, useCallback, useSyncExternalStore } from 'react';
-import type { Line, Scene, Speaker, SttResponse } from '@/types';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import type { Scene, Speaker } from '@/types';
 import { TrialOrchestrator } from '@/lib/debate/orchestrator';
 import { sessionVoiceId } from '@/components/onboarding/VoiceStep';
-import { sessionSelfie } from '@/components/onboarding/SelfieStep';
+import { useSessionHeads } from '@/components/onboarding/sessionHeads';
 import SharePanel from '@/components/share/SharePanel';
 import { sessionProfile, takeSessionQuestion } from '@/lib/onboarding/session';
 import { useTrialState } from '@/lib/debate/useTrial';
@@ -21,7 +21,12 @@ import { footnotes } from '@/lib/debate/transcript';
 import * as engine from '@/lib/audio/engine';
 import type { BgmName } from '@/lib/audio/assets';
 import Courtroom from '@/components/courtroom/Courtroom';
-import { deriveMoods } from '@/components/courtroom/expressions';
+import { deriveMoods, type CharacterMood } from '@/components/courtroom/expressions';
+import { runPunch, type PunchStage } from '@/components/courtroom/punchSequence';
+import { setupText } from '@/lib/debate/punch';
+import { SPEAKER_SCENE } from '@/types';
+import { WHO } from '@/components/courtroom/roles';
+import { useRecorder, transcribe } from '@/components/useRecorder';
 
 // -- Scene -> BGM mapping --
 const SCENE_MUSIC: Record<Scene, BgmName | null> = {
@@ -32,66 +37,70 @@ const SCENE_MUSIC: Record<Scene, BgmName | null> = {
   cutscene: 'cutscene',
 };
 
-// -- Speaker display config --
-const WHO: Record<Line['speaker'], { name: string; color: string }> = {
-  prosecution: { name: 'PROSECUTION \u00B7 YES', color: '#c2410c' },
-  defense: { name: 'DEFENSE \u00B7 NO', color: '#2563eb' },
-  judge: { name: 'THE JUDGE', color: '#a16207' },
-  user: { name: 'YOU', color: '#e4e4e7' },
-};
-
-// -- Hold-to-talk recorder --
-function useRecorder() {
-  const rec = useRef<MediaRecorder | null>(null);
-  const starting = useRef<Promise<boolean> | null>(null);
-  const chunks = useRef<Blob[]>([]);
-  return {
-    start(): Promise<boolean> {
-      starting.current = (async () => {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          chunks.current = [];
-          rec.current = new MediaRecorder(stream);
-          rec.current.ondataavailable = (e) => chunks.current.push(e.data);
-          rec.current.start();
-          return true;
-        } catch {
-          rec.current = null;
-          return false;
-        }
-      })();
-      return starting.current;
-    },
-    async stop(): Promise<Blob | null> {
-      if (starting.current) await starting.current;
-      starting.current = null;
-      const r = rec.current;
-      rec.current = null;
-      if (!r || r.state === 'inactive') return null;
-      return new Promise((resolve) => {
-        r.onstop = () => {
-          r.stream.getTracks().forEach((t) => t.stop());
-          resolve(new Blob(chunks.current, { type: r.mimeType }));
-        };
-        r.stop();
-      });
-    },
+/**
+ * The "type instead" box. Owns the typed text so a keystroke re-renders only this box, not the
+ * courtroom. The box unmounts (intro, between asks), so the page keeps the draft across mounts.
+ */
+function TypedInput({
+  loadDraft,
+  saveDraft,
+  placeholder,
+  onSubmit,
+}: {
+  loadDraft: () => string;
+  saveDraft: (text: string) => void;
+  placeholder: string;
+  onSubmit: (text: string) => boolean;
+}) {
+  const [typed, setTyped] = useState(loadDraft);
+  const change = (text: string) => {
+    saveDraft(text);
+    setTyped(text);
   };
+  const submit = () => {
+    if (onSubmit(typed)) change('');
+  };
+  return (
+    <div className="flex gap-2">
+      <label htmlFor="typed" className="sr-only">
+        Type instead
+      </label>
+      <input
+        type="text"
+        id="typed"
+        value={typed}
+        onChange={(e) => change(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            submit();
+          }
+        }}
+        placeholder={placeholder}
+        className="min-h-9 min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-xs"
+      />
+      <button type="button" onClick={submit} className="min-h-9 rounded-lg border border-zinc-600 px-3 text-xs">
+        Send
+      </button>
+    </div>
+  );
 }
-
-const noSubscribe = () => () => {};
 
 // -- Main trial page --
 export default function TrialPage() {
   // Onboarding (/) leaves the user's cloned voice + profile in sessionStorage; none → presenter voice.
   const orch = useMemo(() => new TrialOrchestrator({ voiceId: sessionVoiceId(), profile: sessionProfile() }), []);
   const s = useTrialState(orch);
-  // Selfie from onboarding (client-only, so the server render keeps the default face)
-  const faceSrc = useSyncExternalStore(noSubscribe, sessionSelfie, () => undefined);
+  // Head cut-outs from onboarding (client-only, so the server render keeps the default heads)
+  const heads = useSessionHeads();
   const recorder = useRecorder();
   const [holding, setHolding] = useState(false);
   const held = useRef(false);
-  const [typed, setTyped] = useState('');
+  const typedDraft = useRef('');
+  const loadDraft = useCallback(() => typedDraft.current, []);
+  const saveDraft = useCallback((text: string) => {
+    typedDraft.current = text;
+  }, []);
   const [needTyping, setNeedTyping] = useState(false);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   // Crane-up intro: hold on the carpet while the trial loads (no line yet), play as soon as
@@ -100,6 +109,9 @@ export default function TrialPage() {
   const introMode =
     introFinished || s.phase === 'ask' || s.phase === 'done' ? null : s.current ? 'play' : 'hold';
   const finishIntro = useCallback(() => setIntroFinished(true), []);
+  // Surprise punch: which beat of the sequence is on screen, and a counter that shakes the screen.
+  const [punchStage, setPunchStage] = useState<PunchStage | null>(null);
+  const [shakeKey, setShakeKey] = useState(0);
 
   // Track previous scene/phase for change detection
   const prevScene = useRef<Scene>(s.scene);
@@ -184,6 +196,35 @@ export default function TrialPage() {
       orch.lineEnded(line.id);
       return;
     }
+    if (line.punch && (line.speaker === 'prosecution' || line.speaker === 'defense')) {
+      const speaker = line.speaker;
+      const ctl = new AbortController();
+      const sleep = (ms: number) =>
+        new Promise<void>((done) => {
+          const t = setTimeout(done, ms);
+          ctl.signal.addEventListener('abort', () => (clearTimeout(t), done()), { once: true });
+        });
+      void runPunch(
+        line,
+        {
+          stage: setPunchStage,
+          clip: (url, ms) => (url ? engine.playVoice(speaker, url).catch(() => {}) : sleep(ms)),
+          sfx: (name) => void engine.playSfx(name),
+          shake: () => setShakeKey((k) => k + 1),
+          sleep,
+        },
+        ctl.signal,
+      ).then(() => {
+        if (ctl.signal.aborted) return;
+        setPunchStage(null);
+        orch.lineEnded(line.id);
+      });
+      return () => {
+        ctl.abort();
+        engine.stopVoice(); // interrupted mid-punch: cut the clip
+        setPunchStage(null);
+      };
+    }
     if (line.audioUrl) {
       const speaker = line.speaker as Exclude<Speaker, 'user'>;
       let cancelled = false;
@@ -214,18 +255,6 @@ export default function TrialPage() {
       scoredTopicCount.current = scored;
     }
   }, [s.agenda, audioUnlocked]);
-
-  // -- STT helper --
-  async function transcribe(blob: Blob): Promise<string> {
-    try {
-      const form = new FormData();
-      form.append('audio', blob, 'question.webm');
-      const res = await fetch('/api/voice/stt', { method: 'POST', body: form });
-      return res.ok ? ((await res.json()) as SttResponse).transcript.trim() : '';
-    } catch {
-      return '';
-    }
-  }
 
   // -- 2. OBJECTION sting on interrupt --
   async function down() {
@@ -260,16 +289,20 @@ export default function TrialPage() {
     }
   }
 
-  const submitTyped = useCallback(() => {
-    const text = typed.trim();
-    const phase = orch.getState().phase;
-    if (!text || (phase !== 'ask' && phase !== 'listening')) return; // don't swallow text mid-debate
-    setTyped('');
-    setNeedTyping(false);
-    void unlockAudio();
-    if (phase === 'ask') orch.start(text);
-    else orch.endInterrupt(text);
-  }, [typed, orch, unlockAudio]);
+  /** Returns whether the text was taken (the box then clears). */
+  const submitTyped = useCallback(
+    (raw: string) => {
+      const text = raw.trim();
+      const phase = orch.getState().phase;
+      if (!text || (phase !== 'ask' && phase !== 'listening')) return false; // don't swallow text mid-debate
+      setNeedTyping(false);
+      void unlockAudio();
+      if (phase === 'ask') orch.start(text);
+      else orch.endInterrupt(text);
+      return true;
+    },
+    [orch, unlockAudio],
+  );
 
   // -- Keyboard handler: Space to hold-to-talk --
   useEffect(() => {
@@ -292,16 +325,47 @@ export default function TrialPage() {
 
 
   // -- Expressions (sticky) + talking (independent), derived from the transcript --
+  // Surprise punch on screen: who punched, who reacts, which shot.
+  const punchLine = punchStage && s.phase === 'speaking' && line?.punch ? line : undefined;
+  const punchWho = punchLine?.speaker === 'prosecution' || punchLine?.speaker === 'defense' ? punchLine.speaker : undefined;
+  const punchOpp = punchWho === 'prosecution' ? 'defense' : 'prosecution';
+  const shot =
+    !punchWho ? undefined
+      : punchStage === 'to-judge' || punchStage === 'judge' ? ('judge' as const)
+        : punchStage === 'to-opponent' || punchStage === 'opponent' ? SPEAKER_SCENE[punchOpp]
+          : undefined;
+
   const moods = useMemo(() => {
     const m = deriveMoods(s);
     if (introMode) for (const who of ['prosecution', 'defense', 'judge'] as const) m[who] = { ...m[who], talking: false };
+    if (punchWho && punchStage) {
+      const shocked: CharacterMood = { expression: 'shocked', talking: false };
+      m[punchWho] = { ...m[punchWho], talking: punchStage === 'setup' };
+      if (punchStage === 'judge' || punchStage === 'to-opponent' || punchStage === 'opponent') m.judge = shocked;
+      if (punchStage === 'opponent') m[punchOpp] = shocked;
+    }
     return m;
-  }, [s, introMode]);
+  }, [s, introMode, punchWho, punchOpp, punchStage]);
+
+  const punch =
+    punchWho && punchLine?.punch && punchStage && punchStage !== 'setup'
+      ? {
+          who: punchWho,
+          stage: punchStage === 'cut' || punchStage === 'punch' ? punchStage : punchStage === 'to-judge' ? ('out' as const) : ('gone' as const),
+          // The speaker keeps their current expression; talks while the punch plays.
+          mood: { expression: moods[punchWho].expression, talking: punchStage === 'punch' },
+          typeMs: punchStage === 'punch' ? (punchLine.punch.durationMs ?? 1400) * 0.9 : 0,
+        }
+      : undefined;
 
   // -- Textbox content --
   const box =
     s.phase === 'speaking' && line
-      ? { name: WHO[line.speaker].name, color: WHO[line.speaker].color, text: line.text }
+      ? {
+          name: WHO[line.speaker].name,
+          color: WHO[line.speaker].color,
+          text: !line.punch ? line.text : !punchStage || punchStage === 'setup' ? setupText(line) : punchStage === 'cut' ? '' : line.punch.text,
+        }
       : s.phase === 'listening'
         ? {
             name: 'YOU',
@@ -334,34 +398,18 @@ export default function TrialPage() {
         <span className="text-[10px] text-zinc-500">or SPACE</span>
       </div>
       {(needTyping || s.phase === 'ask') && (
-        <div className="flex gap-2">
-          <label htmlFor="typed" className="sr-only">
-            Type instead
-          </label>
-          <input
-            type="text"
-            id="typed"
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                submitTyped();
-              }
-            }}
-            placeholder={s.phase === 'ask' ? 'or type: Should I…?' : 'Type your interruption'}
-            className="min-h-9 min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-xs"
-          />
-          <button type="button" onClick={submitTyped} className="min-h-9 rounded-lg border border-zinc-600 px-3 text-xs">
-            Send
-          </button>
-        </div>
+        <TypedInput
+          loadDraft={loadDraft}
+          saveDraft={saveDraft}
+          placeholder={s.phase === 'ask' ? 'or type: Should I…?' : 'Type your interruption'}
+          onSubmit={submitTyped}
+        />
       )}
     </div>
   );
 
   return (
-    <main className="relative h-dvh w-full overflow-hidden bg-black text-zinc-100">
+    <main className="relative h-dvh w-full overflow-hidden bg-black text-zinc-100" data-punch-stage={punchStage ?? undefined}>
       {/* Full-bleed manga courtroom */}
       <div className="absolute inset-0">
         <Courtroom
@@ -373,9 +421,13 @@ export default function TrialPage() {
           objection={s.phase === 'listening'}
           status={introMode === 'play' ? undefined : s.phase === 'preparing' || s.phase === 'thinking' ? s.status : undefined}
           controls={introMode ? undefined : controls}
-          faceSrc={faceSrc}
+          heads={heads}
+          interrupting={s.phase === 'listening'}
           intro={introMode}
           onIntroDone={finishIntro}
+          shot={shot}
+          punch={punch}
+          shakeKey={shakeKey}
         />
       </div>
 
@@ -397,7 +449,7 @@ export default function TrialPage() {
       {/* Top-right: spectrum + agenda (hidden through the intro) */}
       {!introMode && (
         <aside className="absolute right-4 top-4 z-50 w-72 rounded-lg bg-black/70 p-3">
-          <div className="relative h-2 rounded-full bg-gradient-to-r from-blue-600 via-zinc-600 to-orange-600">
+          <div className="relative h-2 rounded-full bg-gradient-to-r from-red-600 via-zinc-600 to-blue-600">
             <div className="absolute -top-1 h-4 w-1 rounded bg-white transition-all" style={{ left: pos }} />
           </div>
           <p className="mt-1 text-center text-xs font-bold">

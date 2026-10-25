@@ -161,6 +161,22 @@ export interface Line {
   topic_id?: string;
   /** Inner-loop cycle for arguments (1-based; 2 per topic + 1 per user interrupt). */
   cycle?: number;
+  /** With a punch: the setup's audio (the punch has its own). */
+  audioUrl?: string;
+  durationMs?: number;
+  /**
+   * Surprise punch (YES/NO only, max one per side per topic): the emphasised ending of `text`,
+   * played as its own close-up shot and voice clip. `text` = setup + ' ' + punch.text, and `tts`
+   * covers the setup only.
+   */
+  punch?: Punch;
+}
+
+export interface Punch {
+  /** The climactic last 2-8 words, exactly as they end `text`. */
+  text: string;
+  /** Intense, deliberate delivery: an audio tag + "..." beats. */
+  tts?: string;
   audioUrl?: string;
   durationMs?: number;
 }
