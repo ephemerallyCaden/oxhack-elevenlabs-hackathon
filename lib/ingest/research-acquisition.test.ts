@@ -1,9 +1,10 @@
-﻿// @vitest-environment node
+// @vitest-environment node
 
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { createCollectionFetcher } from "./collection-fetch";
 import { createResearchAgent } from "./research-agent";
+import { createPassageSelector } from "./research-selection";
 import { planPublicResearch, type TopicResearchRequest } from "./research-contract";
 
 const SEARCH_ENDPOINT = "https://openapi.thunderbit.com/openapi/v1/search";
@@ -175,7 +176,7 @@ test("unsupported quick research returns without search or provider traffic", as
   });
 
   assert.deepEqual(planPublicResearch(input), { source: "none" });
-  const result = await createResearchAgent({ community: false, fetcher }).run(input);
+  const result = await createResearchAgent({ webSearch: false, community: false, fetcher }).run(input);
   assert.equal(result.diagnostics.status, "unsupported");
   assert.deepEqual(result.cards, []);
   assert.equal(calls, 0);
@@ -206,4 +207,46 @@ test("ONS CPI is selected only for a UK-scoped CPI topic", () => {
     source: "search",
     query: "United Kingdom leaving employment career change employment outcomes primary research official statistics",
   });
+});
+
+test("the overall category wins over a conflicting topic and public queries contain no personal text", () => {
+  const conflicting = request({
+    question: "Should I leave my job at PrivateEmployerZ?",
+    topic: { id: "moving-cost", title: "Moving costs", question: "Can I afford moving from PrivateAddressZ?" },
+    side: "no",
+  });
+  assert.deepEqual(planPublicResearch(conflicting), {
+    source: "search",
+    query: "leaving employment career change costs financial risks primary research official statistics",
+  });
+  assert.deepEqual(planPublicResearch({ ...conflicting, tier: "quick" }), { source: "none" });
+});
+
+test("deep planning falls back to the topic when the overall question is generic", async () => {
+  const generic = request({
+    question: "What should I do next?",
+    topic: { id: "gap-year-wellbeing", title: "Taking a gap year", question: "Could a gap year improve my happiness and wellbeing?" },
+  });
+  const quote = "The study reports improved wellbeing among participants after a gap year.";
+  let searchQuery = "";
+  const fetcher = createCollectionFetcher({ apiKey: "fixture-key", fetchImpl: async (url, init) => {
+    assert.equal(String(url), SEARCH_ENDPOINT);
+    searchQuery = JSON.parse(String(init?.body)).query;
+    return searchResponse([row({
+      url: "https://www.nomadicmatt.com/fixture-gap-year", title: "Gap year wellbeing study",
+      markdown: `${quote} The sample was limited to survey respondents.`,
+    })]);
+  } });
+  const selector = createPassageSelector({ apiKey: "fixture-key", fetchImpl: async (_url, init) => {
+    const payload = JSON.parse(JSON.parse(String(init?.body)).messages[1].content);
+    return Response.json({ choices: [{ message: { content: JSON.stringify({
+      selections: [{ recordId: payload.records[0].id, quote, side: "yes" }],
+    }) } }] });
+  } });
+
+  const result = await createResearchAgent({ webSearch: false, community: false, fetcher, selector }).run(generic);
+  assert.equal(searchQuery, "gap year outcomes wellbeing outcomes primary research official statistics");
+  assert.equal(result.cards.length, 1);
+  assert.equal(result.cards[0].claim, quote);
+  assert.equal(result.cards[0].topic_id, generic.topic.id);
 });

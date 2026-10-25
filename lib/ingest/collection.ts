@@ -3,7 +3,7 @@ import { z } from "zod";
 
 export type CollectionRecord = {
   id: string; sourceUrl: string; title: string; text: string;
-  collector: "ons" | "easyspider" | "thunderbit" | "stackexchange" | "discourse" | "wordpress" | "telegram" | "youtube" | "x" | "wikipedia" | "crossref";
+  collector: "ons" | "easyspider" | "thunderbit" | "stackexchange" | "discourse" | "wordpress" | "telegram" | "youtube" | "x" | "wikipedia" | "crossref" | "exa";
   capturedAt: string; captureMode: "live" | "import"; publishedAt?: string;
   limitations: string[]; verified: false;
   discussion?: { threadUrl: string; postId: string; parentId?: string; parentText?: string;
@@ -23,7 +23,7 @@ const truncatedText = "Source text was truncated to 4000 characters during norma
 const recordSchema = z.object({
   id: z.string().optional(), sourceUrl: z.string().trim().min(1).max(4096),
   title: z.string().trim().min(1), text: z.string().trim().min(1),
-  collector: z.enum(["ons", "easyspider", "thunderbit", "stackexchange", "discourse", "wordpress", "telegram", "youtube", "x", "wikipedia", "crossref"]),
+  collector: z.enum(["ons", "easyspider", "thunderbit", "stackexchange", "discourse", "wordpress", "telegram", "youtube", "x", "wikipedia", "crossref", "exa"]),
   capturedAt: z.iso.datetime({ offset: true }), captureMode: z.enum(["live", "import"]),
   publishedAt: z.string().max(100).refine(value => Number.isFinite(Date.parse(value))).optional(),
   limitations: z.array(z.string().trim().max(800)).max(20).default([]),

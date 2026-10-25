@@ -108,7 +108,7 @@ it.each(["search", "answers"])("retains collected evidence when %s requests back
   const fetchImpl = vi.fn<typeof fetch>(async input => new URL(String(input)).pathname.endsWith("search/advanced")
     ? Response.json({ items: [{ question_id: 42, link: "https://expatriates.stackexchange.com/questions/42/moving", title: "Moving costs", body: quote }], ...(stage === "search" ? { backoff: 120 } : {}) })
     : Response.json({ items: [], backoff: 120 }));
-  const agent = createResearchAgent({ community: createCommunityFetcher({ env: { RESEARCH_COMMUNITY_SOURCES: "stackexchange" }, fetchImpl }),
+  const agent = createResearchAgent({ webSearch: false, community: createCommunityFetcher({ env: { RESEARCH_COMMUNITY_SOURCES: "stackexchange" }, fetchImpl }),
     fetcher: createCollectionFetcher({ apiKey: "" }), selector: async (request, records) => ({ status: "ok", warnings: [], selections: [{ recordId: records[0].id, quote, side: request.side }] }) });
   const first = await agent.run(req), second = await agent.run(req);
   expect(first.cards[0].claim).toBe(quote);
@@ -119,7 +119,7 @@ it.each(["search", "answers"])("retains collected evidence when %s requests back
 
 it("applies source eligibility to legacy captures before selection", async () => {
   const selector = vi.fn();
-  const agent = createResearchAgent({ community: false, selector, publicCaptures: [{ id: "capture", matches: () => true,
+  const agent = createResearchAgent({ webSearch: false, community: false, selector, publicCaptures: [{ id: "capture", matches: () => true,
     read: async () => ({ status: "live", warnings: [], records: [communityRecord("wordpress", { url: "https://unregistered.example/article", title: "Moving", text: reply }, () => 0)] }) }] });
   expect((await agent.run({ ...req, tier: "quick" })).cards).toEqual([]);
   expect(selector).not.toHaveBeenCalled();
@@ -134,7 +134,7 @@ it("interleaves records before the common cap so one source cannot occupy every 
 it("shares collection across sides and rejects a parent quotation attributed to a reply", async () => {
   const fetchImpl = vi.fn(forumFetch);
   const community = createCommunityFetcher({ env: { RESEARCH_COMMUNITY_SOURCES: "discourse" }, fetchImpl });
-  const agent = createResearchAgent({ community, fetcher: createCollectionFetcher({ apiKey: "" }), selector: async (request, records) => {
+  const agent = createResearchAgent({ webSearch: false, community, fetcher: createCollectionFetcher({ apiKey: "" }), selector: async (request, records) => {
     const record = records.find(item => item.discussion?.kind === "reply")!;
     return { status: "ok", warnings: [], selections: [{ recordId: record.id, quote: parent, side: request.side },
       { recordId: record.id, quote: reply, side: request.side }] };
@@ -144,8 +144,9 @@ it("shares collection across sides and rejects a parent quotation attributed to 
   for (const result of [yes, no]) {
     expect(result.cards).toHaveLength(1);
     expect(result.cards[0].claim).toBe(reply);
-    expect(result.cards[0].evidence).toContain(`Parent context (not the quoted reply): ${parent}`);
-    expect(result.cards[0].evidence).toContain("opinions");
+    expect(result.cards[0].evidence).toBe(`${reply} (personal account from an online discussion)`);
+    expect(result.cards[0].provenance.discussion).toMatchObject({ kind: "reply", parentText: parent });
+    expect(result.cards[0].provenance.limitations.join(" ")).toContain("opinions");
     expect(result.diagnostics.warnings.join(" ")).toContain("Rejected");
   }
   expect(yes.cards[0].id).not.toBe(no.cards[0].id);
@@ -153,6 +154,7 @@ it("shares collection across sides and rejects a parent quotation attributed to 
 
 it("connects real POST handling to forum acquisition and provider selection without UI or voice", async () => {
   vi.resetModules();
+  vi.stubEnv("RESEARCH_WEB_SEARCH", "none");
   vi.stubEnv("RESEARCH_COMMUNITY_SOURCES", "discourse");
   vi.stubEnv("RESEARCH_MODEL_PROVIDER", "agnes");
   vi.stubEnv("AGNES_API_KEY", "fixture-model-key");
