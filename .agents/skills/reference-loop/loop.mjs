@@ -11,7 +11,6 @@ const [command, directory, ...args] = process.argv.slice(2);
 const help = `Usage:
   node loop.mjs start TASK_DIRECTORY "problem and desired result"
   node loop.mjs collect TASK_DIRECTORY github ISSUE_URL
-  node loop.mjs collect TASK_DIRECTORY bilibili BV_ID
   node loop.mjs import TASK_DIRECTORY SAVED_COLLECTOR_JSON
   node loop.mjs search TASK_OR_LIBRARY_DIRECTORY "words" [LIMIT=5]
   node loop.mjs read TASK_DIRECTORY EVIDENCE_ID [TEXT_FILTER]
@@ -46,7 +45,7 @@ function contextRows(record) {
 }
 function route(url) {
   const parsed = new URL(url), host = parsed.hostname.toLowerCase();
-  if (host === 'bilibili.com' || host.endsWith('.bilibili.com') || host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'youtu.be') return 'video';
+  if (host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'youtu.be') return 'video';
   if (['github.com', 'gitlab.com', 'codeberg.org', 'huggingface.co', 'www.npmjs.com', 'pypi.org'].includes(host)) return 'direct';
   return 'linked';
 }
@@ -94,7 +93,7 @@ try {
   } else if (command === 'collect') {
     taskRoot(root);
     const [kind, input] = args;
-    if (!['github', 'bilibili'].includes(kind) || !input) die(help);
+    if (kind !== 'github' || !input) die(help);
     fs.mkdirSync(path.join(root, 'evidence'), {recursive:true});
     const id = 'E-' + randomUUID().slice(0, 8), output = path.join(root, 'evidence', id + '.json');
     const result = spawnSync(process.execPath, [path.join(here, 'collect.mjs'), kind, input, output], { encoding:'utf8', timeout:140000, windowsHide:true, shell:false, maxBuffer:8*1024*1024 });

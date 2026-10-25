@@ -1,11 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <opml version="2.0">
-  <head><title>Reference loop public development sources</title></head>
-  <body>
-    <outline text="NodeSeek latest topics" type="rss" xmlUrl="https://rss.nodeseek.com/" />
-    <outline text="V2EX latest topics" type="rss" xmlUrl="https://www.v2ex.com/index.xml" />
-    <outline text="Reddit selfhosted" type="rss" xmlUrl="https://www.reddit.com/r/selfhosted/.rss" />
-    <outline text="Stack Overflow Telegram questions" type="rss" xmlUrl="https://stackoverflow.com/feeds/tag/telegram" />
-    <outline text="RSSHub GitHub releases" type="rss" xmlUrl="https://github.com/DIYgod/RSSHub/releases.atom" />
-  </body>
+  <head><title>Project source feeds</title></head>
+  <body />
 </opml>
