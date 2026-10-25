@@ -6,7 +6,7 @@ import type { Transcript } from "@/types";
 
 // At the verdict: nothing is stored unless the user asks. "Save & share" saves the trial (transcript +
 // verdict, no voice or face) for 7 days and shows a QR code + link to /t/[id] for their phone.
-export default function SharePanel({ transcript }: { transcript: Transcript }) {
+export default function SharePanel({ transcript, onSaved }: { transcript: Transcript; onSaved?: (id: string) => void }) {
   const [state, setState] = useState<"ask" | "saving" | "saved" | "failed">("ask");
   const [link, setLink] = useState<{ url: string; qr: string } | null>(null);
 
@@ -16,6 +16,7 @@ export default function SharePanel({ transcript }: { transcript: Transcript }) {
       const r = await fetch("/api/trials", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }) });
       if (!r.ok) throw new Error(String(r.status));
       const { id } = (await r.json()) as { id: string };
+      onSaved?.(id);
       const url = `${window.location.origin}/t/${id}`;
       setLink({ url, qr: await QRCode.toDataURL(url, { margin: 1, width: 220 }) });
       setState("saved");

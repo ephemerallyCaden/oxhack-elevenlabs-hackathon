@@ -1,8 +1,9 @@
-// Server-only: returning users ("Remember me"). Stores the onboarding profile, the user's voice clone
-// id and their selfie, so next time they skip straight to their question. Opt-in only; "Forget me"
-// deletes the row and the clone. Supabase table `users` (docs/supabase.sql), else local JSON.
+// Server-only: returning users ("Remember me", signed in with Google). Stores the onboarding profile,
+// the user's voice clone id and their head cut-outs, keyed by their Supabase user id, so next time
+// they skip straight to their question. Opt-in only; "Forget me" deletes the row and the clone.
+// Supabase table `users` (docs/supabase.sql), else local JSON.
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { LOCAL_DIR, supabase } from "@/lib/supabase";
 import type { UserProfile } from "@/types";
@@ -11,20 +12,36 @@ export type SavedUser = {
   id: string;
   profile: UserProfile;
   voiceId: string | null;
-  /** PNG data URL from the selfie step (~100-300 KB). */
+  /** Front head cut-out, PNG data URL (~100-400 KB). */
   selfie: string | null;
+  /** Both cut-outs + calibration, when onboarding captured them. Kept in the `selfie` column as JSON. */
+  heads?: { front: { src: string }; side?: { src: string } } | null;
 };
 
+/** The `selfie` column holds either a data URL (front only) or the heads JSON. */
+function packFaces(u: Pick<SavedUser, "selfie" | "heads">): string | null {
+  return u.heads ? JSON.stringify(u.heads) : u.selfie;
+}
+function unpackFaces(stored: string | null): Pick<SavedUser, "selfie" | "heads"> {
+  if (!stored?.startsWith("{")) return { selfie: stored, heads: null };
+  try {
+    const heads = JSON.parse(stored) as NonNullable<SavedUser["heads"]>;
+    return { selfie: heads.front.src, heads };
+  } catch {
+    return { selfie: null, heads: null };
+  }
+}
+
 const DIR = join(LOCAL_DIR, "users");
-const validId = (id: string) => /^[\w-]{16,32}$/.test(id);
+const validId = (id: string) => /^[\w-]{16,40}$/.test(id); // Supabase user ids are UUIDs
 
 export async function saveUser(u: Omit<SavedUser, "id"> & { id?: string }): Promise<string> {
   const id = u.id && validId(u.id) ? u.id : randomBytes(16).toString("base64url");
-  const row: SavedUser = { id, profile: u.profile ?? {}, voiceId: u.voiceId ?? null, selfie: u.selfie ?? null };
+  const row: SavedUser = { id, profile: u.profile ?? {}, voiceId: u.voiceId ?? null, selfie: u.selfie ?? null, heads: u.heads ?? null };
   if (supabase) {
     const { error } = await supabase
       .from("users")
-      .upsert({ id, profile: row.profile, voice_id: row.voiceId, selfie: row.selfie, updated_at: new Date().toISOString() });
+      .upsert({ id, profile: row.profile, voice_id: row.voiceId, selfie: packFaces(row), updated_at: new Date().toISOString() });
     if (error) throw new Error(`supabase upsert: ${error.message}`);
   } else {
     await mkdir(DIR, { recursive: true });
@@ -37,13 +54,31 @@ export async function getUser(id: string): Promise<SavedUser | null> {
   if (!validId(id)) return null;
   if (supabase) {
     const { data } = await supabase.from("users").select("id, profile, voice_id, selfie").eq("id", id).maybeSingle();
-    return data ? { id: data.id, profile: data.profile ?? {}, voiceId: data.voice_id, selfie: data.selfie } : null;
+    return data ? { id: data.id, profile: data.profile ?? {}, voiceId: data.voice_id, ...unpackFaces(data.selfie) } : null;
   }
   try {
     return JSON.parse(await readFile(join(DIR, `${id}.json`), "utf8"));
   } catch {
     return null;
   }
+}
+
+/** The jury on the homepage: every saved user's front face + name, newest first. Nothing else. */
+export async function listFaces(limit = 15): Promise<{ name?: string; selfie: string }[]> {
+  type Row = { profile: UserProfile | null; selfie: string | null };
+  let rows: Row[] = [];
+  if (supabase) {
+    const { data } = await supabase.from("users").select("profile, selfie").not("selfie", "is", null).order("updated_at", { ascending: false }).limit(limit);
+    rows = (data ?? []) as Row[];
+  } else {
+    const files = await readdir(DIR).catch(() => [] as string[]);
+    const saved = await Promise.all(files.filter((f) => f.endsWith(".json")).map((f) => readFile(join(DIR, f), "utf8").then((t) => JSON.parse(t) as SavedUser).catch(() => null)));
+    rows = saved.filter((u): u is SavedUser => !!u).slice(0, limit).map((u) => ({ profile: u.profile, selfie: packFaces(u) }));
+  }
+  return rows.flatMap((r) => {
+    const { selfie } = unpackFaces(r.selfie);
+    return selfie ? [{ name: r.profile?.name?.split(/\s+/)[0], selfie }] : [];
+  });
 }
 
 /** Removes the user and returns what was stored (so the caller can delete the voice clone). */
