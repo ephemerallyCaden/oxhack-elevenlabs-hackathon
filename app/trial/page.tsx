@@ -10,14 +10,15 @@
 //   5. Voice playback via engine.playVoice() with stereo panning
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Scene, Speaker } from '@/types';
 import { TrialOrchestrator } from '@/lib/debate/orchestrator';
 import { sessionVoiceId } from '@/components/onboarding/VoiceStep';
 import { useSessionHeads } from '@/components/onboarding/sessionHeads';
-import SharePanel from '@/components/share/SharePanel';
+import VerdictScreen from '@/components/menu/VerdictScreen';
+import { signOut } from '@/lib/auth/browser';
 import { sessionProfile, takeSessionQuestion } from '@/lib/onboarding/session';
 import { useTrialState } from '@/lib/debate/useTrial';
-import { footnotes } from '@/lib/debate/transcript';
 import * as engine from '@/lib/audio/engine';
 import type { BgmName } from '@/lib/audio/assets';
 import Courtroom from '@/components/courtroom/Courtroom';
@@ -93,6 +94,7 @@ export default function TrialPage() {
   const s = useTrialState(orch);
   // Head cut-outs from onboarding (client-only, so the server render keeps the default heads)
   const heads = useSessionHeads();
+  const router = useRouter();
   const recorder = useRecorder();
   const [holding, setHolding] = useState(false);
   const held = useRef(false);
@@ -306,10 +308,10 @@ export default function TrialPage() {
 
   // -- Keyboard handler: Space to hold-to-talk --
   useEffect(() => {
-    const kd = (e: KeyboardEvent) =>
-      e.code === 'Space' && !e.repeat && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA' && (e.preventDefault(), down());
-    const ku = (e: KeyboardEvent) =>
-      e.code === 'Space' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA' && (e.preventDefault(), up());
+    // Space on a focused control (input, button, link: e.g. the verdict screen) is that control's.
+    const free = () => !['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(document.activeElement?.tagName ?? '');
+    const kd = (e: KeyboardEvent) => e.code === 'Space' && !e.repeat && free() && (e.preventDefault(), down());
+    const ku = (e: KeyboardEvent) => e.code === 'Space' && free() && (e.preventDefault(), up());
     window.addEventListener('keydown', kd);
     window.addEventListener('keyup', ku);
     return () => {
@@ -489,44 +491,20 @@ export default function TrialPage() {
         </aside>
       )}
 
-      {/* Verdict + transcript overlay */}
+      {/* Verdict: the end of the loop (new case / save & share / court record / main menu) */}
       {s.result && (
-        <section className="absolute inset-x-4 bottom-4 top-20 z-[60] mx-auto flex max-w-3xl flex-col gap-4 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950/95 p-6">
-          <h2 className="text-xl font-black">
-            Verdict: {s.result.verdict?.spectrum.label} ({s.spectrum.value > 0 ? '+' : ''}
-            {s.spectrum.value})
-          </h2>
-          <p className="text-zinc-300">{s.result.verdict?.explanation}</p>
-          <SharePanel transcript={s.result} />
-          <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-400">Transcript</h3>
-          <ol className="flex flex-col gap-1 text-sm">
-            {s.result.lines.map((l) => (
-              <li key={l.id}>
-                <strong style={{ color: WHO[l.speaker].color }}>{WHO[l.speaker].name}:</strong> {l.text}
-                {footnotes(s.result!, l).map((n) => (
-                  <sup key={n} className="ml-0.5 text-zinc-400">
-                    [{n}]
-                  </sup>
-                ))}
-              </li>
-            ))}
-          </ol>
-          <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-400">Sources</h3>
-          <ol className="flex flex-col gap-1 text-sm text-zinc-300">
-            {s.result.sources.map((c, i) => (
-              <li key={c.id}>
-                [{i + 1}] {c.evidence} ·{' '}
-                {c.source_url ? (
-                  <a className="underline" href={c.source_url} target="_blank" rel="noreferrer">
-                    {c.source_name}
-                  </a>
-                ) : (
-                  c.source_name
-                )}
-              </li>
-            ))}
-          </ol>
-        </section>
+        <VerdictScreen
+          transcript={s.result}
+          value={(s.result.verdict?.spectrum ?? s.spectrum).value}
+          label={(s.result.verdict?.spectrum ?? s.spectrum).label}
+          heads={heads}
+          onLeave={async (href) => {
+            void engine.setMusic(null);
+            void engine.setAmbience(false);
+            if (href === '/') await signOut(); // back to the menu = done: the next person starts clean
+            router.push(href);
+          }}
+        />
       )}
     </main>
   );

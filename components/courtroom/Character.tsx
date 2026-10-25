@@ -37,16 +37,19 @@ export default function Character({
   mood,
   heads = DEFAULT_HEADS,
   interrupting = false,
+  pose: forcedPose,
 }: {
   role: CourtActor;
   mood: CharacterMood;
   heads?: Heads;
   /** The user is interrupting: everyone faces front in the neutral pose. */
   interrupting?: boolean;
+  /** Pin one pose instead of cycling (menu + verdict screens). */
+  pose?: string;
 }) {
   const jawRef = useRef<HTMLImageElement>(null);
   useTalkEngine(jawRef, mood.talking, { maxRotation: 8, openDistance: 3 });
-  const { pose, frame, spec } = usePoseCycle(role, mood, interrupting);
+  const { pose, frame, spec } = usePoseCycle(role, mood, interrupting, forcedPose);
 
   const art = POSE_ART[role];
   const width = artWidth(role);

@@ -5,7 +5,7 @@ import QRCode from "qrcode";
 import type { Transcript } from "@/types";
 
 // At the verdict: save the trial once and show a QR code + link to /t/[id] (scan to read it on your phone).
-export default function SharePanel({ transcript }: { transcript: Transcript }) {
+export default function SharePanel({ transcript, onSaved }: { transcript: Transcript; onSaved?: (id: string) => void }) {
   const [link, setLink] = useState<{ url: string; qr: string } | null>(null);
   const [failed, setFailed] = useState(false);
   const saved = useRef(false);
@@ -16,11 +16,12 @@ export default function SharePanel({ transcript }: { transcript: Transcript }) {
     fetch("/api/trials", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }) })
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then(async ({ id }: { id: string }) => {
+        onSaved?.(id);
         const url = `${window.location.origin}/t/${id}`;
         setLink({ url, qr: await QRCode.toDataURL(url, { margin: 1, width: 220 }) });
       })
       .catch(() => setFailed(true));
-  }, [transcript]);
+  }, [transcript, onSaved]);
 
   if (failed) return null;
   return (

@@ -138,35 +138,35 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
   }, []);
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-6 text-center">
+    <div className="flex w-full flex-col items-start gap-6">
       {(phase === "intro" || phase === "recording") && (
-        <div className="rounded-2xl bg-zinc-900 p-6 text-left text-xl leading-relaxed text-zinc-200">
-          <p className="mb-3 text-sm uppercase tracking-widest text-amber-400">Read this out loud, in your normal voice</p>
+        <div className="ct-panel ct-speech p-6 !text-lg">
+          <p className="ct-kicker mb-3 !leading-snug">Read this out loud, in your normal voice</p>
           <p>
             “My name is <b>[your name]</b>. I’m <b>[your age]</b> years old and I live in <b>[your city]</b>. I work as a{" "}
             <b>[your job]</b>, and I’d say I’m the kind of person who <b>[values freedom / plays it safe / chases the big win /
             follows their gut]</b>. If I had to describe my life in one sentence, it would be…”
           </p>
-          <p className="mt-4 text-zinc-400">Then keep talking: what decision are you stuck on? What’s the best that could happen? The worst?</p>
+          <p className="ct-small mt-4">Then keep talking: what decision are you stuck on? What’s the best that could happen? The worst?</p>
         </div>
       )}
 
       {phase === "intro" && (
-        <button className="rounded-full bg-red-600 px-10 py-4 text-xl font-bold text-white hover:bg-red-500" onClick={start}>
+        <button className="ct-primary no-arrow" onClick={start}>
           🎙 Start recording
         </button>
       )}
 
       {phase === "recording" && (
         <>
-          <div className="h-3 w-full overflow-hidden rounded-full bg-zinc-800">
-            <div className="h-full bg-red-500 transition-[width]" style={{ width: `${Math.min(100, (seconds / MIN_SECONDS) * 100)}%` }} />
+          <div className="h-3 w-full overflow-hidden bg-[var(--c-wood)]">
+            <div className="h-full bg-[var(--c-brass)] transition-[width]" style={{ width: `${Math.min(100, (seconds / MIN_SECONDS) * 100)}%` }} />
           </div>
-          <p className="text-lg text-zinc-300" style={{ opacity: 0.6 + level * 0.4 }}>
+          <p className="ct-body" style={{ opacity: 0.6 + level * 0.4 }}>
             {seconds}s {seconds < MIN_SECONDS ? `— keep going, ${MIN_SECONDS - seconds}s more` : "— great, stop whenever you’re ready"}
           </p>
           <button
-            className="rounded-full bg-zinc-200 px-10 py-4 text-xl font-bold text-black disabled:opacity-40"
+            className="ct-primary"
             disabled={seconds < MIN_SECONDS}
             onClick={stop}
           >
@@ -175,17 +175,17 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
         </>
       )}
 
-      {(phase === "processing" || phase === "preview") && <p className="text-2xl text-zinc-200" data-testid="voice-status">{status}</p>}
+      {(phase === "processing" || phase === "preview") && <p className="ct-title-sm" data-testid="voice-status">{status}</p>}
       {phase === "preview" && result?.error && (
-        <p role="alert" data-testid="voice-error" className="max-w-xl rounded-xl border border-amber-500/60 bg-amber-500/10 px-4 py-3 text-left text-amber-200">
+        <p role="alert" data-testid="voice-error" className="ct-alert max-w-xl">
           ⚠️ We couldn’t use your voice: {result.error}
         </p>
       )}
 
       {phase === "preview" && result && (
         <div className="flex gap-3">
-          <button className="rounded-full bg-zinc-700 px-6 py-3 text-white" onClick={() => preview.current?.play()}>↻ Hear again</button>
-          <button className="rounded-full bg-red-600 px-8 py-3 font-bold text-white" onClick={() => onDone(result)}>Continue</button>
+          <button className="ct-ghost" onClick={() => preview.current?.play()}>↻ Hear again</button>
+          <button className="ct-primary" onClick={() => onDone(result)}>Continue</button>
         </div>
       )}
     </div>

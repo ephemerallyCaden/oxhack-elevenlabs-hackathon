@@ -1,0 +1,220 @@
+/* The menu, onboarding and verdict screens. Same grade as the courtroom: dull, desaturated
+   neutrals, halftone, ink vignette, scanlines, and Geist Mono like the courtroom textbox. Only
+   YES blue / NO red keep their colour. Root: .court-ui. */
+.court-ui {
+  --c-black: #0b0b0b;
+  --c-umber: #141413;
+  --c-wood: #1e1e1c;
+  --c-oak: #363532;
+  --c-oak-hi: #504e4a;
+  --c-stone: #9d9b96; /* secondary text: 6.9:1 on umber */
+  --c-plaster: #e0e0dc;
+  --c-carpet: #2a2120;
+  --c-brass: #b4ad9c; /* the old brass accent, greyed to the courtroom grade */
+  --c-brass-dk: #5e5a50;
+  --c-yes: #3b82f6;
+  --c-yes-field: #1aa3ff;
+  --c-no: #ef4444;
+  --c-no-field: #ff3a3a;
+  --display: var(--font-geist-mono), ui-monospace, monospace;
+  --ui: var(--font-geist-mono), ui-monospace, monospace;
+  --speech: var(--font-geist-mono), ui-monospace, monospace;
+  position: relative;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: var(--c-black);
+  color: var(--c-plaster);
+  font-family: var(--ui);
+  font-size: 17px;
+  line-height: 1.5;
+}
+.court-ui :focus-visible { outline: 2px solid var(--c-plaster); outline-offset: 3px; }
+
+/* ── Type roles ── */
+.ct-title { font: 800 clamp(44px, 4.6vw, 76px)/0.98 var(--display); letter-spacing: -0.03em; color: #fff; text-wrap: balance; }
+/* Verdict labels ("Lean YES", "NO") stay legible: the UI face, not blackletter caps. */
+.ct-verdict { font: 800 clamp(44px, 4.6vw, 72px)/0.95 var(--ui); letter-spacing: -0.04em; text-shadow: 4px 5px 0 rgb(0 0 0 / 0.35); }
+.ct-title-sm { font: 800 clamp(30px, 3vw, 46px)/1.05 var(--display); letter-spacing: -0.03em; color: #fff; text-wrap: balance; }
+.ct-kicker { font: 700 11px/1.2 var(--ui); letter-spacing: 0.2em; text-transform: uppercase; color: var(--c-brass); }
+.ct-body { font: 400 16px/1.6 var(--ui); color: #c9c8c3; max-width: 46ch; }
+.ct-small { font: 400 14px/1.45 var(--ui); color: var(--c-stone); }
+.ct-speech { font: 400 16px/1.55 var(--speech); color: var(--c-plaster); }
+
+/* ── Controls ── */
+.ct-primary {
+  display: inline-flex; align-items: center; gap: 0.55em; padding: 0.62em 1.25em 0.66em;
+  font: 700 19px/1 var(--ui); color: var(--c-black); background: var(--c-plaster);
+  box-shadow: 0 4px 0 var(--c-brass-dk), 0 10px 24px rgb(0 0 0 / 0.45);
+  transition: transform 120ms ease-out, box-shadow 120ms ease-out, background-color 120ms;
+}
+.ct-primary::after { content: '▶'; font-size: 0.6em; }
+.ct-primary:hover { background: #fff; transform: translateY(-2px); box-shadow: 0 6px 0 var(--c-brass-dk), 0 14px 28px rgb(0 0 0 / 0.5); }
+.ct-primary:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--c-brass-dk), 0 4px 10px rgb(0 0 0 / 0.4); }
+.ct-primary:disabled { opacity: 0.4; transform: none; cursor: not-allowed; }
+.ct-primary.no-arrow::after { content: none; }
+.ct-ghost {
+  display: inline-flex; align-items: center; gap: 0.5em; padding: 0.6em 1.05em;
+  font: 600 15px/1 var(--ui); color: var(--c-plaster); border: 2px solid var(--c-oak-hi);
+  transition: border-color 120ms, background-color 120ms;
+}
+.ct-ghost:hover { border-color: var(--c-plaster); background: rgb(255 255 255 / 0.05); }
+.ct-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
+.ct-link { font: 500 15px/1.3 var(--ui); color: var(--c-stone); text-decoration: underline; text-decoration-color: rgb(168 166 158 / 0.45); text-underline-offset: 4px; }
+.ct-link:hover { color: #fff; text-decoration-color: #fff; }
+.ct-link.danger:hover { color: var(--c-no); text-decoration-color: var(--c-no); }
+.ct-panel { background: var(--c-umber); border-top: 3px solid var(--c-oak); }
+.ct-input {
+  width: 100%; padding: 0.65em 0.8em; font: 400 20px/1.3 var(--ui); color: #fff;
+  background: var(--c-black); border: 2px solid var(--c-oak); outline: none;
+}
+.ct-input:focus { border-color: var(--c-brass); }
+.ct-input::placeholder { color: #77756d; }
+.ct-alert { border: 2px solid var(--c-brass); background: rgb(255 255 255 / 0.04); padding: 0.7em 0.9em; color: var(--c-plaster); }
+.ct-meter { position: relative; height: 6px; background: linear-gradient(90deg, #dc2626, #4a4840 50%, #2563eb); }
+.ct-meter > i { position: absolute; top: -4px; width: 3px; height: 14px; background: #fff; box-shadow: 0 0 0 1px #000; transform: translateX(-50%); }
+
+/* ── Menu: the seal on the left, the actions on the right, the jury below ── */
+/* Background: the seal's own lighting (warm umber glow, near-black edges). */
+.menu-bg { position: absolute; inset: 0; background: radial-gradient(ellipse 62% 72% at 28% 36%, #1f1e1c 0%, #141413 40%, #0c0c0b 66%, #050505 100%); }
+/* The courtroom's ink fall-off along the bottom (expressions.css .manga-ink), without its vignette. */
+.menu-ink { position: absolute; inset: 0; z-index: 40; pointer-events: none; background: linear-gradient(0deg, rgb(0 0 0 / 0.45) 0%, rgb(0 0 0 / 0.15) 22%, transparent 40%); }
+.menu-bg::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle, rgb(0 0 0 / 0.18) 1px, transparent 1.2px) 0 0 / 4px 4px; }
+.menu-grid {
+  position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 54fr) minmax(360px, 46fr); align-items: center;
+  gap: 4vw; min-height: 100dvh; padding: 4vh 6vw calc(var(--jury-h) + 2vh);
+}
+.menu-seal { width: min(64vh, 44vw); aspect-ratio: 1; justify-self: center; filter: saturate(0.3) contrast(1.2) brightness(0.72) drop-shadow(0 26px 44px rgb(0 0 0 / 0.7)); user-select: none; }
+.menu-actions { display: flex; flex-direction: column; gap: 22px; max-width: 470px; }
+.menu-step { position: relative; z-index: 2; min-height: 100dvh; display: flex; padding: 3vh 4vw calc(var(--jury-h-compact) + 2vh); }
+.menu-step-seal { position: absolute; left: 2.2vw; top: 2.2vh; width: clamp(72px, 7vw, 112px); filter: saturate(0.3) contrast(1.2) brightness(0.72) drop-shadow(0 8px 16px rgb(0 0 0 / 0.6)); }
+.menu-step-panel {
+  width: min(760px, 92vw); margin: auto; padding: 32px 36px; display: flex; flex-direction: column; gap: 22px;
+  background: rgb(23 20 16 / 0.94); border-top: 3px solid var(--c-oak); box-shadow: 0 24px 60px rgb(0 0 0 / 0.55);
+}
+.court-ui { --jury-h: 30vh; --jury-h-compact: 15vh; }
+
+/* ── The jury box ── */
+.jury { filter: saturate(0.3) contrast(1.15) brightness(0.8); position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+.jury-pew { position: relative; z-index: 1; isolation: isolate; display: flex; flex-direction: column; align-items: stretch; }
+.jury-pew.jury-front { z-index: 2; } /* the front pew's heads overlap the back pew's backrest */
+.jury-back { width: 86vw; } .jury-front { width: 98vw; margin-top: -2.6vh; }
+.jury-heads { position: relative; z-index: 1; display: flex; justify-content: space-around; align-items: flex-end; padding: 0 3vw; }
+.jury-pew > .jury-rail { position: relative; z-index: 4; height: 16px; background: linear-gradient(#6a4529, #3b2414 60%, #22140b); box-shadow: 0 2px 0 #0a0604, inset 0 1px 0 rgb(255 220 170 / 0.18); }
+.jury-pew > .jury-backrest { position: relative; z-index: 3; width: auto; height: 5vh; background: repeating-linear-gradient(90deg, #24160c 0 calc(12.5% - 3px), #150c06 calc(12.5% - 3px) 12.5%), #1d1209; box-shadow: inset 0 10px 18px rgb(0 0 0 / 0.5); }
+.jury-front > .jury-backrest { height: 11vh; }
+.jury-back .jury-rail { height: 12px; }
+.juror, .jury-slot { --h: 9.4vh; width: var(--h); display: flex; justify-content: center; flex: 0 0 auto; }
+.jury-back .jury-slot { --h: 7.2vh; }
+.jury.compact .jury-slot { --h: 7.8vh; }
+.juror { position: relative; margin-bottom: calc(var(--h) * -0.08); transform: translate(var(--dx), var(--dy)) scale(var(--k)) rotate(var(--rot)); }
+.jury-back .juror { --h: 7.2vh; }
+.juror img { display: block; height: var(--h); width: auto; max-width: none; filter: saturate(0.75) contrast(1.05) brightness(0.9); animation: jurorBreathe 4.6s ease-in-out var(--delay) infinite; transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1); }
+.jury-back .juror img { filter: saturate(0.6) brightness(0.62); }
+.juror.empty img { filter: brightness(0) drop-shadow(0 -2px 0 rgb(224 224 220 / 0.14)); opacity: 0.82; }
+.juror.kept { pointer-events: auto; }
+.juror-pick { display: block; cursor: pointer; }
+.juror-x { position: absolute; z-index: 6; top: -4px; right: -10px; width: 22px; height: 22px; font: 600 13px/18px var(--ui); color: var(--c-stone); background: var(--c-black); border: 2px solid var(--c-oak); opacity: 0; transition: opacity 120ms; }
+.juror.kept:hover .juror-x, .juror-x:focus-visible { opacity: 1; }
+.juror-x:hover { color: var(--c-no); border-color: var(--c-no); }
+.juror.kept:hover img, .juror-pick:focus-visible img { transform: translateY(-8px); }
+.juror.me img { filter: none; }
+.juror.me::before { content: ''; position: absolute; left: 50%; bottom: 10%; width: 220%; aspect-ratio: 1; transform: translateX(-50%); background: radial-gradient(circle, rgb(224 224 220 / 0.22), transparent 62%); pointer-events: none; }
+.jury-plates { position: relative; z-index: 5; height: 16px; margin-top: -16px; display: flex; justify-content: space-around; align-items: center; padding: 0 3vw; pointer-events: none; }
+.jury-back .jury-plates { height: 12px; margin-top: -12px; }
+.juror-plate { margin-top: 1px; padding: 1px 7px; white-space: nowrap; font: 600 12px/1.2 var(--ui); color: var(--c-black); background: var(--c-brass); box-shadow: 0 2px 0 var(--c-brass-dk); }
+.jury.leaning .juror img { transform: translateY(-5px) scale(1.03); }
+@keyframes jurorBreathe { 0%, 100% { translate: 0 0; } 50% { translate: 0 -1.5px; } }
+/* Title page: the faces in the system bounce in their seats (staggered by --delay); silhouettes just breathe. */
+.jury:not(.compact) .juror.kept img { animation: jurorBounce 1.6s cubic-bezier(0.33, 0, 0.67, 1) var(--delay) infinite; }
+@keyframes jurorBounce {
+  0%, 60%, 100% { translate: 0 0; scale: 1 1; }
+  8% { translate: 0 0; scale: 1.04 0.95; } /* crouch */
+  26% { translate: 0 -14px; scale: 0.98 1.03; } /* up */
+  44% { translate: 0 0; scale: 1.03 0.96; } /* land */
+}
+.jury.compact .jury-front { margin-top: 0; }
+.jury.compact .juror { --h: 7.8vh; }
+.jury.compact .jury-front > .jury-backrest { height: 5vh; }
+
+/* ── The seam: YES field | the court | NO field ── */
+.seam-half { position: absolute; top: 0; bottom: 0; width: 50%; overflow: hidden; }
+.seam-yes { left: 0; background: var(--c-yes-field); }
+.seam-no { right: 0; background: var(--c-no-field); }
+.seam-streak { position: absolute; left: 0; background: #fff; border-radius: 99px; animation: seamStreak var(--dur) linear var(--delay) infinite; }
+@keyframes seamStreak { from { transform: translateX(var(--from)); } to { transform: translateX(var(--to)); } }
+.seam-word { position: absolute; top: 22px; font: 800 clamp(72px, 8.4vw, 140px)/0.85 var(--ui); letter-spacing: -0.06em; color: #fff; text-shadow: 6px 8px 0 rgb(0 0 0 / 0.22); pointer-events: none; }
+.seam-yes .seam-word { left: 30px; }
+.seam-no .seam-word { right: 30px; }
+.seam-fig { position: absolute; width: 0; height: 0; transform-origin: 0 0; }
+.seam-band {
+  position: relative; z-index: 4; margin: 0 auto; min-height: 100dvh; width: clamp(360px, 31vw, 470px);
+  display: flex; flex-direction: column; justify-content: center; gap: 24px; padding: 48px clamp(26px, 2.6vw, 44px);
+  border-left: 3px solid var(--c-oak); border-right: 3px solid var(--c-oak); background: var(--c-umber);
+  box-shadow: 0 0 0 6px rgb(0 0 0 / 0.35); transition: width 450ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.seam-band.wide { width: min(760px, 66vw); }
+/* The empty court seen through the band: the Judge's bench, graded like the courtroom, sunk in umber. */
+.seam-band::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: url(/assets/courtroom-bg.png) center 28% / auto 120% no-repeat;
+  filter: saturate(0.3) contrast(1.25) brightness(0.68);
+  opacity: 0.22;
+}
+.seam-band::after {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(4px 4px at 50% 50%, rgb(0 0 0 / 0.18) 1px, transparent 1.2px) 0 0 / 4px 4px,
+    linear-gradient(180deg, rgb(23 20 16 / 0.35), rgb(23 20 16 / 0.9) 70%);
+}
+.seam-strip { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; border-top: 3px solid var(--c-oak); background: var(--c-umber); transform: translateY(101%); transition: transform 380ms cubic-bezier(0.16, 1, 0.3, 1); }
+.seam-strip.open { transform: none; }
+.scanlines { position: fixed; inset: 0; z-index: 50; pointer-events: none; background: repeating-linear-gradient(0deg, transparent 0 2px, rgb(0 0 0 / 0.06) 2px 3px); }
+
+/* HoldToTalk (shared component) inside the court: square, oak, brass-free (red stays the mic). */
+.ct-htt button { border-radius: 0; font-family: var(--ui); }
+.ct-htt textarea { border-radius: 0; background: var(--c-black); border: 2px solid var(--c-oak); font-family: var(--ui); }
+.ct-htt p { color: var(--c-stone); }
+
+/* SharePanel (shared component) inside the court */
+.ct-share [data-testid='share-panel'] { border-radius: 0; background: var(--c-black); border: 2px solid var(--c-oak); }
+.ct-share .text-amber-400 { color: var(--c-brass); }
+.ct-share .text-zinc-400, .ct-share .text-zinc-300 { color: var(--c-stone); }
+
+/* ── Chips (confirm step) ── */
+.ct-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ct-chip { display: inline-flex; align-items: baseline; gap: 0.5em; padding: 0.45em 0.75em; background: var(--c-wood); border: 2px solid var(--c-oak); font: 500 16px/1.2 var(--ui); color: var(--c-plaster); text-align: left; }
+.ct-chip > span:first-child { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--c-stone); }
+.ct-chip:hover { border-color: var(--c-oak-hi); }
+.ct-chip.empty { color: var(--c-stone); border-style: dashed; }
+.ct-chip.editing { border-color: var(--c-brass); padding: 0.25em 0.4em 0.25em 0.75em; }
+.ct-chip input, .ct-chip select { min-width: 6ch; background: transparent; border: 0; outline: none; color: #fff; font: inherit; padding: 0.2em 0; }
+.ct-chip select option { background: var(--c-umber); }
+
+/* ── Faces on this laptop ── */
+.ct-faces { display: flex; flex-wrap: wrap; gap: 10px; }
+.ct-face { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 76px; font: 500 13px/1.2 var(--ui); color: var(--c-plaster); }
+.ct-face img { width: 64px; height: 74px; object-fit: contain; background: var(--c-wood); border: 2px solid var(--c-oak); transition: border-color 120ms, transform 120ms; }
+.ct-face:hover img { border-color: var(--c-brass); transform: translateY(-2px); }
+.ct-face-x { position: absolute; top: -6px; right: 0; width: 20px; height: 20px; font-size: 12px; line-height: 16px; background: var(--c-black); border: 2px solid var(--c-oak); color: var(--c-stone); }
+.ct-face-x:hover { color: var(--c-no); border-color: var(--c-no); }
+.ct-google { display: inline-flex; align-items: center; gap: 0.6em; padding: 0.55em 0.95em; font: 600 16px/1 var(--ui); color: var(--c-plaster); background: var(--c-black); border: 2px solid var(--c-oak-hi); }
+.ct-google:hover:not(:disabled) { border-color: #fff; }
+.ct-google:disabled { opacity: 0.45; cursor: not-allowed; }
+.ct-google b { display: grid; place-items: center; width: 1.3em; height: 1.3em; font: 700 15px/1 system-ui, sans-serif; color: var(--c-black); background: #fff; }
+
+@media (max-width: 760px) {
+  .court-ui { --jury-h: 18vh; }
+  .menu-grid { grid-template-columns: 1fr; padding-top: 3vh; }
+  .menu-seal { width: min(70vw, 34vh); }
+  .jury-back { display: none; }
+  /* Keep the middle five seats (kept faces sit in the middle first). */
+  .jury-front .jury-heads > :nth-child(1), .jury-front .jury-heads > :nth-child(n + 7),
+  .jury-front .jury-plates > :nth-child(1), .jury-front .jury-plates > :nth-child(n + 7) { display: none; }
+  .seam-half { width: 100%; height: 50%; }
+  .seam-yes { top: 0; bottom: auto; } .seam-no { top: 50%; }
+  .seam-fig { display: none; }
+  .seam-band, .seam-band.wide { width: auto; margin: 0 14px; min-height: 100dvh; border: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .seam-streak, .jury .juror img, .jury:not(.compact) .juror.kept img { animation: none; }
+  .seam-band { transition: none; }
+}

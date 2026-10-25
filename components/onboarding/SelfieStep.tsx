@@ -130,40 +130,40 @@ export default function SelfieStep({ onDone }: { onDone: (dataUrl: string | null
   const chin = kind === "side" ? SIDE_FRAME.chin / SIDE_FRAME.h : 1;
 
   return (
-    <div className="flex w-full max-w-xl flex-col items-center gap-5">
-      <p className="text-lg text-zinc-300">
+    <div className="flex w-full flex-col items-start gap-5">
+      <p className="ct-body">
         {kind === "front" ? "Look at the camera: hair at the top of the box, chin on the bottom." : "Now turn to your right, so the camera sees your profile."}
       </p>
       {error ? (
-        <p className="text-zinc-400">{error}</p>
+        <p className="ct-small">{error}</p>
       ) : (
-        <div className="relative w-full overflow-hidden rounded-2xl bg-zinc-900" style={{ aspectRatio: "16 / 9" }}>
+        <div className="relative w-full overflow-hidden border-2 border-[var(--c-oak)] bg-[var(--c-black)]" style={{ aspectRatio: "16 / 9" }}>
           {shot && (
             // eslint-disable-next-line @next/next/no-img-element -- data URL preview
             <img src={shot.spec.src} alt={kind === "front" ? "Your face" : "Your profile"} className="absolute left-1/2 top-1/2 z-10 h-[55%] -translate-x-1/2 -translate-y-1/2" />
           )}
           <video ref={video} autoPlay playsInline muted onLoadedData={() => setReady(true)} className={`h-full w-full -scale-x-100 object-cover ${shot ? "opacity-20" : ""}`} />
           {!shot && (
-            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[55%] -translate-x-1/2 -translate-y-1/2 border-2 border-dashed border-amber-400/70" style={{ aspectRatio: `${guide.w} / ${guide.h}` }}>
+            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[55%] -translate-x-1/2 -translate-y-1/2 border-2 border-dashed border-[var(--c-brass)]/70" style={{ aspectRatio: `${guide.w} / ${guide.h}` }}>
               {guide.eyes.map(([x, y], i) => (
-                <span key={i} className="absolute size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-amber-400" style={{ left: pct(x), top: pct(y) }} />
+                <span key={i} className="absolute size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--c-brass)]" style={{ left: pct(x), top: pct(y) }} />
               ))}
-              <span className="absolute left-1/4 h-0.5 w-1/2 bg-amber-400" style={{ top: pct(guide.lipY) }} />
-              {kind === "side" && <span className="absolute inset-x-0 h-0.5 bg-amber-400/60" style={{ top: pct(chin) }} />}
+              <span className="absolute left-1/4 h-0.5 w-1/2 bg-[var(--c-brass)]" style={{ top: pct(guide.lipY) }} />
+              {kind === "side" && <span className="absolute inset-x-0 h-0.5 bg-[var(--c-brass)]/60" style={{ top: pct(chin) }} />}
             </div>
           )}
         </div>
       )}
-      {shot && !shot.detected && <p className="text-sm text-zinc-500">Couldn’t find your face clearly: using the guide box. Retake for a cleaner cut-out.</p>}
-      <div className="flex gap-3">
+      {shot && !shot.detected && <p className="ct-small">Couldn’t find your face clearly: using the guide box. Retake for a cleaner cut-out.</p>}
+      <div className="flex flex-wrap items-center gap-3">
         {!shot && !error && (
-          <button className="rounded-full bg-red-600 px-8 py-3 text-lg font-bold text-white disabled:opacity-40" disabled={!ready || busy} onClick={capture}>
+          <button className="ct-primary no-arrow" disabled={!ready || busy} onClick={capture}>
             {busy ? "Cutting out…" : ready ? "📸 Take photo" : "Starting camera…"}
           </button>
         )}
-        {shot && <button className="rounded-full bg-zinc-700 px-6 py-3 text-white" onClick={() => setShot(null)}>Retake</button>}
-        {shot && <button className="rounded-full bg-red-600 px-8 py-3 text-lg font-bold text-white" onClick={use}>{kind === "front" ? "Next: side photo" : "Use these"}</button>}
-        <button className="rounded-full px-6 py-3 text-zinc-400 hover:text-white" onClick={() => (kind === "side" ? finish() : onDone(null))}>
+        {shot && <button className="ct-ghost" onClick={() => setShot(null)}>Retake</button>}
+        {shot && <button className="ct-primary" onClick={use}>{kind === "front" ? "Next: side photo" : "Use these"}</button>}
+        <button className="ct-link" onClick={() => (kind === "side" ? finish() : onDone(null))}>
           Skip
         </button>
       </div>

@@ -10,7 +10,11 @@ create table if not exists public.trials (
 -- Only the server (service role key) reads/writes; no public access.
 alter table public.trials enable row level security;
 
--- Returning users ("Remember me", opt-in): onboarding profile, their voice clone id, their selfie.
+-- Returning users ("Remember me", opt-in, signed in with Google via Supabase Auth): onboarding
+-- profile, their voice clone id, their head cut-outs (`selfie`: a data URL, or JSON with both heads).
+-- `id` is the Supabase Auth user id; /api/users* verify the caller's session token and only touch
+-- their own row. Rows from before sign-in (random ids) are unreachable: delete them with
+--   delete from public.users where id !~ '^[0-9a-f]{8}-';
 -- "Forget me" deletes the row and the voice clone.
 create table if not exists public.users (
   id          text primary key,

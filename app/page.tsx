@@ -1,14 +1,30 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import type { UserProfile } from "@/types";
 import type { SavedUser } from "@/lib/users/store";
 import VoiceStep, { sessionVoiceId, type VoiceStepResult } from "@/components/onboarding/VoiceStep";
 import HoldToTalk from "@/components/HoldToTalk";
 import SelfieStep, { sessionSelfie } from "@/components/onboarding/SelfieStep";
+import { HEADS_KEY, useSessionHeads } from "@/components/onboarding/sessionHeads";
+import Jury from "@/components/menu/Jury";
+import "@/components/menu/court.css";
+import ProfileChips from "@/components/menu/ProfileChips";
+import { parsePastTrials, pastTrialsRaw, verdictSide } from "@/components/menu/pastTrials";
 import { getProfile } from "@/lib/debate/orchestrator";
-import { rememberedUserId, restoreSession, saveOnboarding, setRememberedUserId } from "@/lib/onboarding/session";
+import { authConfigured, authedPost, signInWithGoogle, signOut, useSession } from "@/lib/auth/browser";
+import {
+  addToRoster,
+  faceThumb,
+  removeFromRoster,
+  restoreSession,
+  saveDraft,
+  saveOnboarding,
+  sessionProfile,
+  takeDraft,
+  type RosterEntry,
+} from "@/lib/onboarding/session";
 
 type Step = "welcome" | "back" | "voice" | "selfie" | "thinking" | "confirm";
 
@@ -21,35 +37,107 @@ function clearSession() {
   }
 }
 
-const post = (url: string, body: unknown) =>
-  fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+function sessionHeadsJson() {
+  try {
+    return JSON.parse(sessionStorage.getItem(HEADS_KEY) ?? "null");
+  } catch {
+    return null;
+  }
+}
 
-// Onboarding: read the script aloud (voice clone + transcript) → selfie → profile + question → the trial.
-// Returning users ("Remember me") skip straight to their question.
+const noSubscribe = () => () => {};
+const rosterRaw = () => {
+  try {
+    return localStorage.getItem("roulette.roster") ?? "[]";
+  } catch {
+    return "[]";
+  }
+};
+
+function parseRoster(raw: string): RosterEntry[] {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+
+// The menu + onboarding, in the YES | NO seam: read the script aloud (voice clone + transcript) →
+// two photos → check the court's file on you + the question → the trial. Signed-in users who kept
+// their voice and face skip straight to their question.
 export default function Home() {
   const router = useRouter();
+  const { session, ready } = useSession();
+  const heads = useSessionHeads();
   const [step, setStep] = useState<Step>("welcome");
   const [profile, setProfile] = useState<UserProfile>({});
   const [question, setQuestion] = useState("");
   const [remember, setRemember] = useState(false);
   const [returning, setReturning] = useState<SavedUser | null>(null);
+  const [aim, setAim] = useState(false); // pointer on the main action: both futures turn to you
+  const [pastOpen, setPastOpen] = useState(false);
+  const [, bump] = useState(0); // re-read localStorage lists after we change them
+  const [error, setError] = useState("");
+  const [stored, setStored] = useState<RosterEntry[]>([]); // everyone saved (the jury), from the server
+  const [busy, setBusy] = useState(false);
   const profileCall = useRef<ReturnType<typeof getProfile> | null>(null);
 
-  // Remembered on this device? → "Welcome back".
+  const rosterJson = useSyncExternalStore(noSubscribe, rosterRaw, () => "[]");
+  const roster = useMemo(() => parseRoster(rosterJson), [rosterJson]);
+  const pastJson = useSyncExternalStore(noSubscribe, () => pastTrialsRaw(), () => "[]");
+  const past = useMemo(() => parsePastTrials(pastJson), [pastJson]);
+
+  // Back from Google mid-onboarding (the draft), or "New case" from the verdict (keeps voice + face).
   useEffect(() => {
-    const id = rememberedUserId();
-    if (!id) return;
-    post("/api/users/get", { id })
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then(({ user }: { user: SavedUser }) => {
-        setReturning(user);
-        setStep((s) => (s === "welcome" ? "back" : s));
-      })
-      .catch(() => setRememberedUserId(null)); // deleted or a different database
+    void Promise.resolve().then(() => {
+      const draft = takeDraft();
+      const again = new URLSearchParams(location.search).has("again");
+      if (draft) {
+        setProfile(draft.profile);
+        setQuestion(draft.question);
+        setRemember(true);
+        setStep("confirm");
+      } else if (again) {
+        setProfile(sessionProfile() ?? {});
+        setStep("confirm");
+        history.replaceState(null, "", "/");
+      }
+    });
   }, []);
 
+  // The jury: every saved face (thumbnail + first name). Decoration: a slow or failed fetch leaves silhouettes.
+  useEffect(() => {
+    fetch("/api/jury", { method: "POST", signal: AbortSignal.timeout(5000) })
+      .then((r) => (r.ok ? r.json() : { jurors: [] }))
+      .then(({ jurors }: { jurors: { name?: string; face: string }[] }) => setStored(jurors.map((j) => ({ email: "", name: j.name, face: j.face }))))
+      .catch(() => {});
+  }, []);
+
+  // Signed in → their saved file, if they kept one → "Welcome back".
+  useEffect(() => {
+    if (!ready || !session) return;
+    let live = true;
+    authedPost("/api/users/get", session)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((res: { user: SavedUser } | null) => {
+        if (!live || !res) return;
+        setReturning(res.user);
+        setStep((s) => (s === "welcome" ? "back" : s));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [ready, session]);
+
+  function begin() {
+    clearSession();
+    setStep("voice");
+  }
+
   function onVoice(r: VoiceStepResult) {
-    profileCall.current = getProfile({ transcript: r.transcript }); // runs while they take the selfie
+    profileCall.current = getProfile({ transcript: r.transcript }); // runs while they take the photos
     setStep("selfie");
   }
 
@@ -58,6 +146,7 @@ export default function Home() {
     const res = await (profileCall.current ?? getProfile({}));
     setProfile(res.profile);
     setQuestion(res.question ?? "");
+    setRemember(false); // opt-in: never save into whoever happens to be signed in
     setStep("confirm");
   }
 
@@ -70,11 +159,38 @@ export default function Home() {
     setStep("confirm");
   }
 
-  async function forgetMe() {
-    if (returning) await post("/api/users/delete", { id: returning.id }).catch(() => {});
-    setRememberedUserId(null);
+  async function someoneNew() {
+    await signOut();
     setReturning(null);
+    clearSession();
+    setStep("voice");
+  }
+
+  async function forgetMe() {
+    if (!session) return;
+    setError("");
+    const r = await authedPost("/api/users/delete", session, {}, AbortSignal.timeout(8000)).catch(() => null);
+    if (!r?.ok) {
+      setError("The court couldn’t delete your voice and face just now. Nothing was removed; try again.");
+      return;
+    }
+    if (session.user.email) removeFromRoster(session.user.email);
+    await signOut();
+    setReturning(null);
+    clearSession();
+    bump((n) => n + 1);
     setStep("welcome");
+  }
+
+  function forgetFace(email: string) {
+    removeFromRoster(email);
+    bump((n) => n + 1);
+  }
+
+  /** Sign in from the confirm step: keep what they've told us across the trip to Google. */
+  function signInToKeep() {
+    saveDraft({ profile, question });
+    void signInWithGoogle();
   }
 
   const leaving = useRef(false);
@@ -82,115 +198,162 @@ export default function Home() {
     const q = question.trim();
     if (!q || leaving.current) return; // Enter + click (or a double click) must not save twice
     leaving.current = true;
+    setBusy(true);
     saveOnboarding({ profile, question: q });
-    if (remember) {
-      const r = await post("/api/users", {
-        id: returning?.id ?? rememberedUserId() ?? undefined,
-        profile,
-        voiceId: sessionVoiceId() ?? null,
-        selfie: sessionSelfie() ?? null,
-      }).catch(() => null);
-      if (r?.ok) setRememberedUserId((await r.json()).id);
+    if (remember && session) {
+      // Never hold the visitor at the door: a slow save is skipped after 5s (the trial still starts).
+      const selfie = sessionSelfie() ?? null;
+      const heads = sessionHeadsJson();
+      const body = { profile, voiceId: sessionVoiceId() ?? null, ...(heads ? { heads } : { selfie }) };
+      const r = await authedPost("/api/users", session, body, AbortSignal.timeout(5000)).catch(() => null);
+      if (r?.ok && session.user.email) addToRoster({ email: session.user.email, name: profile.name, face: selfie ? await faceThumb(selfie) : undefined });
     }
     router.push("/trial");
   }
 
-  const facts = [profile.name, profile.age && `${profile.age}`, profile.situation, profile.location, profile.risk_tolerance && `${profile.risk_tolerance} with risk`].filter(Boolean);
+  const aimProps = { onMouseEnter: () => setAim(true), onMouseLeave: () => setAim(false), onFocus: () => setAim(true), onBlur: () => setAim(false) };
+
+  const signedInAs = session?.user.email;
+  const menu = step === "welcome" || step === "back";
+  // The jury: faces kept on this laptop, plus yours once the photos are taken (not clickable).
+  const yours = !menu && heads ? [{ email: "", name: profile.name || "You", face: heads.front.src }] : [];
+  const pickJuror = authConfigured ? (e: RosterEntry) => e.email && e.email !== signedInAs && void signInWithGoogle(e.email) : undefined;
 
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-8 px-6 py-12 text-center">
-      <header className="flex flex-col items-center gap-3">
-        <p className="text-sm uppercase tracking-[0.4em] text-amber-400">Court of Future Selves</p>
-        {step === "welcome" && <h1 className="text-5xl font-black tracking-tight sm:text-7xl">Your future is on trial.</h1>}
-      </header>
+    <main className="court-ui">
+      <div className="menu-bg" />
+      {menu ? (
+        <div className="menu-grid">
+          {/* eslint-disable-next-line @next/next/no-img-element -- the logo, sized by the layout */}
+          <img className="menu-seal" src="/assets/logo/roulette-seal-1200.webp" alt="Roulette: the Court of Future Selves" />
+          <div className="menu-actions">
+            {step === "welcome" && (
+              <>
+                <span className="ct-kicker">Court of Future Selves</span>
+                <h1 className="ct-title-sm">Your future is on trial.</h1>
+                <p className="ct-body">Read one short paragraph out loud, then put your decision before the court.</p>
+                <div className="flex flex-col items-start gap-4">
+                  <button className="ct-primary" onClick={begin} {...aimProps}>Begin</button>
+                  <button className="ct-link" onClick={() => { clearSession(); router.push("/trial"); }}>Skip setup: go straight to court</button>
+                  {past.length > 0 && (
+                    <button className="ct-link" aria-expanded={pastOpen} onClick={() => setPastOpen((o) => !o)}>
+                      Watch a past trial {pastOpen ? "▴" : "▾"}
+                    </button>
+                  )}
+                </div>
+                {/* Always shown; greyed out until Supabase Auth is configured (NEXT_PUBLIC_SUPABASE_*). */}
+                {(
+                  <div className="flex flex-col gap-3 border-t-2 border-[var(--c-oak)] pt-5">
+                    {signedInAs ? (
+                      <p className="ct-small">
+                        Signed in as {signedInAs}. <button className="ct-link" onClick={() => void signOut()}>Sign out</button>
+                      </p>
+                    ) : (
+                      <>
+                        <span className="ct-small">{roster.length ? "Been here before? Find your face in the jury, or:" : "Been here before?"}</span>
+                        <button className="ct-google self-start" disabled={!authConfigured} onClick={() => void signInWithGoogle()}>
+                          <b aria-hidden="true">G</b> Sign in with Google
+                        </button>
+                        {!authConfigured && <span className="ct-small">Sign-in isn’t switched on for this build yet.</span>}
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
 
-      {step === "welcome" && (
-        <>
-          <p className="max-w-xl text-lg text-zinc-400">
-            Read one short paragraph out loud. Three future versions of you, in your own voice, will argue your decision in court.
-          </p>
-          <div className="flex flex-col items-center gap-3">
-            <button className="rounded-full bg-red-600 px-10 py-4 text-xl font-bold text-white hover:bg-red-500" onClick={() => { clearSession(); setStep("voice"); }}>
-              Begin
-            </button>
-            <button className="text-sm text-zinc-500 underline-offset-4 hover:underline" onClick={() => { clearSession(); router.push("/trial"); }}>
-              Skip setup — go straight to court
-            </button>
+            {step === "back" && returning && (
+              <>
+                <div className="flex items-center gap-4">
+                  {/* eslint-disable-next-line @next/next/no-img-element -- stored data URL */}
+                  {returning.selfie && <img src={returning.selfie} alt="Your saved face" className="h-[92px] w-20 border-2 border-[var(--c-oak)] bg-[var(--c-wood)] object-contain" />}
+                  <span className="ct-kicker">Court of Future Selves</span>
+                </div>
+                <h1 className="ct-title-sm">Welcome back{returning.profile.name ? `, ${returning.profile.name}` : ""}.</h1>
+                <p className="ct-body">The court remembers your voice and your face.</p>
+                {/* Shared demo laptop: the next person must find "someone new" as easily as "that's me". */}
+                <div className="flex flex-col items-start gap-3">
+                  <button className="ct-primary" onClick={() => welcomeBack(returning)} {...aimProps}>That’s me: ask a new question</button>
+                  <button className="ct-ghost" onClick={() => void someoneNew()}>I’m someone new</button>
+                </div>
+                <button className="ct-link danger self-start" onClick={() => void forgetMe()}>Forget me (delete my voice &amp; face)</button>
+                {error && <p role="alert" className="ct-alert">{error}</p>}
+              </>
+            )}
           </div>
-        </>
-      )}
+        </div>
+      ) : (
+        <div className="menu-step">
+          {/* eslint-disable-next-line @next/next/no-img-element -- the logo badge */}
+          <img className="menu-step-seal" src="/assets/logo/roulette-seal-600.webp" alt="Roulette" />
+          <div className="menu-step-panel">
+            {step === "voice" && (
+              <>
+                <VoiceStep onDone={onVoice} />
+                <button className="ct-link self-start" onClick={() => setStep("selfie")}>Skip: use the default voice</button>
+              </>
+            )}
 
-      {step === "back" && returning && (
-        <div className="flex flex-col items-center gap-5">
-          {/* eslint-disable-next-line @next/next/no-img-element -- stored data URL */}
-          {returning.selfie && <img src={returning.selfie} alt="" className="h-32 rounded-full" />}
-          <h1 className="text-4xl font-black sm:text-6xl">Welcome back{returning.profile.name ? `, ${returning.profile.name}` : ""}.</h1>
-          <p className="text-zinc-400">The court remembers your voice and your face.</p>
-          {/* Shared demo laptop: the next person must find "someone new" as easily as "that's me". */}
-          <div className="flex flex-wrap justify-center gap-3">
-            <button className="rounded-full bg-red-600 px-8 py-4 text-xl font-bold text-white hover:bg-red-500" onClick={() => welcomeBack(returning)}>
-              That’s me: ask a new question
-            </button>
-            <button
-              className="rounded-full border-2 border-zinc-500 px-8 py-4 text-xl font-bold text-white hover:border-white"
-              onClick={() => { setRememberedUserId(null); setReturning(null); clearSession(); setStep("voice"); }}
-            >
-              I’m someone new
-            </button>
+            {step === "selfie" && <SelfieStep onDone={onSelfie} />}
+
+            {step === "thinking" && <p className="ct-title-sm" role="status">The court is reading your file…</p>}
+
+            {step === "confirm" && (
+              <>
+                <span className="ct-kicker">Your file · click to correct</span>
+                <ProfileChips profile={profile} onChange={setProfile} />
+                <label className="flex flex-col gap-2">
+                  <span className="ct-kicker">The question before the court</span>
+                  <input
+                    className="ct-input"
+                    placeholder="Should I …?"
+                    value={question}
+                    autoFocus
+                    onChange={(e) => setQuestion(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && toCourt()}
+                  />
+                </label>
+                <div className="ct-htt self-start">
+                  <HoldToTalk label="Hold to say your question" spacebar={false} onTranscript={setQuestion} />
+                </div>
+                {authConfigured &&
+                  (session ? (
+                    <label className="ct-small flex items-center gap-2.5">
+                      <input type="checkbox" className="size-4 accent-[var(--c-brass)]" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+                      Keep my voice, face and file with {session.user.email}
+                    </label>
+                  ) : (
+                    <p className="ct-small">
+                      Want to come back as yourself?{" "}
+                      <button className="ct-link" onClick={signInToKeep}>Sign in with Google to keep your voice and face</button>
+                    </p>
+                  ))}
+                <button className="ct-primary self-start" disabled={!question.trim() || busy} onClick={toCourt} {...aimProps}>
+                  {busy ? "Entering the court…" : "Take it to court"}
+                </button>
+              </>
+            )}
           </div>
-          <button className="text-sm text-zinc-500 underline-offset-4 hover:text-red-400 hover:underline" onClick={forgetMe}>
-            Forget me (delete my voice &amp; face)
-          </button>
         </div>
       )}
-
-      {step === "voice" && (
-        <>
-          <VoiceStep onDone={onVoice} />
-          <button className="text-sm text-zinc-500 underline-offset-4 hover:underline" onClick={() => setStep("selfie")}>
-            Skip — use the default voice
-          </button>
-        </>
-      )}
-
-      {step === "selfie" && <SelfieStep onDone={onSelfie} />}
-
-      {step === "thinking" && <p className="text-2xl text-zinc-300">The court is reading your file…</p>}
-
-      {step === "confirm" && (
-        <div className="flex w-full max-w-2xl flex-col items-center gap-6">
-          {facts.length > 0 && (
-            <div className="flex flex-wrap justify-center gap-2">
-              {facts.map((f) => (
-                <span key={String(f)} className="rounded-full bg-zinc-800 px-4 py-1 text-sm text-zinc-300">{f}</span>
-              ))}
-            </div>
-          )}
-          <label className="flex w-full flex-col gap-2 text-left">
-            <span className="text-sm uppercase tracking-widest text-amber-400">The question before the court</span>
-            <input
-              className="rounded-xl bg-zinc-900 px-4 py-4 text-xl text-white"
-              placeholder="Should I …?"
-              value={question}
-              autoFocus
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && toCourt()}
-            />
-          </label>
-          <HoldToTalk label="Hold to say your question" spacebar={false} onTranscript={setQuestion} />
-          <label className="flex items-center gap-2 text-sm text-zinc-400">
-            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-            Remember me on this device (saves your voice, face and profile)
-          </label>
-          <button
-            className="rounded-full bg-red-600 px-10 py-4 text-xl font-bold text-white hover:bg-red-500 disabled:opacity-40"
-            disabled={!question.trim()}
-            onClick={toCourt}
-          >
-            Take it to court
-          </button>
+      <Jury roster={[...yours, ...roster, ...stored]} signedInAs={signedInAs} onPick={pickJuror} onRemove={(e) => forgetFace(e.email)} leaning={aim} compact={!menu} />
+      {past.length > 0 && (
+        <div className={`seam-strip${pastOpen ? " open" : ""}`} aria-hidden={!pastOpen} inert={!pastOpen}>
+          <div className="grid grid-cols-2 md:grid-cols-4">
+            {past.slice(0, 4).map((t) => (
+              <a key={t.id} href={`/t/${t.id}`} className="flex flex-col gap-2.5 border-r border-[#2a2722] px-5 py-4 hover:bg-[#1f1b16]">
+                <span className="ct-speech text-sm">{t.question}</span>
+                <span className="ct-meter" aria-hidden="true"><i style={{ left: `${(t.value + 100) / 2}%` }} /></span>
+                <span className={`ct-kicker ${verdictSide(t.label) === "yes" ? "!text-[var(--c-yes)]" : verdictSide(t.label) === "no" ? "!text-[var(--c-no)]" : "!text-[var(--c-stone)]"}`}>
+                  {t.label} {t.value > 0 ? "+" : ""}{t.value}
+                </span>
+              </a>
+            ))}
+          </div>
         </div>
       )}
+      <div className="menu-ink" />
+      <div className="scanlines" />
     </main>
   );
 }
