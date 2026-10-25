@@ -299,7 +299,7 @@
   50%, 100% { transform: scaleX(-1); }
 }
 
-/* ===== MANGA-NOIR STAGE (from research/courtroom-manga-camera.html) ===== */
+/* ===== MANGA-NOIR STAGE (tuned in public/mockups/intro-crane.html) ===== */
 .manga-stage {
   position: relative;
   width: 960px;
@@ -308,24 +308,39 @@
   background: #000;
 }
 .manga-camera {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
   transition: transform 0.8s ease-out;
   transform-origin: center center;
 }
-.manga-bg {
+/* Depth planes of courtroom-bg-tall.png (scripts/make-intro-layers.py). At rest they
+   recombine into the original image; the intro moves them at different rates. */
+.manga-plane {
   position: absolute;
   inset: 0;
-  z-index: 0;
-  background: url('/assets/courtroom-bg.png') center center / cover no-repeat;
-  filter: grayscale(1) contrast(1.3) brightness(0.7);
+  transform-origin: 480.6px 259.2px; /* vanishing point (throne), see intro.ts VP */
 }
+.manga-plane-img {
+  position: absolute;
+  display: block;
+  max-width: none;
+  pointer-events: none;
+  user-select: none;
+  filter: saturate(0.3) contrast(1.25) brightness(0.68); /* desaturated noir */
+}
+/* Past the photo's left/right edges the far + mid planes hold reflected wall; fade it
+   into darkness (floor planes keep their synthesized carpet). The img is 1492 tall-px
+   wide and the photo spans px 300..1192 of it (scaled 0.978 → 293.5..1166.2). */
+.manga-plane[data-plane='far'] .manga-plane-img,
+.manga-plane[data-plane='mid'] .manga-plane-img {
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, transparent 176px, #000 303px, #000 1157px, transparent 1284px);
+  mask-image: linear-gradient(90deg, transparent 0, transparent 176px, #000 303px, #000 1157px, transparent 1284px);
+}
+/* Screen-space manga overlays (fixed to the frame, not the camera) */
 .manga-speedlines {
   position: absolute;
-  inset: -50%;
-  width: 200%;
-  height: 200%;
-  z-index: 1;
+  inset: 0;
+  z-index: 20;
   pointer-events: none;
   background: repeating-conic-gradient(
     from 0deg at 50% 45%,
@@ -336,7 +351,7 @@
 .manga-halftone {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 21;
   pointer-events: none;
   background-image: radial-gradient(circle, rgba(0, 0, 0, 0.15) 1px, transparent 1px);
   background-size: 4px 4px;
@@ -345,11 +360,26 @@
 .manga-ink {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 22;
   pointer-events: none;
   background:
     linear-gradient(0deg, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.2) 25%, transparent 45%),
     radial-gradient(ellipse 80% 80% at 50% 45%, transparent 40%, rgba(0, 0, 0, 0.6) 100%);
+}
+/* Intro zoom blur: radial speed lines from the vanishing point (opacity driven by JS) */
+.manga-zoomlines {
+  position: absolute;
+  inset: 0;
+  z-index: 23;
+  pointer-events: none;
+  opacity: 0;
+  background: repeating-conic-gradient(
+    from 0deg at var(--vpx, 50%) var(--vpy, 45%),
+    transparent 0deg 1.7deg, rgba(255, 255, 255, 0.55) 1.7deg 1.95deg,
+    transparent 1.95deg 3.1deg, rgba(255, 255, 255, 0.3) 3.1deg 3.25deg
+  );
+  -webkit-mask-image: radial-gradient(circle at var(--vpx, 50%) var(--vpy, 45%), transparent 0 14%, #000 60%);
+  mask-image: radial-gradient(circle at var(--vpx, 50%) var(--vpy, 45%), transparent 0 14%, #000 60%);
 }
 .manga-scanlines {
   position: absolute;

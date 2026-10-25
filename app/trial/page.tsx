@@ -94,6 +94,12 @@ export default function TrialPage() {
   const [typed, setTyped] = useState('');
   const [needTyping, setNeedTyping] = useState(false);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
+  // Crane-up intro: hold on the carpet while the trial loads (no line yet), play as soon as
+  // the first line is ready (so the hold lasts exactly the loading time), once per trial.
+  const [introFinished, setIntroFinished] = useState(false);
+  const introMode =
+    introFinished || s.phase === 'ask' || s.phase === 'done' ? null : s.current ? 'play' : 'hold';
+  const finishIntro = useCallback(() => setIntroFinished(true), []);
 
   // Track previous scene/phase for change detection
   const prevScene = useRef<Scene>(s.scene);
@@ -173,7 +179,7 @@ export default function TrialPage() {
   // -- Play current line via AudioEngine (with panning) --
   useEffect(() => {
     const line = s.current;
-    if (s.phase !== 'speaking' || !line) return;
+    if (s.phase !== 'speaking' || !line || introMode) return; // the first line waits for the intro
     if (line.speaker === 'user') {
       orch.lineEnded(line.id);
       return;
@@ -196,7 +202,7 @@ export default function TrialPage() {
     // No audio URL: use estimated duration as fallback timer
     const t = setTimeout(() => orch.lineEnded(line.id), line.durationMs ?? 3000);
     return () => clearTimeout(t);
-  }, [s.current, s.phase, orch]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [s.current, s.phase, orch, introMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // -- Gavel on topic score (single slam) --
   const scoredTopicCount = useRef(0);
@@ -286,7 +292,11 @@ export default function TrialPage() {
 
 
   // -- Expressions (sticky) + talking (independent), derived from the transcript --
-  const moods = useMemo(() => deriveMoods(s), [s]);
+  const moods = useMemo(() => {
+    const m = deriveMoods(s);
+    if (introMode) for (const who of ['prosecution', 'defense', 'judge'] as const) m[who] = { ...m[who], talking: false };
+    return m;
+  }, [s, introMode]);
 
   // -- Textbox content --
   const box =
@@ -357,69 +367,75 @@ export default function TrialPage() {
         <Courtroom
           scene={s.scene}
           moods={moods}
-          speakerName={box?.name}
+          speakerName={introMode ? undefined : box?.name}
           speakerColor={box?.color}
-          text={box?.text}
+          text={introMode ? undefined : box?.text}
           objection={s.phase === 'listening'}
-          status={s.phase === 'preparing' || s.phase === 'thinking' ? s.status : undefined}
-          controls={controls}
+          status={introMode === 'play' ? undefined : s.phase === 'preparing' || s.phase === 'thinking' ? s.status : undefined}
+          controls={introMode ? undefined : controls}
           faceSrc={faceSrc}
+          intro={introMode}
+          onIntroDone={finishIntro}
         />
       </div>
 
-      {/* Top-left: question + topic/cycle */}
-      <header className="absolute left-4 top-4 z-50 max-w-md rounded-lg bg-black/70 px-4 py-2">
-        <h1 className="text-sm font-black tracking-tight">Court of Future Selves</h1>
-        <p className="text-xs text-zinc-400">
-          {s.question ? `"${s.question}"` : 'Ask a yes/no question to begin'}
-        </p>
-        {active && (
-          <p className="mt-1 text-xs text-amber-500">
-            {active.title} · cycle {s.cycle}/{s.totalCycles}
+      {/* Top-left: question + topic/cycle (hidden through the intro) */}
+      {!introMode && (
+        <header className="absolute left-4 top-4 z-50 max-w-md rounded-lg bg-black/70 px-4 py-2">
+          <h1 className="text-sm font-black tracking-tight">Court of Future Selves</h1>
+          <p className="text-xs text-zinc-400">
+            {s.question ? `"${s.question}"` : 'Ask a yes/no question to begin'}
           </p>
-        )}
-      </header>
+          {active && (
+            <p className="mt-1 text-xs text-amber-500">
+              {active.title} · cycle {s.cycle}/{s.totalCycles}
+            </p>
+          )}
+        </header>
+      )}
 
-      {/* Top-right: spectrum + agenda */}
-      <aside className="absolute right-4 top-4 z-50 w-72 rounded-lg bg-black/70 p-3">
-        <div className="relative h-2 rounded-full bg-gradient-to-r from-blue-600 via-zinc-600 to-orange-600">
-          <div className="absolute -top-1 h-4 w-1 rounded bg-white transition-all" style={{ left: pos }} />
-        </div>
-        <p className="mt-1 text-center text-xs font-bold">
-          {s.spectrum.value > 0 ? '+' : ''}
-          {s.spectrum.value} · {s.spectrum.label}
-        </p>
-        {s.agenda.length > 0 && (
-          <ul className="mt-2 flex flex-col gap-1 text-xs">
-            {s.agenda.map((t) => (
-              <li
-                key={t.id}
-                className={`flex justify-between gap-2 ${
-                  t.status === 'removed'
-                    ? 'text-zinc-600 line-through'
-                    : t.id === s.activeTopicId
-                      ? 'font-bold text-white'
-                      : 'text-zinc-400'
-                }`}
-              >
-                <span>
-                  {t.title}
-                  {t.added_by === 'user' ? ' (yours)' : ''}
-                </span>
-                <span className="shrink-0">
-                  {Math.round(t.importance * 100)}%
-                  {t.score ? ` · ${t.score.t > 0 ? '+' : ''}${t.score.t.toFixed(2)}` : ''}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {s.fallbacks.length > 0 && (
-          <p className="mt-2 text-[10px] text-zinc-500">
-            Mock data: {[...new Set(s.fallbacks)].join(', ')}
+      {/* Top-right: spectrum + agenda (hidden through the intro) */}
+      {!introMode && (
+        <aside className="absolute right-4 top-4 z-50 w-72 rounded-lg bg-black/70 p-3">
+          <div className="relative h-2 rounded-full bg-gradient-to-r from-blue-600 via-zinc-600 to-orange-600">
+            <div className="absolute -top-1 h-4 w-1 rounded bg-white transition-all" style={{ left: pos }} />
+          </div>
+          <p className="mt-1 text-center text-xs font-bold">
+            {s.spectrum.value > 0 ? '+' : ''}
+            {s.spectrum.value} · {s.spectrum.label}
           </p>
-        )}
-      </aside>
+          {s.agenda.length > 0 && (
+            <ul className="mt-2 flex flex-col gap-1 text-xs">
+              {s.agenda.map((t) => (
+                <li
+                  key={t.id}
+                  className={`flex justify-between gap-2 ${
+                    t.status === 'removed'
+                      ? 'text-zinc-600 line-through'
+                      : t.id === s.activeTopicId
+                        ? 'font-bold text-white'
+                        : 'text-zinc-400'
+                  }`}
+                >
+                  <span>
+                    {t.title}
+                    {t.added_by === 'user' ? ' (yours)' : ''}
+                  </span>
+                  <span className="shrink-0">
+                    {Math.round(t.importance * 100)}%
+                    {t.score ? ` · ${t.score.t > 0 ? '+' : ''}${t.score.t.toFixed(2)}` : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {s.fallbacks.length > 0 && (
+            <p className="mt-2 text-[10px] text-zinc-500">
+              Mock data: {[...new Set(s.fallbacks)].join(', ')}
+            </p>
+          )}
+        </aside>
+      )}
 
       {/* Verdict + transcript overlay */}
       {s.result && (

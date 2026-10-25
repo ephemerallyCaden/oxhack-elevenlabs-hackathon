@@ -1,21 +1,28 @@
 'use client';
-// Manga-noir courtroom scene (960×540). Background, camera, characters + expressions.
-// Camera transforms precomputed with the validated formula from
+// Manga-noir courtroom scene (960×540). Background depth planes, camera, characters + expressions,
+// and the crane-up intro. Camera transforms precomputed with the validated formula from
 // research/courtroom-manga-camera.html against the marker positions below.
+import { useRef } from 'react';
 import './expressions.css';
 import type { Scene } from '@/types';
 import Character, { type Facing } from './Character';
 import Stage from './Stage';
 import TextBox from './TextBox';
 import type { CharacterMood, CourtActor } from './expressions';
+import { PLANES } from './intro';
+import { useIntroCrane, type IntroMode } from './useIntroCrane';
 
 /* Character torso centers — the #ff0000 markers measured in courtroom-bg.png,
-   adjusted for `background-size: cover` crop (image 5:3 → container 16:9). */
+   adjusted for `background-size: cover` crop (image 5:3 → container 16:9). The tall
+   background's planes are aligned to the same framing, so these still hold. */
 const MARKER: Record<CourtActor, { x: string; y: string }> = {
   prosecution: { x: '23.3%', y: '78%' },
   defense: { x: '76.5%', y: '78%' },
   judge: { x: '50%', y: '62.5%' },
 };
+
+/* Characters ride the plane they stand on, so parallax never slides them off their desks. */
+const RIDES: Record<string, CourtActor[]> = { far: ['judge'], mid: ['prosecution', 'defense'] };
 
 /* Precomputed from face centers at the markers:
    prosecution face (223.7, 343.7), defense (734.4, 343.7), judge (480, 283).
@@ -47,6 +54,8 @@ export default function Courtroom({
   status,
   controls,
   faceSrc,
+  intro = null,
+  onIntroDone,
 }: {
   scene: Scene;
   moods: Record<CourtActor, CharacterMood>;
@@ -59,24 +68,47 @@ export default function Courtroom({
   faceSrc?: string;
   /** Rendered inside the textbox (right side) so it scales with the stage. */
   controls?: React.ReactNode;
+  /** Crane-up intro: 'hold' = still on the carpet (loading), 'play' = run it. */
+  intro?: IntroMode;
+  onIntroDone?: () => void;
 }) {
+  const stage = useRef<HTMLDivElement>(null);
+  const camera = useRef<HTMLDivElement>(null);
+  const shaker = useRef<HTMLDivElement>(null);
+  const ghosts = useRef<HTMLDivElement>(null);
+  const lines = useRef<HTMLDivElement>(null);
+  useIntroCrane({ stage, camera, shaker, ghosts, lines }, intro, onIntroDone);
+  const facing = (role: CourtActor) => (intro ? 'front' : facingFor(role, scene));
+
   return (
     <Stage>
-      <div className="manga-stage">
-        <div className="manga-camera" style={{ transform: CAMERA[scene] }}>
-          <div className="manga-bg" />
+      <div className="manga-stage" ref={stage}>
+        <div className="absolute inset-0" ref={shaker}>
+          <div className="absolute inset-0">
+            {/* While the intro runs it owns the camera transform (useIntroCrane). */}
+            <div className="manga-camera" ref={camera} data-camera style={intro ? undefined : { transform: CAMERA[scene] }}>
+              {PLANES.map((p) => (
+                <div key={p.name} className="manga-plane" data-plane={p.name} data-weight={p.weight}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img className="manga-plane-img" src={p.file} alt="" style={p.style} />
+                  {RIDES[p.name]?.map((role) => (
+                    <div
+                      key={role}
+                      className="absolute z-10"
+                      style={{ left: MARKER[role].x, top: MARKER[role].y, transform: 'translate(-50%, -50%)' }}
+                    >
+                      <Character role={role} mood={moods[role]} facing={facing(role)} faceSrc={faceSrc} />
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div className="absolute inset-0" ref={ghosts} />
+          </div>
           <div className="manga-speedlines" />
+          <div className="manga-zoomlines" ref={lines} />
           <div className="manga-halftone" />
           <div className="manga-ink" />
-          {(['prosecution', 'judge', 'defense'] as const).map((role) => (
-            <div
-              key={role}
-              className="absolute z-10"
-              style={{ left: MARKER[role].x, top: MARKER[role].y, transform: 'translate(-50%, -50%)' }}
-            >
-              <Character role={role} mood={moods[role]} facing={facingFor(role, scene)} faceSrc={faceSrc} />
-            </div>
-          ))}
         </div>
 
         {/* Viewport-fixed overlays (not affected by camera) */}
