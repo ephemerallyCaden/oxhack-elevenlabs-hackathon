@@ -30,7 +30,7 @@ describe('askGemini (model pool caller)', () => {
     expect(groq).toHaveBeenCalledTimes(2);
   });
 
-  it('gives up (so the caller falls back) after a second malformed answer', async () => {
+  it('gives up (so the caller falls back) once both retries also answered malformed', async () => {
     const { askGroq } = await import('./groq');
     const groq = vi.mocked(askGroq);
     groq.mockReset();
@@ -38,7 +38,7 @@ describe('askGemini (model pool caller)', () => {
     const { askGemini } = await import('./gemini');
 
     await expect(askGemini('system', 'content', schema, new AbortController().signal)).rejects.toBeInstanceOf(z.ZodError);
-    expect(groq).toHaveBeenCalledTimes(2);
+    expect(groq).toHaveBeenCalledTimes(3); // the answer + 2 retries
   });
 
   it('retries broken JSON (not just a schema mismatch) on the next model', async () => {
@@ -54,7 +54,7 @@ describe('askGemini (model pool caller)', () => {
     expect(models[1]).not.toBe(models[0]); // the model that answered badly sits out the retry
   });
 
-  it('a second bad answer goes to the mock, even if its text looks like a quota error', async () => {
+  it('bad answers go to the mock after the retries, even if their text looks like a quota error', async () => {
     const { askGroq } = await import('./groq');
     const groq = vi.mocked(askGroq);
     groq.mockReset();
@@ -62,7 +62,7 @@ describe('askGemini (model pool caller)', () => {
     const { askGemini } = await import('./gemini');
 
     await expect(askGemini('system', 'content', schema, new AbortController().signal)).rejects.toBeInstanceOf(z.ZodError);
-    expect(groq).toHaveBeenCalledTimes(2); // no third call from mistaking it for a quota hold
+    expect(groq).toHaveBeenCalledTimes(3); // the answer + 2 retries; no extra call from mistaking it for a quota hold
   });
 
   it('does not retry once the request is aborted', async () => {

@@ -60,6 +60,8 @@ async function ask<S extends z.ZodType, R>(
   priority: Priority = 'interactive',
   /** The caller's request signal: a client that gave up (e.g. a stopped trial) frees the model slot too. */
   signal?: AbortSignal,
+  /** Fixes a free model's known near-misses in the raw JSON before validation (Claude's output is enforced). */
+  repair?: (raw: unknown) => unknown,
 ): Promise<{ value: R; fallback: boolean }> {
   const llm = debateLlm();
   if (llm === 'mock') return { value: fallback(), fallback: true };
@@ -67,7 +69,9 @@ async function ask<S extends z.ZodType, R>(
   const system = task === P.PROFILE_TASK ? task : `${P.COURT}\n\n${task}`;
   if (llm === 'gemini') {
     const deadline = Date.now() + ms;
-    return withFallback(async (s) => build(await askGemini(system, content, schema, s, priority, deadline)), fallback, ms, label, signal);
+    // `build` doubles as the check: an answer it can't use (e.g. an empty line) is retried, not mocked.
+    const check = (out: z.infer<S>) => void build(out);
+    return withFallback(async (s) => build(await askGemini(system, content, schema, s, priority, deadline, { repair, check })), fallback, ms, label, signal);
   }
   return withFallback(
     async (s) => {
@@ -192,6 +196,51 @@ const TopicSchema = z.object({
   ruling: Spoken,
 });
 
+const EMPTY = { text: '', tts: '' };
+const str = (v: unknown) => (typeof v === 'string' ? v : '');
+/** A spoken pair from whatever the model sent: a bare string, a half-filled object, or nothing. */
+function spoken(v: unknown): { text: string; tts: string } {
+  if (typeof v === 'string') return { text: v, tts: v };
+  if (!v || typeof v !== 'object') return { ...EMPTY };
+  const o = v as { text?: unknown; tts?: unknown };
+  const text = str(o.text) || str(o.tts);
+  return { text, tts: str(o.tts) || text };
+}
+
+/**
+ * Free models' near-misses on TopicSchema, fixed before validation instead of throwing the whole exchange
+ * away: a line sent as a bare string (seen live: every other line), a missing optional part (cut-in,
+ * resume, punch, cites), a missing reasoning / deciding argument / confidence, a ruling sent as a string.
+ * Speakers don't need fixing: the code takes them from the turn plan. What it can't invent (the score `t`,
+ * a line's words) stays missing, so validation still fails and the call is retried.
+ */
+export function repairTopic(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const o = { ...(raw as Record<string, unknown>) };
+  if (Array.isArray(o.lines))
+    o.lines = o.lines.map((l) => {
+      if (typeof l === 'string') return { text: l, tts: l, cites: [], cut_in: { ...EMPTY }, resume: { ...EMPTY }, punch: { ...EMPTY } };
+      if (!l || typeof l !== 'object') return l;
+      const line = l as Record<string, unknown>;
+      const said = spoken(line);
+      return {
+        ...line,
+        text: said.text,
+        tts: said.tts,
+        cites: Array.isArray(line.cites) ? line.cites.filter((c) => typeof c === 'string') : [],
+        cut_in: spoken(line.cut_in),
+        resume: spoken(line.resume),
+        punch: spoken(line.punch),
+      };
+    });
+  if (!Array.isArray(o.ledger)) o.ledger = [];
+  if (typeof o.reasoning !== 'string') o.reasoning = '';
+  if (typeof o.deciding_argument !== 'string') o.deciding_argument = '';
+  if (typeof o.confidence !== 'number') o.confidence = 0.5;
+  if ('ruling' in o) o.ruling = spoken(o.ruling);
+  return o;
+}
+
 export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promise<TopicResponse> {
   const valid = new Set(req.cards.map((c) => c.id));
   const t = req.urgent ? TIMEOUTS.topicUrgent : TIMEOUTS.topic;
@@ -287,6 +336,7 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
     () => mockTopic(req),
     req.urgent ? 'interactive' : 'background',
     signal,
+    repairTopic,
   );
   return value;
 }

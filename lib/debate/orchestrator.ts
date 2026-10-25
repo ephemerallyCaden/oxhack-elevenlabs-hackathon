@@ -111,6 +111,8 @@ export class TrialOrchestrator {
   private listeners = new Set<() => void>();
 
   private intros: Record<string, Line> = {};
+  /** The debate is really being written (setup wasn't the mock): a topic that falls back now is a failure, not offline mode. */
+  private live = false;
   private quickResearch = new Map<string, Promise<void>>();
   /** Topics written ahead of time (while the previous topic plays). */
   private prewritten = new Map<string, Promise<TopicResponse>>();
@@ -309,6 +311,7 @@ export class TrialOrchestrator {
     // One call for the whole cut-scene: agenda, Judge lines and both future selves.
     const setup = await this.call<SetupResponse>('/api/trial/setup', { question, profile }, () => mockSetup({ question, profile }), TIMEOUTS.setup.client);
     this.intros = setup.intros;
+    this.live = !setup.fallback;
     this.set({ agenda: setup.topics, personas: setup.personas });
     this.research(setup.topics);
     // Write the first topic while the Judge's opening plays.
@@ -446,6 +449,11 @@ export class TrialOrchestrator {
       'The court prepares the exchange…',
     );
     this.prewritten.delete(topicId);
+    // A live court never voices the mock exchange: one more (urgent) try, then the topic is set aside.
+    if (res.fallback && this.live) {
+      res = await this.waitFor(this.writeTopic(topicId, this.basePlan(), { urgent: true, cutInAllowed: true }), 'The court prepares the exchange…');
+      if (res.fallback) return this.setAside(topicId);
+    }
     this.queueLedger(res);
     let queue = res.lines;
 
@@ -469,16 +477,32 @@ export class TrialOrchestrator {
       total++;
       this.set({ totalCycles: total });
       this.discard([...queue.slice(i + 1), res.ruling]);
+      const before = res;
       res = await this.waitFor(
         this.writeTopic(topicId, planAfterInterrupt(side, line.cycle ?? 1, total), { urgent: true, userPoint: text, cutInAllowed: !cutUsed }),
         'The court considers your objection…',
         'witness',
       );
+      // The rewrite failed in a live court: don't answer the user with mock lines. Note their point and
+      // close the topic on the ruling it already had.
+      if (res.fallback && this.live) {
+        await this.sayHandled({ id: uid('line'), speaker: 'judge', kind: 'agenda_change', topic_id: topicId, text: 'The court notes your point.', cites: [] });
+        return before;
+      }
       this.queueLedger(res);
       queue = res.lines;
       i = -1;
     }
     return res;
+  }
+
+  /** A topic the court couldn't get written (live, after retries): the Judge says so and drops it from the agenda. */
+  private async setAside(topicId: string): Promise<null> {
+    const title = this.topic(topicId)?.title.toLowerCase() ?? 'this question';
+    const agenda = removeTopic(this.state.agenda, topicId);
+    this.set({ agenda, spectrum: computeSpectrum(agenda) });
+    await this.sayHandled({ id: uid('line'), speaker: 'judge', kind: 'agenda_change', topic_id: topicId, text: `The court has heard too little on ${title} to rule on it. We set it aside.`, cites: [] });
+    return null;
   }
 
   /** Await a call; show a status only if it isn't already done (pre-written topics usually are). */

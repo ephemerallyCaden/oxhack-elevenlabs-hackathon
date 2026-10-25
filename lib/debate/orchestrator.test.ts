@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { UserProfile } from '@/types';
 import { planAfterInterrupt, TrialOrchestrator, type TrialState } from './orchestrator';
 import { computeSpectrum } from './spectrum';
-import { mockSetup } from './mock';
+import { mockSetup, mockTopic } from './mock';
 
 // Offline: every API call fails, so the whole trial runs on the decision-aware mocks.
 vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
@@ -391,7 +391,12 @@ describe('fixes from the PR #79 review', () => {
     };
     vi.stubGlobal('fetch', (url: string, init?: { body?: string }) => {
       if (String(url) === '/api/trial/setup') return Promise.resolve(new Response(JSON.stringify(setup), { headers: { 'Content-Type': 'application/json' } }));
-      if (String(url) === '/api/trial/topic') events.push(`call:${JSON.parse(init?.body ?? '{}').topic?.id}`);
+      if (String(url) === '/api/trial/topic') {
+        const req = JSON.parse(init?.body ?? '{}');
+        events.push(`call:${req.topic?.id}`);
+        // A live court's topics are written (a live court never plays a failed topic's mock lines).
+        return Promise.resolve(new Response(JSON.stringify({ ...mockTopic(req), fallback: false }), { headers: { 'Content-Type': 'application/json' } }));
+      }
       return Promise.reject(new Error('offline'));
     });
     try {
