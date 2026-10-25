@@ -265,6 +265,17 @@ describe('attachPunch', () => {
     }
   });
 
+  it('number words the digits do not imply are the punch’s, not the setup’s: the run-on is cut', () => {
+    for (const [text, tts, punch, clip] of [
+      ['It costs $5', '[sad] It costs five million dollars', 'million dollars more.', '[sad] It costs five'],
+      ['You earn £12', '[sad] You earn twelve thousand pounds', 'thousand pounds a year.', '[sad] You earn twelve'],
+    ]) {
+      const l = line('defense', text, { tts });
+      expect(attachPunch(l, { text: punch, tts: '' }, new Set())).toBe(true);
+      expect(l.tts).toBe(clip);
+    }
+  });
+
   it('"I am" before a number is not part of it: the spoken number stays in the clip', () => {
     const l = line('defense', 'I am 30', { tts: '[sad] I am thirty' });
     attachPunch(l, { text: 'Thirty and broke.', tts: '' }, new Set());

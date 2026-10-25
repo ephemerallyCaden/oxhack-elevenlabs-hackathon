@@ -161,7 +161,9 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
       // The overlap starts with the number's unit ("…five | million dollars"): it belongs to the setup.
       const ov = clip.slice(clip.length - k);
       const j = ov.findIndex((w) => units.some((u) => u.test(w)));
-      if (j >= 0 && ov.slice(0, j).every((w) => NUMBERISH.test(w))) return false;
+      // Number words before the unit only belong to the setup if its digits say them ("$5m" → million).
+      const scale = /\dk$/i.test(bare) ? /^thousand$/ : /\dm$/i.test(bare) ? /^million$/ : /\d(?:bn|b)$/i.test(bare) ? /^billion$/ : null;
+      if (j >= 0 && ov.slice(0, j).every((w) => scale?.test(w))) return false;
       // "am"/"pm" only count as part of the number right after one ("nine am", not "I am").
       if (/^(?:am|pm)$/.test(spokenPrev) && !NUMBERISH.test(clip[clip.length - k - 2] ?? '')) return prev === setup[setup.length - 1];
       return prev === setup[setup.length - 1] || NUMBERISH.test(spokenPrev);
