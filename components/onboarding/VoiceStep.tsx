@@ -29,6 +29,22 @@ export function sessionVoiceId(): string | undefined {
 
 type Phase = "intro" | "recording" | "processing" | "preview";
 
+/** A gap in the script. Only an emoji, so there's no "[your name]" for people to read out by mistake. */
+function Blank({ emoji, label }: { emoji: string; label: string }) {
+  return (
+    <span
+      role="img"
+      aria-label={`(say ${label})`}
+      className="mx-0.5 inline-block min-w-20 border-b-2 border-dashed border-[var(--c-brass)] bg-[var(--c-wood)] px-2 text-center"
+    >
+      {emoji}
+    </span>
+  );
+}
+
+const DELETE_CLONE = (voiceId: string) =>
+  fetch("/api/voice/clone/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ voiceId }) }).catch(() => {});
+
 // B8: the user reads the onboarding script aloud once. That recording is cloned (their future selves'
 // voice) and transcribed (their profile) in parallel. Ends with a line in their cloned voice.
 export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => void }) {
@@ -96,7 +112,8 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
     setPhase("recording");
   }
 
-  function stop() {
+  /** Ends the recording: keep → clone + transcribe it; otherwise throw it away and start over. */
+  function stop(keep = true) {
     const r = rec.current;
     if (!r) return;
     rec.current = null;
@@ -104,6 +121,13 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
     r.ctx.close();
     r.stream.getTracks().forEach((t) => t.stop());
     setLevel(0);
+    if (!keep) {
+      r.recorder.onstop = null; // nothing is sent anywhere
+      r.recorder.stop();
+      setSeconds(0);
+      setPhase("intro");
+      return;
+    }
     setPhase("processing");
     setStatus("Cloning your voice and listening to your answers…");
     r.recorder.stop(); // → onstop → process
@@ -154,6 +178,22 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
     setPhase("preview");
   }
 
+  /** Not happy with the clone: delete it (frees the voice slot) and record again. */
+  function redo() {
+    preview.current?.pause();
+    preview.current = null;
+    if (result?.voiceId) void DELETE_CLONE(result.voiceId);
+    try {
+      sessionStorage.removeItem(SESSION_KEY);
+    } catch {
+      // private mode: nothing was stored
+    }
+    setResult(null);
+    setStatus("");
+    setSeconds(0);
+    setPhase("intro");
+  }
+
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -178,11 +218,15 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
         <div className="ct-panel ct-speech p-6 !text-lg">
           <p className="ct-kicker mb-3 !leading-snug">Read this out loud, in your normal voice</p>
           <p>
-            “My name is <b>[your name]</b>. I’m <b>[your age]</b> years old and I live in <b>[your city]</b>. I work as a{" "}
-            <b>[your job]</b>, and I’d say I’m the kind of person who <b>[values freedom / plays it safe / chases the big win /
-            follows their gut]</b>. If I had to describe my life in one sentence, it would be…”
+            “My name is <Blank emoji="👤" label="your name" />. I’m <Blank emoji="🎂" label="your age" /> years old and I live in{" "}
+            <Blank emoji="🏙️" label="your city" />. I work as a <Blank emoji="💼" label="your job" />, and I’d say I’m the kind of
+            person who <Blank emoji="🧭" label="what kind of person you are" />.”
           </p>
-          <p className="ct-small mt-4">Then keep talking: what decision are you stuck on? What’s the best that could happen? The worst?</p>
+          <p className="ct-small mt-3" aria-hidden>
+            Fill the gaps with your own answers: 👤 name · 🎂 age · 🏙️ city · 💼 job · 🧭 values freedom, plays it safe, chases
+            the big win, or follows their gut
+          </p>
+          <p className="ct-small mt-4">Then talk about your life, and keep going: what decision are you stuck on? What’s the best that could happen? The worst?</p>
         </div>
       )}
 
@@ -200,13 +244,14 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
           <p className="ct-body" style={{ opacity: 0.6 + level * 0.4 }}>
             {seconds}s {seconds < MIN_SECONDS ? `— keep going, ${MIN_SECONDS - seconds}s more` : "— great, stop whenever you’re ready"}
           </p>
-          <button
-            className="ct-primary"
-            disabled={seconds < MIN_SECONDS}
-            onClick={stop}
-          >
-            Done
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button className="ct-ghost" onClick={() => stop(false)}>
+              ↺ Start over
+            </button>
+            <button className="ct-primary" disabled={seconds < MIN_SECONDS} onClick={() => stop()}>
+              Done
+            </button>
+          </div>
         </>
       )}
 
@@ -220,6 +265,7 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
       {phase === "preview" && result && (
         <div className="flex gap-3">
           <button className="ct-ghost" onClick={() => preview.current?.play()}>↻ Hear again</button>
+          <button className="ct-ghost" onClick={redo}>↺ Redo</button>
           <button className="ct-primary" onClick={() => onDone(result)}>Continue</button>
         </div>
       )}

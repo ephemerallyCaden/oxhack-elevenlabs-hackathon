@@ -6,8 +6,7 @@
 import type { RosterEntry } from '@/lib/onboarding/session';
 
 const DEFAULT_HEAD = '/assets/heads/head-front.webp';
-const BACK = 7; // seats per pew
-const FRONT = 8;
+const PEWS = [7, 8]; // seats per pew, back to front
 
 // Small per-seat variety so the silhouettes don't read as one stamp: [dx px, dy px, scale, tilt deg].
 const JITTER: [number, number, number, number][] = [
@@ -27,6 +26,7 @@ export default function Jury({
   onRemove,
   leaning = false,
   compact = false,
+  pews = PEWS,
 }: {
   roster: RosterEntry[];
   signedInAs?: string;
@@ -38,23 +38,25 @@ export default function Jury({
   leaning?: boolean;
   /** Onboarding steps: just the front pew, lower. */
   compact?: boolean;
+  /** Seats per pew, back to front (the title page seats a whole gallery). */
+  pews?: number[];
 }) {
-  // Kept faces take the middle of the front pew first, then the back pew.
-  const front: Seat[] = Array.from({ length: FRONT }, () => ({}));
-  const back: Seat[] = Array.from({ length: BACK }, () => ({}));
+  // Kept faces take the middle of the front pew first, then the middle of each pew behind it.
+  const rows: Seat[][] = (compact ? pews.slice(-1) : pews).map((n) => Array.from({ length: n }, () => ({})));
   const order = (n: number) => Array.from({ length: n }, (_, i) => i).sort((a, b) => Math.abs(a - (n - 1) / 2) - Math.abs(b - (n - 1) / 2));
-  const slots = [...order(FRONT).map((i) => front[i]), ...order(BACK).map((i) => back[i])];
+  const slots = [...rows].reverse().flatMap((seats) => order(seats.length).map((i) => seats[i]));
   roster.slice(0, slots.length).forEach((entry, i) => {
     slots[i].entry = entry;
     slots[i].signedIn = entry.email === signedInAs;
   });
 
-  const pew = (seats: Seat[], row: 'back' | 'front') => (
-    <div className={`jury-pew jury-${row}`}>
+  // `depth`: 0 = the front pew, 1 = the pew behind it, …
+  const pew = (seats: Seat[], depth: number) => (
+    <div key={depth} className={`jury-pew ${depth === 0 ? 'jury-front' : 'jury-back'}`} style={{ '--depth': depth, zIndex: rows.length - depth } as React.CSSProperties}>
       <div className="jury-heads">
         {seats.map((s, i) => {
-          const [dx, dy, k, rot] = JITTER[(i + (row === 'back' ? 4 : 0)) % JITTER.length];
-          const style = { '--dx': `${dx}px`, '--dy': `${dy}px`, '--k': k, '--rot': `${rot}deg`, '--delay': `${-(i * 0.37 + (row === 'back' ? 0.2 : 0))}s` } as React.CSSProperties;
+          const [dx, dy, k, rot] = JITTER[(i + depth * 4) % JITTER.length];
+          const style = { '--dx': `${dx}px`, '--dy': `${dy}px`, '--k': k, '--rot': `${rot}deg`, '--delay': `${-(i * 0.37 + depth * 0.2)}s` } as React.CSSProperties;
           const name = s.entry && (plate(s.entry) || 'a juror');
           if (!s.entry) return <span key={i} className="juror empty" style={style} aria-hidden="true"><img src={DEFAULT_HEAD} alt="" /></span>;
           const face = <img src={s.entry.face ?? DEFAULT_HEAD} alt="" />;
@@ -85,9 +87,8 @@ export default function Jury({
   );
 
   return (
-    <div className={`jury${leaning ? ' leaning' : ''}${compact ? ' compact' : ''}`}>
-      {!compact && pew(back, 'back')}
-      {pew(front, 'front')}
+    <div className={`jury${leaning ? ' leaning' : ''}${compact ? ' compact' : ''}${rows.length > 2 ? ' gallery' : ''}`}>
+      {rows.map((seats, r) => pew(seats, rows.length - 1 - r))}
     </div>
   );
 }
