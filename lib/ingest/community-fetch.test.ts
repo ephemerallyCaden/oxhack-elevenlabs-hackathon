@@ -83,6 +83,26 @@ it("throttles failed identical collections for a minute and retries after expiry
   expect(fetchImpl).toHaveBeenCalledTimes(3);
 });
 
+it("applies API backoff before the next call of another already-running query", async () => {
+  let release!: (response: Response) => void;
+  const delayed = new Promise<Response>(resolve => { release = resolve; });
+  const fetchImpl = vi.fn<typeof fetch>(async input => {
+    const url = new URL(String(input));
+    if (url.searchParams.get("site") === "academia") return delayed;
+    return Response.json({ items: [], backoff: 120 });
+  });
+  const fetcher = createCommunityFetcher({ env: { RESEARCH_COMMUNITY_SOURCES: "stackexchange" }, fetchImpl });
+  const signal = new AbortController().signal;
+  const pending = fetcher.collect({ id: "stackexchange", query: "gap year" }, signal);
+  await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+  await fetcher.collect({ id: "stackexchange", query: "moving abroad" }, signal);
+  release(Response.json({ items: [{ question_id: 42, link: "https://academia.stackexchange.com/questions/42/gap-year", title: "Gap year", body: "A gap year can change your graduation plans." }] }));
+  const result = await pending;
+  expect(result.records).toHaveLength(1);
+  expect(result.warnings.join(" ")).toContain("replies could not be retrieved");
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+});
+
 it.each(["search", "answers"])("retains collected evidence when %s requests backoff and suppresses subsequent calls", async stage => {
   const quote = "My relocation costs exceeded the savings I had set aside for the move.";
   const fetchImpl = vi.fn<typeof fetch>(async input => new URL(String(input)).pathname.endsWith("search/advanced")

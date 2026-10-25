@@ -102,7 +102,12 @@ export function createCommunityFetcher(options: Options = {}) {
           ...(error instanceof CommunityHttpError && error.retryAt ? { retryAt: error.retryAt } : {}),
           warnings: ["Community source collection failed or exceeded its budget."] };
       }
-      if (result.retryAt && Number.isFinite(Date.parse(result.retryAt))) sourceCooldown.set(adapter.id, Math.min(now() + 86400000, Date.parse(result.retryAt)));
+      if (result.retryAt && Number.isFinite(Date.parse(result.retryAt))) {
+        const until = Math.min(now() + 86400000, Date.parse(result.retryAt));
+        sourceCooldown.set(adapter.id, Math.max(sourceCooldown.get(adapter.id) ?? 0, until));
+        // Already-running jobs also check this shared map before their next HTTP call.
+        for (const host of adapter.hosts) hostCooldown.set(host, Math.max(hostCooldown.get(host) ?? 0, until));
+      }
       if (result.status === "live") boundedSet(cache, key, { until: now() + 600000, report: structuredClone(result) });
       else boundedSet(retry, key, { until: Math.max(now() + 60000, sourceCooldown.get(adapter.id) ?? 0), report: structuredClone(result) });
       return result;
