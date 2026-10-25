@@ -55,11 +55,20 @@ export const sway = (t: number) => Math.sign(t) * Math.abs(t) ** 0.55;
 /** How hard the bar swings: the weighted average is multiplied by this (then capped at ±100), so a lean reads as one. */
 export const BAR_GAIN = 1.8;
 
-/** Importance-weighted average of SCORED, non-removed topics, × BAR_GAIN × 100, capped. 0 before any topic is scored. */
+/**
+ * A decided topic (score ≠ 0) always counts for at least this much of the bar (0.25 = 25 points), so a
+ * near-even ruling still moves it visibly towards the side that won. Only an exact 0 stays neutral.
+ */
+export const MIN_SWING = 0.25;
+
+/** One topic's push on the bar: its score × BAR_GAIN, but at least MIN_SWING towards the side it favours. */
+const push = (t: number) => (t === 0 ? 0 : Math.sign(t) * Math.max(Math.abs(BAR_GAIN * t), MIN_SWING));
+
+/** Importance-weighted average of SCORED, non-removed topics' pushes × 100, capped. 0 before any topic is scored. */
 export function computeSpectrum(topics: Topic[]): Spectrum {
   const scored = topics.filter((t) => live(t) && t.score);
   const w = scored.reduce((s, t) => s + t.importance, 0);
-  const raw = w === 0 ? 0 : (BAR_GAIN * scored.reduce((s, t) => s + t.importance * t.score!.t, 0)) / w;
+  const raw = w === 0 ? 0 : scored.reduce((s, t) => s + t.importance * push(t.score!.t), 0) / w;
   const value = Math.round(Math.max(-1, Math.min(1, raw)) * 100);
   return { value, label: spectrumLabel(value) };
 }
