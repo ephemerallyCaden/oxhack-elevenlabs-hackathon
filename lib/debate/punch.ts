@@ -154,7 +154,10 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
     const ov = all.slice(-k);
     // A number said in several words ("twenty | thirty", "two thousand | eight"): the next number word is still it.
     // (Scale words — "five | million" — follow the digits' suffix rule below instead.)
-    if (NUMBER_WORD(said) && NUMBER_WORD(ov[0] ?? '') && !/^(?:hundred|thousand|million|billion|trillion)$/.test(ov[0])) return true;
+    // Only while the clip ends inside the number: no pause after `said`, and nothing but number words after it.
+    const saidRaw = (tokensOf(tts).filter((t) => norm(t)).at(-k - 1) ?? '').replace(/\[[^\]]*\]/g, '');
+    if (!/[.!?,;:…—-]["”’')»]*$/.test(saidRaw) && ov.every(NUMBER_WORD) && NUMBER_WORD(said) && !/^(?:hundred|thousand|million|billion|trillion)$/.test(ov[0] ?? ''))
+      return true;
     const j = ov.findIndex((w) => units.some((u) => u.test(w)));
     // Number words before the unit only belong to the setup if its digits say them ("$5m" → million).
     return j >= 0 ? ov.slice(0, j).every((w) => scale?.test(w)) : !!scale?.test(ov[0] ?? '');

@@ -331,6 +331,20 @@ describe('attachPunch', () => {
     }
   });
 
+  it('once the spoken number has ended (a pause, or words past it), a punch starting with a number word is cut', () => {
+    for (const [text, tts, punch, clip] of [
+      ['You will be 30', '[sad] You will be thirty, one', 'one pay rise behind.', '[sad] You will be thirty,'],
+      ['You will be 30', '[sad] You will be thirty, one pay rise behind.', 'one pay rise behind.', '[sad] You will be thirty,'],
+      ['You get 2', '[sad] You get two. One bad, one worse.', 'One bad, one worse.', '[sad] You get two.'],
+      ['By 2030', '[sad] By twenty thirty, first', 'first you lose the house.', '[sad] By twenty thirty,'],
+      ['By 2030', '[sad] By twenty thirty thirty percent of jobs vanish.', 'thirty percent of jobs vanish.', '[sad] By twenty thirty'],
+    ]) {
+      const l = line('defense', text, { tts });
+      attachPunch(l, { text: punch, tts: '' }, new Set());
+      expect(l.tts).toBe(clip);
+    }
+  });
+
   it('"I am" before a number is not part of it: the spoken number stays in the clip', () => {
     const l = line('defense', 'I am 30', { tts: '[sad] I am thirty' });
     attachPunch(l, { text: 'Thirty and broke.', tts: '' }, new Set());
