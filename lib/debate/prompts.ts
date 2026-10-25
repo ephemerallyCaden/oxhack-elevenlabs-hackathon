@@ -1,5 +1,5 @@
 // Prompts for every Claude call in the trial. Generic: they must work for ANY "Should I …?" question.
-import type { EvidenceCard, LedgerEntry, Line, Persona, Topic, TopicTurn, UserProfile } from '@/types';
+import type { EvidenceCard, Line, Persona, Topic, TopicTurn, UserProfile } from '@/types';
 import { TAG_PALETTE } from '@/lib/voice/configs';
 
 const tags = (role: keyof typeof TAG_PALETTE) => TAG_PALETTE[role].map((t) => `[${t}]`).join(' ');
@@ -38,7 +38,7 @@ LINES. Write exactly one line per entry in TURNS TO WRITE, in that order, for th
 - A turn marked ANSWERS THE WITNESS: the witness just interrupted that speaker. Address their point directly and first; concede what's fair, then turn it toward your side. The lines after it should take the witness's point into account too.
 - CUT-IN (only if CUT-IN ALLOWED is yes, at most once, and only where a line says something the other side would genuinely jump on, like a best-case number or an exaggeration): on that line set "text" to what the speaker says before being cut off, ending mid-thought with "—"; "cut_in" is the OTHER side interrupting (max 12 words, opens with an exclamation like "Hold on!" or "Oh, come on!"); "resume" is the speaker's one-sentence comeback (max 20 words). On every other line leave cut_in and resume as empty strings.
 
-LEDGER. For each line you wrote (by its index, from 0), record: the claim in under 20 words, which side it supports (yes / no / neutral), and its strength 1-5 (5 = specific, sourced and directly relevant; 1 = vague). Include the witness's own points from the exchange so far too, with line_index -1.
+LEDGER. For each line you wrote (by its index, from 0), record: the claim in under 20 words, which side it supports (yes / no / neutral), and its strength 1-5 (5 = specific, sourced and directly relevant; 1 = vague). If a turn ANSWERS THE WITNESS, also record the witness's point it answers, once, with line_index -1 (their earlier points are already recorded).
 
 RULING. As THE JUDGE, given the whole exchange (EXCHANGE SO FAR plus your lines): t from -1 (clearly NO) to +1 (clearly YES), 0 = genuinely balanced; be decisive when one side clearly argued better or had better evidence. The witness's points count: they reveal what matters to this person. Give confidence 0-1, one-sentence reasoning, the single deciding argument, and the Judge's spoken ruling (max 30 words) saying which way it leans and why.`;
 
@@ -83,11 +83,6 @@ export function profileBlock(profile?: UserProfile): string {
   return `THE WITNESS: ${bits.length ? bits.join('; ') : '(no profile given)'}`;
 }
 
-export function personaBlock(p?: Persona): string {
-  if (!p) return '';
-  return `YOUR LIFE (${p.when}${p.age != null ? `, age ${p.age}` : ''}, ${p.mood}): ${p.snapshot}`;
-}
-
 export function turnsBlock(turns: TopicTurn[], userPoint?: string): string {
   const who = (t: TopicTurn) => (t.side === 'yes' ? 'PROSECUTION (YES)' : 'DEFENSE (NO)');
   const rows = turns.map((t, i) => `${i}. ${who(t)}, cycle ${t.cycle}${t.answer ? ` — ANSWERS THE WITNESS, who just said: "${userPoint ?? ''}"` : ''}`);
@@ -104,7 +99,3 @@ export function topicBlock(question: string, topic: Topic): string {
   return `QUESTION: ${question}\nTOPIC: ${topic.title}: ${topic.question}`;
 }
 
-export function ledgerBlock(entries: LedgerEntry[]): string {
-  if (!entries.length) return 'LEDGER: (empty)';
-  return `LEDGER:\n${entries.map((e) => `- [${e.supports.toUpperCase()}, strength ${e.strength}, by ${e.by}] ${e.claim}`).join('\n')}`;
-}

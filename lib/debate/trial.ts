@@ -226,11 +226,15 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
           if (line.tts) line.tts = line.tts.trim().replace(/—$/, '.');
         }
       });
-      const userLine = [...req.history].reverse().find((l) => l.speaker === 'user');
+      // The witness's point being answered (line_index -1) is recorded once; earlier points already were.
+      const userLine = req.userPoint ? [...req.history].reverse().find((l) => l.speaker === 'user') : undefined;
+      let userRecorded = false;
       const ledger: LedgerEntry[] = out.ledger
         .map((e): LedgerEntry | null => {
+          if (e.line_index === -1 && userRecorded) return null;
           const line = e.line_index === -1 ? userLine : byIndex[e.line_index];
           if (!line) return null;
+          if (e.line_index === -1) userRecorded = true;
           return { id: uid('ledger'), line_id: line.id, topic_id: req.topic.id, by: line.speaker, supports: e.supports, claim: e.claim, strength: Math.min(5, Math.max(1, e.strength)), card_ids: line.cites };
         })
         .filter((e): e is LedgerEntry => e !== null);
