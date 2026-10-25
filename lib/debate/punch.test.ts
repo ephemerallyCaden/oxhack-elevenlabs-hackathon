@@ -345,6 +345,25 @@ describe('attachPunch', () => {
     }
   });
 
+  it('a spaced dash, "..." or a tag after the spoken number is a pause too: the run-on is cut', () => {
+    for (const tts of ['[sad] By twenty thirty — two million.', '[sad] By twenty thirty ... two million.', '[sad] By twenty thirty [pause] two million.']) {
+      const l = line('defense', 'By 2030', { tts });
+      attachPunch(l, { text: 'Two million.', tts: '' }, new Set());
+      expect(l.tts).toBe(tts.slice(0, tts.lastIndexOf(' two million.')));
+    }
+  });
+
+  it('a unit word before the setup’s number ("month 6", "year 3") is not the number: its spoken digit stays', () => {
+    for (const [text, tts, punch] of [
+      ['Your runway ends in month 6', '[sad] Your runway ends in month six', 'six weeks early.'],
+      ['You quit in year 3', '[sad] You quit in year three', 'three years too late.'],
+    ]) {
+      const l = line('defense', text, { tts });
+      attachPunch(l, { text: punch, tts: '' }, new Set());
+      expect(l.tts).toBe(tts);
+    }
+  });
+
   it('"I am" before a number is not part of it: the spoken number stays in the clip', () => {
     const l = line('defense', 'I am 30', { tts: '[sad] I am thirty' });
     attachPunch(l, { text: 'Thirty and broke.', tts: '' }, new Set());

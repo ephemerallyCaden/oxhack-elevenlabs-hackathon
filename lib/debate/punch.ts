@@ -155,8 +155,13 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
     // A number said in several words ("twenty | thirty", "two thousand | eight"): the next number word is still it.
     // (Scale words — "five | million" — follow the digits' suffix rule below instead.)
     // Only while the clip ends inside the number: no pause after `said`, and nothing but number words after it.
-    const saidRaw = (tokensOf(tts).filter((t) => norm(t)).at(-k - 1) ?? '').replace(/\[[^\]]*\]/g, '');
-    if (!/[.!?,;:…—-]["”’')»]*$/.test(saidRaw) && ov.every(NUMBER_WORD) && NUMBER_WORD(said) && !/^(?:hundred|thousand|million|billion|trillion)$/.test(ov[0] ?? ''))
+    // Everything the clip says before the overlap: a pause there (",", " — ", "...", a tag) ends the number.
+    const raws = tokensOf(tts);
+    let i = raws.length;
+    for (let seen = 0; i > 0 && seen < k; ) if (norm(raws[--i])) seen++;
+    const lastPre = raws[i - 1] ?? '';
+    const paused = /^\[[^\]]*\]$/.test(lastPre) || /[.!?,;:…—-]["”’')»]*$/.test(lastPre.replace(/\[[^\]]*\]/g, ''));
+    if (!paused && ov.every(NUMBER_WORD) && NUMBER_WORD(said) && !/^(?:hundred|thousand|million|billion|trillion)$/.test(ov[0] ?? ''))
       return true;
     const j = ov.findIndex((w) => units.some((u) => u.test(w)));
     // Number words before the unit only belong to the setup if its digits say them ("$5m" → million).
@@ -186,7 +191,10 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
       if (bare.endsWith('%')) return prev === setup[setup.length - 1] || /^(?:per)?cent$/.test(prev ?? '') || /%$/.test(rawPrev);
       // "am"/"pm" only count as part of the number right after one ("nine am", not "I am").
       if (/^(?:am|pm)$/.test(spokenPrev) && !NUMBERISH.test(clip[clip.length - k - 2] ?? '')) return prev === setup[setup.length - 1];
-      return prev === setup[setup.length - 1] || NUMBERISH.test(spokenPrev);
+      // A unit ("years", "pounds") only counts as number speech right after a number word: "ten years", not "year 3".
+      const parts = rawPrev.split('-').map(norm).filter(Boolean);
+      const beforePrev = parts.length > 1 ? parts[parts.length - 2] : clip[clip.length - k - 2];
+      return prev === setup[setup.length - 1] || NUMBER_WORD(spokenPrev) || /^(?:twice|double|half)$/.test(spokenPrev) || (NUMBERISH.test(spokenPrev) && NUMBER_WORD(beforePrev ?? ''));
     }
     return prev === setup[setup.length - 1];
   };
