@@ -43,7 +43,10 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
   // work still running after the user left (Skip, mid-processing) must not clone, store or play anything.
   const alive = useRef(false);
 
+  const starting = useRef(false);
   async function start() {
+    if (starting.current || rec.current) return; // one recording at a time (the button stays up during the mic prompt)
+    starting.current = true;
     let stream: MediaStream;
     try {
       // No browser processing: noise suppression / AGC change the voice and hurt the clone.
@@ -51,9 +54,11 @@ export default function VoiceStep({ onDone }: { onDone: (r: VoiceStepResult) => 
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
       });
     } catch {
+      starting.current = false;
       if (alive.current) finish({ voiceId: null, transcript: "", fallback: true }, "No microphone — using the default voice.");
       return;
     }
+    starting.current = false;
     if (!alive.current) {
       stream.getTracks().forEach((t) => t.stop()); // they left while the permission prompt was up
       return;

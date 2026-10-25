@@ -21,7 +21,7 @@ export function punchedSides(history: Line[], topicId: string): Set<Side> {
 // → "12000", "can't" → "cant"), a multi-word tag like [laughs softly] kept as one token.
 const JOIN = '\u2060'; // word joiner: not whitespace, so a tag's inner spaces don't split it
 const tokensOf = (s: string) => s.trim().replace(/\[[^\]]*\]/g, (t) => t.replace(/\s+/g, JOIN)).split(/\s+/).filter(Boolean);
-const norm = (tok: string) => tok.replace(/\[[^\]]*\]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+const norm = (tok: string) => tok.replace(/\[[^\]]*\]/g, '').toLowerCase().replace(/[^\p{L}\p{N}\p{Extended_Pictographic}]/gu, '');
 const words = (s: string) => tokensOf(s).map(norm).filter(Boolean);
 const OPEN_QUOTE = /^[“"‘'(«]+/;
 /** Does `text` already end with `tail` (case, punctuation and audio tags ignored)? */
@@ -36,7 +36,7 @@ function overlap(text: string, tail: string): number {
   const b = words(tail);
   // A finished sentence ("I lost it all.") only counts if it ends with the whole tail, never a part of it.
   // (A comma/semicolon/colon is a deliberate pause too: "freedom, freedom to fail" keeps both words.)
-  const finished = /[.!?,;:]["”’')»]*$/.test(untagged(text));
+  const finished = /[.!?,;:…]["”’')»]*$/.test(untagged(text));
   for (let k = Math.min(a.length, b.length); k > 0; k--) {
     if (finished && k < b.length) break;
     if (b.slice(0, k).every((w, i) => a[a.length - k + i] === w)) return k;
@@ -44,12 +44,17 @@ function overlap(text: string, tail: string): number {
   return 0;
 }
 /** The tail as it follows `setup`: after a full stop it starts a new sentence (capitalised). */
-// A sentence ended (a full stop, maybe inside a closing quote), but not a "..." pause before the punch.
+// A sentence ended (a full stop, maybe inside a closing quote), but not a "..." pause before the punch
+// and not an initialism like "the U.S." (more likely mid-sentence).
 const SENTENCE_END = /(?<!\.)[.!?]["”’')»]*$/;
+const INITIALISM = /\b(?:\p{Lu}\.){2,}["”’')»]*$/u;
 const untagged = (s: string) => s.replace(/\[[^\]]*\]/g, '').trim();
-/** The tail as it follows `setup`: after a sentence end it starts a new sentence (first letter capitalised). */
-const tailAfter = (setup: string, tail: string) => (SENTENCE_END.test(untagged(setup)) ? tail.replace(/\p{L}/u, (c) => c.toUpperCase()) : tail);
-const joinSentence = (setup: string, tail: string) => (setup.trim() ? `${setup.trim()} ${tailAfter(setup, tail)}` : tail);
+const endsSentence = (s: string) => SENTENCE_END.test(untagged(s)) && !INITIALISM.test(untagged(s));
+/** Capitalise the first word, if it starts with a letter ("£2,000 a month." stays; "iPhones" stays). */
+const capitalise = (tail: string) => tail.replace(/^([^\p{L}\p{N}]*)(\p{Ll})(?!\p{Lu})/u, (_, lead: string, c: string) => lead + c.toUpperCase());
+/** The tail as it follows `setup`: after a sentence end (or alone) it starts a new sentence. */
+const tailAfter = (setup: string, tail: string) => (!untagged(setup) || endsSentence(setup) ? capitalise(tail) : tail);
+const joinSentence = (setup: string, tail: string) => (setup.trim() ? `${setup.trim()} ${tailAfter(setup, tail)}` : capitalise(tail));
 /** `text` without its last `n` words, plus any opening quote the first dropped word carried. */
 function dropWords(text: string, n: number): { rest: string; lead: string } {
   const tokens = tokensOf(text);
@@ -96,6 +101,8 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   if (!punch || line.text.trim().endsWith('—') || !line.text.trim()) return false;
   // Models sometimes leave all or part of the punch in the line's text too: never say a word twice.
   const already = endsWithWords(line.text, punch);
+  // Did the text itself say (part of) the punch? (Measured before `line.text` is rewritten below.)
+  const textOverlap = already || overlap(line.text, punch) > 0;
   const cut = before(line.text, punch);
   const shown = cut.lead && !OPEN_QUOTE.test(punch) ? cut.lead + punch : punch; // keep an opening quote
   // The punch's spoken form (numbers written out, "..." beats), without its delivery tag.
@@ -111,7 +118,8 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   const count = punch.split(/\s+/).length;
   if (used.size > 0 || count > MAX_WORDS) return refuse();
   // The punch must be exactly the end of `text` (setupText() cuts it off by length), after a real setup.
-  if (!words(cut.rest).length) return false; // the punch would be the whole line: keep it as a plain line
+  // The whole line is (the start of) the punch: no setup to cut to, so it's a plain line (with the rest of the punch).
+  if (!words(cut.rest).length) return refuse();
   used.add(side);
   const tail = tailAfter(cut.rest, shown);
   line.text = `${cut.rest} ${tail}`;
@@ -119,7 +127,15 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   // The setup clip is voiced from `tts`: if it also says (part of) the punch, in either form, cut it.
   if (line.tts?.trim()) {
     const t = line.tts;
-    const rest = endsWithWords(t, spoken) || overlap(t, spoken) ? before(t, spoken).rest : before(t, punch).rest;
+    // Partial overlaps only when the text had one too (else "freedom, freedom to fail" would lose a word in the clip).
+    const partial = textOverlap;
+    const rest = endsWithWords(t, spoken)
+      ? before(t, spoken).rest
+      : endsWithWords(t, punch)
+        ? before(t, punch).rest
+        : partial
+          ? before(t, overlap(t, spoken) ? spoken : punch).rest
+          : t.trim();
     line.tts = words(rest).length ? rest : ''; // nothing left but a tag: voice the setup text instead
   }
   return true;

@@ -38,6 +38,19 @@ describe('writeTopic: a model punch with a label and tags is cleaned like the li
     expect(res.ruling.text).toBe('Noted.');
   });
 
+  it('a line cut off with "—" but no cut-in keeps the punch as its ending (no punch shot)', async () => {
+    askGemini.mockImplementation(async (_s: string, _c: string, schema: { parse: (x: unknown) => unknown }) => {
+      const o = out({ text: 'every quant on Wall Street.', tts: '[passionate] every quant on Wall Street.' });
+      o.lines[0].text = 'The top players earn more than —';
+      o.lines[0].tts = '[confident] The top players earn more than —';
+      return schema.parse(o);
+    });
+    const res = await writeTopic({ question: 'Should I?', topic, cards: [], history: [], turns: [{ side: 'yes', cycle: 1 }, { side: 'no', cycle: 1 }], cutInAllowed: false, urgent: true });
+    expect(res.lines[0].text).toBe('The top players earn more than every quant on Wall Street.');
+    expect(res.lines[0].tts).toBe('[confident] The top players earn more than every quant on Wall Street.');
+    expect(res.lines[0].punch).toBeUndefined();
+  });
+
   it('a line that is only a speaker label counts as empty (→ the mock)', async () => {
     askGemini.mockImplementation(async (_s: string, _c: string, schema: { parse: (x: unknown) => unknown }) => {
       const o = out(empty);

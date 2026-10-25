@@ -67,9 +67,9 @@ describe('attachPunch', () => {
       ["Face it, you just can't afford it.", "can't afford it.", 'Face it, you just'],
     ]) {
       const l = line('prosecution', text);
-      attachPunch(l, { text: punch, tts: '' }, new Set());
-      if (l.punch) expect(setupText(l)).toBe(setup);
-      else expect(l.text).toBe(`${text} ${punch}`); // different words: appended, never a word lost
+      expect(attachPunch(l, { text: punch, tts: '' }, new Set())).toBe(true);
+      expect(setupText(l)).toBe(setup);
+      expect(`${setupText(l)} ${l.punch!.text}`).toBe(l.text); // the textbox adds up to the line
     }
   });
 
@@ -147,6 +147,44 @@ describe('attachPunch', () => {
     const l = line('defense', 'The median earns', { tts: '[concerned] less than minimum wage.' });
     expect(attachPunch(l, { text: 'less than minimum wage.', tts: '[concerned] less than minimum wage.' }, new Set())).toBe(true);
     expect(l.tts).toBe('');
+  });
+
+  it('capitalises the first word only, never a word in the middle', () => {
+    for (const [punch, want] of [
+      ['£2,000 a month.', '£2,000 a month.'],
+      ['40% of them quit.', '40% of them quit.'],
+      ['iPhones win.', 'iPhones win.'],
+      ['"you win."', '"You win."'],
+    ]) {
+      const l = line('prosecution', 'Think about it.');
+      attachPunch(l, { text: punch, tts: '' }, new Set());
+      expect(l.punch?.text).toBe(want);
+    }
+  });
+
+  it('a line that is just the start of the punch keeps the whole sentence (capitalised)', () => {
+    const l = line('defense', 'Everything');
+    expect(attachPunch(l, { text: 'everything is gone.', tts: '' }, new Set())).toBe(false);
+    expect(l.text).toBe('Everything is gone.');
+  });
+
+  it('a unicode ellipsis is a pause too, emoji count as words, an initialism is not a sentence end', () => {
+    const pause = line('defense', 'It costs…');
+    attachPunch(pause, { text: 'costs everything.', tts: '' }, new Set());
+    expect(pause.text).toBe('It costs… costs everything.');
+    const party = line('prosecution', 'We lost 🎉');
+    attachPunch(party, { text: '🎉 everything.', tts: '' }, new Set());
+    expect(party.text).toBe('We lost 🎉 everything.');
+    const us = line('prosecution', 'The U.S.');
+    attachPunch(us, { text: 'pays more.', tts: '' }, new Set());
+    expect(us.text).toBe('The U.S. pays more.');
+  });
+
+  it('keeps a repeated word in the setup clip when the text keeps it (comma in text, not in tts)', () => {
+    const l = line('prosecution', 'What you get is freedom,', { tts: '[passionate] What you get is freedom' });
+    expect(attachPunch(l, { text: 'freedom to fail.', tts: '' }, new Set())).toBe(true);
+    expect(l.text).toBe('What you get is freedom, freedom to fail.');
+    expect(l.tts).toBe('[passionate] What you get is freedom');
   });
 
   it('leaves a cut-off line alone (the cut-in finishes it)', () => {

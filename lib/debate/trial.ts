@@ -241,9 +241,12 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
             { id: uid('line'), speaker: SIDE_SPEAKER[turn.side], kind: 'resume', text: plain(o.resume.text), tts: unlabel(o.resume.tts), cites: [], ...base },
           );
         } else if (line.text.trim().endsWith('—')) {
-          // No cut-in for this line: don't leave it hanging mid-sentence.
-          line.text = line.text.trim().replace(/—$/, '.');
-          if (line.tts) line.tts = line.tts.trim().replace(/—$/, '.');
+          // No cut-in for this line: don't leave it hanging mid-sentence. A punch the model wrote anyway is
+          // the end of that sentence: keep it as ordinary words (no punch shot: the line was meant to be cut).
+          const draft = o.punch && plain(o.punch.text) ? { text: plain(o.punch.text), tts: unlabel(o.punch.tts) } : undefined;
+          line.text = line.text.trim().replace(/\s*—$/, draft ? '' : '.');
+          if (line.tts) line.tts = line.tts.trim().replace(/\s*—$/, draft ? '' : '.');
+          if (draft) attachPunch(line, draft, new Set(['yes', 'no'])); // refused → appended
         } else {
           attachPunch(line, o.punch && { text: plain(o.punch.text), tts: unlabel(o.punch.tts) }, punched);
         }

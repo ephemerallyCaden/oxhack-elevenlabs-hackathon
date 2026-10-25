@@ -305,7 +305,7 @@ export default function Home() {
                   <div className="flex flex-col gap-3 border-t-2 border-[var(--c-oak)] pt-5">
                     {signedInAs ? (
                       <p className="ct-small">
-                        Signed in as {signedInAs}. <button className="ct-link" onClick={() => void signOut()}>Sign out</button>
+                        Signed in as {signedInAs}. <button className="ct-link" onClick={() => (setMyKey(undefined), void signOut())}>Sign out</button>
                       </p>
                     ) : (
                       <>
@@ -349,7 +349,13 @@ export default function Home() {
             {step === "voice" && (
               <>
                 <VoiceStep onDone={onVoice} />
-                <button className="ct-link self-start" onClick={() => setStep("selfie")}>Skip: use the default voice</button>
+                <button className="ct-link self-start" onClick={() => {
+                // The default voice means the default: drop a clone made before they changed their mind.
+                try {
+                  sessionStorage.removeItem("roulette.voiceId");
+                } catch {}
+                setStep("selfie");
+              }}>Skip: use the default voice</button>
               </>
             )}
 
