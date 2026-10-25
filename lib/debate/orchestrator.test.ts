@@ -299,6 +299,34 @@ describe('LLM call budget (Gemini free tier: 5 calls/minute)', () => {
   });
 });
 
+describe('request size', () => {
+  it("voiced lines keep their audio on screen, but it isn't uploaded with the topic history", async () => {
+    const audio = 'data:audio/mpeg;base64,AAAA';
+    const topicBodies: { history: { audioUrl?: string; punch?: { audioUrl?: string } }[] }[] = [];
+    vi.stubGlobal('fetch', (url: string, init?: { body?: string }) => {
+      if (url === '/api/voice/tts') return Promise.resolve({ ok: true, json: async () => ({ audioUrl: audio, durationMs: 1000 }) });
+      if (url === '/api/trial/topic') topicBodies.push(JSON.parse(init!.body!));
+      return Promise.reject(new Error('offline'));
+    });
+    try {
+      let done = false;
+      // Interrupt mid-topic so the rewrite sends a history of already-voiced lines.
+      const s = await play('Should I learn to surf?', (st) => {
+        if (!done && st.current?.speaker === 'defense' && st.current.kind === 'argument') {
+          done = true;
+          return 'But I live by the sea';
+        }
+      });
+      expect(s.transcript.some((l) => l.audioUrl === audio)).toBe(true);
+      const sent = topicBodies.flatMap((b) => b.history);
+      expect(sent.length).toBeGreaterThan(0);
+      expect(sent.every((l) => l.audioUrl === undefined && l.punch?.audioUrl === undefined)).toBe(true);
+    } finally {
+      vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
+    }
+  });
+});
+
 describe('planAfterInterrupt', () => {
   const order = (turns: { side: string; answer?: boolean }[]) => turns.map((t) => t.side);
 

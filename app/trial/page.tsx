@@ -10,7 +10,7 @@
 //   5. Voice playback via engine.playVoice() with stereo panning
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import type { Line, Scene, Speaker, SttResponse } from '@/types';
+import type { Scene, Speaker } from '@/types';
 import { TrialOrchestrator } from '@/lib/debate/orchestrator';
 import { sessionVoiceId } from '@/components/onboarding/VoiceStep';
 import { useSessionHeads } from '@/components/onboarding/sessionHeads';
@@ -25,6 +25,8 @@ import { deriveMoods, type CharacterMood } from '@/components/courtroom/expressi
 import { runPunch, type PunchStage } from '@/components/courtroom/punchSequence';
 import { setupText } from '@/lib/debate/punch';
 import { SPEAKER_SCENE } from '@/types';
+import { WHO } from '@/components/courtroom/roles';
+import { useRecorder, transcribe } from '@/components/useRecorder';
 
 // -- Scene -> BGM mapping --
 const SCENE_MUSIC: Record<Scene, BgmName | null> = {
@@ -35,51 +37,53 @@ const SCENE_MUSIC: Record<Scene, BgmName | null> = {
   cutscene: 'cutscene',
 };
 
-// -- Speaker display config (YES blue, NO red: the suits in the pose art) --
-const WHO: Record<Line['speaker'], { name: string; color: string }> = {
-  prosecution: { name: 'PROSECUTION \u00B7 YES', color: '#3b82f6' },
-  defense: { name: 'DEFENSE \u00B7 NO', color: '#ef4444' },
-  judge: { name: 'THE JUDGE', color: '#a16207' },
-  user: { name: 'YOU', color: '#e4e4e7' },
-};
-
-// -- Hold-to-talk recorder --
-function useRecorder() {
-  const rec = useRef<MediaRecorder | null>(null);
-  const starting = useRef<Promise<boolean> | null>(null);
-  const chunks = useRef<Blob[]>([]);
-  return {
-    start(): Promise<boolean> {
-      starting.current = (async () => {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          chunks.current = [];
-          rec.current = new MediaRecorder(stream);
-          rec.current.ondataavailable = (e) => chunks.current.push(e.data);
-          rec.current.start();
-          return true;
-        } catch {
-          rec.current = null;
-          return false;
-        }
-      })();
-      return starting.current;
-    },
-    async stop(): Promise<Blob | null> {
-      if (starting.current) await starting.current;
-      starting.current = null;
-      const r = rec.current;
-      rec.current = null;
-      if (!r || r.state === 'inactive') return null;
-      return new Promise((resolve) => {
-        r.onstop = () => {
-          r.stream.getTracks().forEach((t) => t.stop());
-          resolve(new Blob(chunks.current, { type: r.mimeType }));
-        };
-        r.stop();
-      });
-    },
+/**
+ * The "type instead" box. Owns the typed text so a keystroke re-renders only this box, not the
+ * courtroom. The box unmounts (intro, between asks), so the page keeps the draft across mounts.
+ */
+function TypedInput({
+  loadDraft,
+  saveDraft,
+  placeholder,
+  onSubmit,
+}: {
+  loadDraft: () => string;
+  saveDraft: (text: string) => void;
+  placeholder: string;
+  onSubmit: (text: string) => boolean;
+}) {
+  const [typed, setTyped] = useState(loadDraft);
+  const change = (text: string) => {
+    saveDraft(text);
+    setTyped(text);
   };
+  const submit = () => {
+    if (onSubmit(typed)) change('');
+  };
+  return (
+    <div className="flex gap-2">
+      <label htmlFor="typed" className="sr-only">
+        Type instead
+      </label>
+      <input
+        type="text"
+        id="typed"
+        value={typed}
+        onChange={(e) => change(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            submit();
+          }
+        }}
+        placeholder={placeholder}
+        className="min-h-9 min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-xs"
+      />
+      <button type="button" onClick={submit} className="min-h-9 rounded-lg border border-zinc-600 px-3 text-xs">
+        Send
+      </button>
+    </div>
+  );
 }
 
 // -- Main trial page --
@@ -92,7 +96,11 @@ export default function TrialPage() {
   const recorder = useRecorder();
   const [holding, setHolding] = useState(false);
   const held = useRef(false);
-  const [typed, setTyped] = useState('');
+  const typedDraft = useRef('');
+  const loadDraft = useCallback(() => typedDraft.current, []);
+  const saveDraft = useCallback((text: string) => {
+    typedDraft.current = text;
+  }, []);
   const [needTyping, setNeedTyping] = useState(false);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   // Crane-up intro: hold on the carpet while the trial loads (no line yet), play as soon as
@@ -248,18 +256,6 @@ export default function TrialPage() {
     }
   }, [s.agenda, audioUnlocked]);
 
-  // -- STT helper --
-  async function transcribe(blob: Blob): Promise<string> {
-    try {
-      const form = new FormData();
-      form.append('audio', blob, 'question.webm');
-      const res = await fetch('/api/voice/stt', { method: 'POST', body: form });
-      return res.ok ? ((await res.json()) as SttResponse).transcript.trim() : '';
-    } catch {
-      return '';
-    }
-  }
-
   // -- 2. OBJECTION sting on interrupt --
   async function down() {
     if (held.current) return;
@@ -293,16 +289,20 @@ export default function TrialPage() {
     }
   }
 
-  const submitTyped = useCallback(() => {
-    const text = typed.trim();
-    const phase = orch.getState().phase;
-    if (!text || (phase !== 'ask' && phase !== 'listening')) return; // don't swallow text mid-debate
-    setTyped('');
-    setNeedTyping(false);
-    void unlockAudio();
-    if (phase === 'ask') orch.start(text);
-    else orch.endInterrupt(text);
-  }, [typed, orch, unlockAudio]);
+  /** Returns whether the text was taken (the box then clears). */
+  const submitTyped = useCallback(
+    (raw: string) => {
+      const text = raw.trim();
+      const phase = orch.getState().phase;
+      if (!text || (phase !== 'ask' && phase !== 'listening')) return false; // don't swallow text mid-debate
+      setNeedTyping(false);
+      void unlockAudio();
+      if (phase === 'ask') orch.start(text);
+      else orch.endInterrupt(text);
+      return true;
+    },
+    [orch, unlockAudio],
+  );
 
   // -- Keyboard handler: Space to hold-to-talk --
   useEffect(() => {
@@ -398,28 +398,12 @@ export default function TrialPage() {
         <span className="text-[10px] text-zinc-500">or SPACE</span>
       </div>
       {(needTyping || s.phase === 'ask') && (
-        <div className="flex gap-2">
-          <label htmlFor="typed" className="sr-only">
-            Type instead
-          </label>
-          <input
-            type="text"
-            id="typed"
-            value={typed}
-            onChange={(e) => setTyped(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                submitTyped();
-              }
-            }}
-            placeholder={s.phase === 'ask' ? 'or type: Should I…?' : 'Type your interruption'}
-            className="min-h-9 min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-xs"
-          />
-          <button type="button" onClick={submitTyped} className="min-h-9 rounded-lg border border-zinc-600 px-3 text-xs">
-            Send
-          </button>
-        </div>
+        <TypedInput
+          loadDraft={loadDraft}
+          saveDraft={saveDraft}
+          placeholder={s.phase === 'ask' ? 'or type: Should I…?' : 'Type your interruption'}
+          onSubmit={submitTyped}
+        />
       )}
     </div>
   );
