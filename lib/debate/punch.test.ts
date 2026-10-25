@@ -211,6 +211,110 @@ describe('attachPunch', () => {
     expect(r.tts).toBe('[concerned] In two years you will be two two years behind.');
   });
 
+  it('a currency setup keeps its spoken unit in the clip when the punch starts with that unit', () => {
+    for (const [text, tts, punch] of [
+      ['You lose £12,000', '[sad] You lose twelve thousand pounds', 'pounds you do not have.'],
+      ['You owe $500', '[sad] You owe five hundred dollars', 'dollars you never had.'],
+      ['It costs €900', '[sad] It costs nine hundred euros', 'euros a month.'],
+    ]) {
+      const l = line('defense', text, { tts });
+      attachPunch(l, { text: punch, tts: '' }, new Set());
+      expect(l.tts).toBe(tts);
+    }
+  });
+
+  it('cuts the run-on when the clip keeps the digits, or says the number in a form the list must also know', () => {
+    const cases: [string, string, string, string][] = [
+      ['You will be 30', '[sad] You will be 30 and', 'and still renting.', '[sad] You will be 30'],
+      ['It returns 7%', '[sad] It returns 7% of your', 'of your savings.', '[sad] It returns 7%'],
+      ['You would sign a 30-year', '[sad] You would sign a thirty-year mortgage', 'mortgage you will hate.', '[sad] You would sign a thirty-year'],
+      ['You would earn 2x', '[sad] You would earn twice as much', 'as much for half the joy.', '[sad] You would earn twice'],
+      ['You work until 9pm', '[sad] You work until nine p.m. every single', 'every single night.', '[sad] You work until nine p.m.'],
+    ];
+    for (const [text, tts, punch, clip] of cases) {
+      const l = line('defense', text, { tts });
+      expect(attachPunch(l, { text: punch, tts: '' }, new Set())).toBe(true);
+      expect(l.tts).toBe(clip);
+    }
+  });
+
+  it('keeps every spoken unit of a number in the clip (grand, pence, cents, yen, times, million dollars)', () => {
+    for (const [text, tts, punch] of [
+      ['You lose £12k', '[sad] You lose twelve grand', 'grand you do not have.'],
+      ['It costs 50p', '[sad] It costs fifty pence', 'pence a go.'],
+      ['It costs $0.50', '[sad] It costs fifty cents', 'cents a go.'],
+      ['It costs ¥500', '[sad] It costs five hundred yen', 'yen a day.'],
+      ['Prices rose 3x', '[sad] Prices rose three times', 'times faster than pay.'],
+      ['You lose $5m', '[sad] You lose five million dollars', 'million dollars down the drain.'],
+    ]) {
+      const l = line('defense', text, { tts });
+      attachPunch(l, { text: punch, tts: '' }, new Set());
+      expect(l.tts).toBe(tts);
+    }
+  });
+
+  it('a unit word later in the overlap is not the number’s unit: the run-on is still cut', () => {
+    for (const [text, tts, punch, clip] of [
+      ['It costs $5', '[sad] It costs five dollars, not one cent', 'Not one cent more.', '[sad] It costs five dollars,'],
+      ['It costs £900', '[sad] It costs nine hundred pounds and a pound', 'And a pound of flesh.', '[sad] It costs nine hundred pounds'],
+      ['You earn 10k', '[sad] You earn ten thousand', 'thousand reasons to stay.', '[sad] You earn ten thousand'],
+    ]) {
+      const l = line('defense', text, { tts });
+      attachPunch(l, { text: punch, tts: '' }, new Set());
+      expect(l.tts).toBe(clip);
+    }
+  });
+
+  it('number words the digits do not imply are the punch’s, not the setup’s: the run-on is cut', () => {
+    for (const [text, tts, punch, clip] of [
+      ['It costs $5', '[sad] It costs five million dollars', 'million dollars more.', '[sad] It costs five'],
+      ['You earn £12', '[sad] You earn twelve thousand pounds', 'thousand pounds a year.', '[sad] You earn twelve'],
+    ]) {
+      const l = line('defense', text, { tts });
+      expect(attachPunch(l, { text: punch, tts: '' }, new Set())).toBe(true);
+      expect(l.tts).toBe(clip);
+    }
+  });
+
+  it('keeps the number’s scale word, unit or am/pm even when the clip ends with the whole punch', () => {
+    for (const [text, tts, punch] of [
+      ['We raised $5m', '[sad] We raised five million', 'million reasons to quit.'],
+      ['Bank $2bn', '[sad] Bank two billion dollars', 'dollars'],
+      ['We raised $5m', '[sad] We raised five million', 'Million.'],
+      ['Meet at 9am', '[sad] Meet at nine am', 'AM sharp.'],
+      ['It returns 7%', '[sad] It returns seven percent of nothing', 'percent of nothing.'],
+    ]) {
+      const l = line('defense', text, { tts });
+      attachPunch(l, { text: punch, tts: '' }, new Set());
+      expect(l.tts).toBe(tts);
+    }
+  });
+
+  it('"I am" before a number is not part of it: the spoken number stays in the clip', () => {
+    const l = line('defense', 'I am 30', { tts: '[sad] I am thirty' });
+    attachPunch(l, { text: 'Thirty and broke.', tts: '' }, new Set());
+    expect(l.tts).toBe('[sad] I am thirty');
+    const t = line('defense', 'We start at 9am', { tts: '[sad] We start at nine am sharp' });
+    expect(attachPunch(t, { text: 'sharp, every day.', tts: '' }, new Set())).toBe(true);
+    expect(t.tts).toBe('[sad] We start at nine am');
+  });
+
+  it('a whitespace-only clip is dropped so the text is voiced', () => {
+    const landed = line('defense', 'You have 3', { tts: '   ' });
+    attachPunch(landed, { text: 'years left.', tts: '' }, new Set());
+    expect(landed.tts).toBe('');
+    const refused = line('defense', 'You have 3', { tts: '   ' });
+    attachPunch(refused, { text: 'years left.', tts: '' }, new Set<Side>(['yes']));
+    expect(refused.tts).toBe('');
+  });
+
+  it('a refused punch on a tag-only clip voices the text instead of the bare tag + punch', () => {
+    const l = line('defense', 'You have 3', { tts: '[sad]' });
+    attachPunch(l, { text: 'years left.', tts: '' }, new Set<Side>(['yes']));
+    expect(l.text).toBe('You have 3 years left.');
+    expect(l.tts).toBe('');
+  });
+
   it('a setup ending in digits still has the clip’s run into the punch cut (spelled-out number)', () => {
     const age = line('defense', 'You will be 30', { tts: '[sad] You will be thirty and' });
     expect(attachPunch(age, { text: 'and still renting.', tts: '' }, new Set())).toBe(true);

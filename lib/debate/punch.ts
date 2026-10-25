@@ -31,7 +31,7 @@ const NUMBERISH = new RegExp(
   `^(?:zero|${UNIT}|ten|eleven|twelve|\\p{L}+teen|(?:${TENS})(?:${UNIT})?|hundred|thousand|million|billion|trillion` +
     `|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|\\p{L}+teenth|\\p{L}+tieth` +
     `|(?:${TENS})(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth)|hundredth|thousandth|millionth` +
-    `|(?:twen|thir|for|fif|six|seven|eigh|nine)ties|noughties|times?` +
+    `|(?:twen|thir|for|fif|six|seven|eigh|nine)ties|noughties|times?|twice|double|half|am|pm|oclock` +
     `|percent|pounds?|dollars?|euros?|pence|cents?|quid|grand|k|years?|months?|weeks?|days?|hours?|minutes?)$`,
   'u',
 );
@@ -112,6 +112,7 @@ function punchTts(speaker: 'prosecution' | 'defense', tts: string, text: string)
 export function attachPunch(line: Line, draft: { text: string; tts: string } | undefined, used: Set<Side>): boolean {
   const punch = draft?.text.trim();
   if (!punch || line.text.trim().endsWith('—') || !line.text.trim()) return false;
+  if (line.tts != null && !words(line.tts).length) line.tts = ''; // blank or only a tag: voice the text instead
   // Models sometimes leave all or part of the punch in the line's text too: never say a word twice.
   const already = endsWithWords(line.text, punch);
   // Did the text itself say (part of) the punch? (Measured before `line.text` is rewritten below.)
@@ -126,6 +127,28 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   /** A partial overlap of the clip with the punch is cut only if the text overlapped too, or the clip lines up
    *  with the setup right before it ("…more than | every quant"): a coincidence ("…returns seven | percent"
    *  for the text's "7%") never cuts a setup word. */
+  /** Do the clip's last `k` words start with the setup number's own scale or unit ("$5m" → "million",
+   *  "£12k" → "pounds", "7%" → "percent", "9am" → "am")? Then they belong to the setup, not the punch. */
+  const numberOwns = (tts: string, k: number) => {
+    const bare = (tokensOf(cut.rest).at(-1) ?? '').replace(/[^\p{L}\p{N}%£$€¥]/gu, '');
+    if (!/\d/.test(bare)) return false;
+    const units = [
+      bare.endsWith('%') && /^(?:percent|per|cent)$/,
+      /£/.test(bare) && /^(?:pounds?|quid|grand|pence|p)$/,
+      /\$/.test(bare) && /^(?:dollars?|bucks|grand|cents?)$/,
+      /€/.test(bare) && /^(?:euros?|cents?|grand)$/,
+      /¥/.test(bare) && /^yen$/,
+      /\dx$/i.test(bare) && /^times$/,
+      /\dp$/i.test(bare) && /^(?:pence|p)$/,
+      /\dk$/i.test(bare) && /^(?:thousand|k|grand)$/,
+      /\d(?:am|pm)$/i.test(bare) && /^(?:am|pm)$/,
+    ].filter((u): u is RegExp => !!u);
+    const scale = /\dk$/i.test(bare) ? /^thousand$/ : /\dm$/i.test(bare) ? /^million$/ : /\d(?:bn|b)$/i.test(bare) ? /^billion$/ : null;
+    const ov = words(tts).slice(-k);
+    const j = ov.findIndex((w) => units.some((u) => u.test(w)));
+    // Number words before the unit only belong to the setup if its digits say them ("$5m" → million).
+    return j >= 0 ? ov.slice(0, j).every((w) => scale?.test(w)) : !!scale?.test(ov[0] ?? '');
+  };
   const clipOverlap = (tts: string, tail: string) => {
     const k = overlap(tts, tail);
     if (k <= 0) return false;
@@ -135,9 +158,23 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
     if (!setup.length) return false;
     const prev = clip[clip.length - k - 1];
     const lastRaw = tokensOf(cut.rest).at(-1) ?? '';
-    // A number the text writes in digits is spelled out in the clip: "30" ↔ "thirty", "£12,000" ↔ "…pounds",
-    // "7%" ↔ "percent" (so "seven | percent" never counts as running into a punch that starts with "percent").
-    if (/\d/.test(lastRaw)) return lastRaw.replace(/[^\p{L}\p{N}%]/gu, '').endsWith('%') ? /^(?:per)?cent$/.test(prev ?? '') : NUMBERISH.test(prev ?? '');
+    // A number the text writes in digits is said in the clip as digits ("30") or spelled out ("thirty",
+    // "thirty-year", "£12,000" ↔ "…pounds", "7%" ↔ "percent"). The clip's unit belongs to the number, so
+    // "seven | percent" or "twelve thousand | pounds" never counts as running into a punch that starts with it.
+    if (/\d/.test(lastRaw)) {
+      // The clip's token right before the overlap, as written ("thirty-year", "%"), and its last word part.
+      const raws = tokensOf(tts);
+      let i = raws.length;
+      for (let seen = 0; i > 0 && seen < k; ) if (norm(raws[--i])) seen++;
+      const rawPrev = raws.slice(0, i).reverse().find((t) => /[\p{L}\p{N}%]/u.test(t.replace(/\[[^\]]*\]/g, ''))) ?? '';
+      const spokenPrev = norm(rawPrev.split('-').at(-1) ?? '');
+      const bare = lastRaw.replace(/[^\p{L}\p{N}%£$€¥]/gu, '');
+      if (numberOwns(tts, k)) return false;
+      if (bare.endsWith('%')) return prev === setup[setup.length - 1] || /^(?:per)?cent$/.test(prev ?? '') || /%$/.test(rawPrev);
+      // "am"/"pm" only count as part of the number right after one ("nine am", not "I am").
+      if (/^(?:am|pm)$/.test(spokenPrev) && !NUMBERISH.test(clip[clip.length - k - 2] ?? '')) return prev === setup[setup.length - 1];
+      return prev === setup[setup.length - 1] || NUMBERISH.test(spokenPrev);
+    }
     return prev === setup[setup.length - 1];
   };
   const refuse = () => {
@@ -163,9 +200,9 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
     const t = line.tts;
     // Partial overlaps only where clipOverlap allows them (else "freedom, freedom to fail" — same word
     // count in clip and text — would lose a word in the clip).
-    const rest = endsWithWords(t, spoken)
+    const rest = endsWithWords(t, spoken) && !numberOwns(t, words(spoken).length)
       ? before(t, spoken).rest
-      : endsWithWords(t, punch)
+      : endsWithWords(t, punch) && !numberOwns(t, words(punch).length)
         ? before(t, punch).rest
         : clipOverlap(t, spoken)
           ? before(t, spoken).rest
