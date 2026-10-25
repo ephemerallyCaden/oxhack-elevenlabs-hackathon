@@ -241,6 +241,15 @@ describe('TrialOrchestrator', () => {
     expect(s.verdict!.breakdown.some((b) => b.added_by === 'user')).toBe(true);
   });
 
+  it('the verdict is delivered on the wide shot, so both sides are in view', async () => {
+    let scene: string | undefined;
+    await play('Should I buy a car?', (st) => {
+      if (st.current?.kind === 'verdict') scene = st.scene;
+      return undefined;
+    });
+    expect(scene).toBe('witness');
+  });
+
   it('interrupting the Judge can remove a topic, which is then never debated', async () => {
     let done = false;
     const s = await play('Should I buy a car?', (st) => {
