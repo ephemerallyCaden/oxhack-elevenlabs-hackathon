@@ -143,7 +143,10 @@ Public web search makes one Exa request, capped at 2.2 seconds (2.4 seconds
 including acquisition queue time) to leave part of the quick budget for selection.
 It requests at most four pages, retains a continuous excerpt of up to 3,200
 characters per page, and uses a 64-entry cache (ten minutes with records, one
-minute without). HTTP 429 host cooldown spans queries. Cache and sharing are
+minute without). Keyless `mcp.exa.ai` allows 2 calls per second and 50 per day
+per IP, so keyless calls are spaced 500 ms apart and a keyless 429 pauses the host
+for two seconds; keyed access skips the spacing and keeps the one-minute cooldown.
+A 4-topic trial needs `EXA_API_KEY` on demo day because of the daily cap. Cache and sharing are
 process-local. A slow model, busy queue or failed search can still yield an empty
 response within the five-second limit; useful cards are not guaranteed.
 

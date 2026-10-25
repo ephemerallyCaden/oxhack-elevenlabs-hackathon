@@ -15,7 +15,11 @@ const SEARCH_MS = 2200;
 const CACHE_ENTRIES = 64;
 const CACHE_WITH_RECORDS_MS = 600000;
 const CACHE_EMPTY_MS = 60000;
-const DEFAULT_BACKOFF_MS = 60000;
+// Keyed access has no such limits. Keyless mcp.exa.ai allows 2 tool calls per second and 50 per
+// day per IP, so space keyless calls out and treat its 429 as a short pause rather than a minute.
+const KEYLESS_GAP_MS = 500;
+const KEYLESS_BACKOFF_MS = 2000;
+const KEYED_BACKOFF_MS = 60000;
 const LIMITATIONS = [
   "Search-provider page excerpt; the original page was not independently fetched or verified.",
   "Only a bounded continuous excerpt is available; omitted page context may qualify this passage. Jurisdiction and dates may differ from the user's situation.",
@@ -34,9 +38,25 @@ export function createWebSearch(options: Options = {}) {
   const cache = new Map<string, { until: number; report: CollectionReport }>();
   const enabled = () => env.RESEARCH_WEB_SEARCH?.trim() !== "none";
   const apiKey = () => env.EXA_API_KEY?.trim() || undefined;
+  const backoffMs = () => apiKey() ? KEYED_BACKOFF_MS : KEYLESS_BACKOFF_MS;
+  let nextKeylessStart = 0;
+
+  /** Keyless calls start at most every KEYLESS_GAP_MS; a cancelled caller stops waiting. */
+  async function pace(signal: AbortSignal): Promise<void> {
+    if (apiKey()) return;
+    const wait = nextKeylessStart - now();
+    nextKeylessStart = Math.max(now(), nextKeylessStart) + KEYLESS_GAP_MS;
+    if (wait <= 0) return;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { signal.removeEventListener("abort", stop); resolve(); }, wait);
+      const stop = () => { clearTimeout(timer); reject(signal.reason ?? new Error("Search cancelled while pacing")); };
+      signal.addEventListener("abort", stop, { once: true });
+    });
+  }
 
   async function search(query: string, signal: AbortSignal): Promise<CollectionReport> {
-    const transport = createCommunityTransport({ hosts: EXA_HOSTS, fetchImpl: options.fetchImpl, now, cooldown });
+    await pace(signal);
+    const transport = createCommunityTransport({ hosts: EXA_HOSTS, fetchImpl: options.fetchImpl, now, cooldown, minCooldownMs: backoffMs() });
     const results = await withinDeadline(
       bounded => searchExa({ query, domains: publicSearchHosts, apiKey: apiKey(), transport, signal: bounded }), SEARCH_MS, signal);
     signal.throwIfAborted();
@@ -56,7 +76,7 @@ export function createWebSearch(options: Options = {}) {
   function failure(error: unknown): CollectionReport {
     if (!(error instanceof CommunityHttpError) || error.status !== 429) return { status: "unavailable", records: [], warnings: [UNAVAILABLE] };
     // A quota error inside an HTTP 200 MCP envelope carries no Retry-After, so set the host cooldown here.
-    const retryAt = error.retryAt ?? new Date(now() + DEFAULT_BACKOFF_MS).toISOString();
+    const retryAt = error.retryAt ?? new Date(now() + backoffMs()).toISOString();
     cooldown.set(apiKey() ? "api.exa.ai" : "mcp.exa.ai", Date.parse(retryAt));
     return { status: "rate_limited", records: [], retryAt, warnings: [UNAVAILABLE] };
   }

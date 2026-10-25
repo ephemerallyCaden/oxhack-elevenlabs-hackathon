@@ -125,6 +125,32 @@ describe("Exa transport and source boundaries", () => {
   });
 });
 
+it("paces keyless searches to two per second and backs off a keyless 429 for seconds, not a minute", async () => {
+  vi.useFakeTimers();
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(envelope([page])));
+  const search = createWebSearch({ env: {}, fetchImpl });
+  const pending = ["one", "two", "three", "four"].map(query => search.collect(query, signal()));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(fetchImpl).toHaveBeenCalledTimes(3);
+  await vi.advanceTimersByTimeAsync(600);
+  expect((await Promise.all(pending)).map(report => report.status)).toEqual(["live", "live", "live", "live"]);
+
+  // Paced calls wait on fake timers, so advance the clock before awaiting each one.
+  const collect = async (query: string) => { const result = search.collect(query, signal()); await vi.advanceTimersByTimeAsync(600); return result; };
+  fetchImpl.mockResolvedValueOnce(new Response("busy", { status: 429 }));
+  expect((await collect("five")).status).toBe("rate_limited");
+  expect((await collect("six")).status).toBe("rate_limited"); // inside the two-second pause: no request
+  await vi.advanceTimersByTimeAsync(2100);
+  expect((await collect("seven")).status).toBe("live");
+
+  const keyed = createWebSearch({ env: { EXA_API_KEY: "fixture" }, fetchImpl: vi.fn<typeof fetch>(async () => new Response("busy", { status: 429 })) });
+  expect((await keyed.collect("eight", signal())).status).toBe("rate_limited");
+  await vi.advanceTimersByTimeAsync(2100);
+  expect((await keyed.collect("nine", signal())).status).toBe("rate_limited"); // keyed access keeps the one-minute cooldown
+});
+
 it("shares quick/deep acquisition while selecting each side independently", async () => {
   const fetchImpl = vi.fn<typeof fetch>(async () => new Response(envelope([page])));
   const agent = createResearchAgent({ community: false, webSearch: createWebSearch({ env: {}, fetchImpl }),
