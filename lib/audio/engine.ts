@@ -80,6 +80,7 @@ export function preload(url: string) {
 export async function playVoice(speaker: Exclude<Speaker, "user">, url: string): Promise<void> {
   const token = ++voiceSeq;
   const buffer = await load(url);
+  if (url.startsWith("data:")) buffers.delete(url); // each line plays once: don't keep its decoded audio
   if (token !== voiceSeq) return; // interrupted or superseded while loading
   stopVoice();
   const panner = graph().createStereoPanner();

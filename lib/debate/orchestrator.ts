@@ -335,7 +335,8 @@ export class TrialOrchestrator {
       personas: this.state.personas,
       profile: this.state.profile,
       cards: this.state.cards.filter((c) => c.topic_id === topicId),
-      history: this.topicLines(topicId),
+      // Without the voice (line + punch clips): each is ~0.3 MB of base64 and the server only reads the text.
+      history: this.topicLines(topicId).map(({ audioUrl, ...l }) => (void audioUrl, l.punch ? { ...l, punch: { ...l.punch, audioUrl: undefined } } : l)),
       turns,
       userPoint: opts.userPoint,
       cutInAllowed: opts.cutInAllowed,

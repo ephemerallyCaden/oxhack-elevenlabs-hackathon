@@ -2,17 +2,13 @@
 // MVP harness for the trial engine (D). Plain scenes; C replaces these with the real 2D courtroom.
 // Hold the button (or SPACE) to talk: asks the question, or interrupts whoever is speaking.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Line, Scene, SttResponse } from '@/types';
+import type { Scene } from '@/types';
 import { TrialOrchestrator } from '@/lib/debate/orchestrator';
 import { useTrialState } from '@/lib/debate/useTrial';
 import { footnotes } from '@/lib/debate/transcript';
+import { WHO } from '@/components/courtroom/roles';
+import { useRecorder, transcribe } from '@/components/useRecorder';
 
-const WHO: Record<Line['speaker'], { name: string; color: string }> = {
-  prosecution: { name: 'PROSECUTION · YES', color: '#3b82f6' },
-  defense: { name: 'DEFENSE · NO', color: '#ef4444' },
-  judge: { name: 'THE JUDGE', color: '#a16207' },
-  user: { name: 'YOU', color: '#e4e4e7' },
-};
 const SCENE_LABEL: Record<Scene, string> = {
   yes: 'S1 · Prosecution close-up',
   no: 'S2 · Defense close-up',
@@ -20,48 +16,6 @@ const SCENE_LABEL: Record<Scene, string> = {
   witness: 'S4 · Witness view (all three face you)',
   cutscene: 'Cut-scene',
 };
-
-/**
- * Hold-to-talk recorder. stop() waits for start() to finish, so a quick tap (or releasing while the
- * permission prompt is open) can't leave the mic recording. Resolves null if the mic is unavailable.
- */
-function useRecorder() {
-  const rec = useRef<MediaRecorder | null>(null);
-  const starting = useRef<Promise<boolean> | null>(null);
-  const chunks = useRef<Blob[]>([]);
-  return {
-    start(): Promise<boolean> {
-      starting.current = (async () => {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          chunks.current = [];
-          rec.current = new MediaRecorder(stream);
-          rec.current.ondataavailable = (e) => chunks.current.push(e.data);
-          rec.current.start();
-          return true;
-        } catch {
-          rec.current = null;
-          return false;
-        }
-      })();
-      return starting.current;
-    },
-    async stop(): Promise<Blob | null> {
-      if (starting.current) await starting.current;
-      starting.current = null;
-      const r = rec.current;
-      rec.current = null;
-      if (!r || r.state === 'inactive') return null;
-      return new Promise((resolve) => {
-        r.onstop = () => {
-          r.stream.getTracks().forEach((t) => t.stop());
-          resolve(new Blob(chunks.current, { type: r.mimeType }));
-        };
-        r.stop();
-      });
-    },
-  };
-}
 
 export default function TrialHarness() {
   const orch = useMemo(() => new TrialOrchestrator(), []);
@@ -96,17 +50,6 @@ export default function TrialHarness() {
     const t = setTimeout(() => orch.lineEnded(line.id), line.durationMs ?? 3000);
     return () => clearTimeout(t);
   }, [s.current, s.phase, orch]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function transcribe(blob: Blob): Promise<string> {
-    try {
-      const form = new FormData();
-      form.append('audio', blob, 'question.webm');
-      const res = await fetch('/api/voice/stt', { method: 'POST', body: form });
-      return res.ok ? ((await res.json()) as SttResponse).transcript.trim() : '';
-    } catch {
-      return '';
-    }
-  }
 
   async function down() {
     if (held.current) return;
