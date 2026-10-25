@@ -315,6 +315,22 @@ describe('attachPunch', () => {
     }
   });
 
+  it('a number spoken as several words keeps its last word when the punch starts with it', () => {
+    for (const [text, tts, punch] of [
+      ['By 2030', '[sad] By twenty thirty', 'thirty percent of jobs vanish.'],
+      ['In 2008', '[sad] In two thousand eight', 'Eight banks failed.'],
+      ['Back in the 1990s', '[sad] Back in the nineteen nineties', 'nineties kids had pensions.'],
+      ['You will be 35', '[sad] You will be thirty five', 'Five years behind.'],
+    ]) {
+      const l = line('defense', text, { tts });
+      attachPunch(l, { text: punch, tts: '' }, new Set());
+      expect(l.tts).toBe(tts);
+      const r = line('defense', text, { tts });
+      attachPunch(r, { text: punch, tts: '' }, new Set<Side>(['yes']));
+      expect(r.tts).toBe(`${tts} ${punch}`);
+    }
+  });
+
   it('"I am" before a number is not part of it: the spoken number stays in the clip', () => {
     const l = line('defense', 'I am 30', { tts: '[sad] I am thirty' });
     attachPunch(l, { text: 'Thirty and broke.', tts: '' }, new Set());
