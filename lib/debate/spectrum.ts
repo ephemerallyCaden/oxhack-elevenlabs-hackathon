@@ -52,11 +52,14 @@ export function spectrumLabel(value: number): SpectrumLabel {
 /** A topic's −1…+1 ruling stretched away from 0 so the court commits (0.1 → 0.28, 0.3 → 0.52, 0.6 → 0.76). */
 export const sway = (t: number) => Math.sign(t) * Math.abs(t) ** 0.55;
 
-/** Importance-weighted average of SCORED, non-removed topics, × 100. 0 before any topic is scored. */
+/** How hard the bar swings: the weighted average is multiplied by this (then capped at ±100), so a lean reads as one. */
+export const BAR_GAIN = 1.8;
+
+/** Importance-weighted average of SCORED, non-removed topics, × BAR_GAIN × 100, capped. 0 before any topic is scored. */
 export function computeSpectrum(topics: Topic[]): Spectrum {
   const scored = topics.filter((t) => live(t) && t.score);
   const w = scored.reduce((s, t) => s + t.importance, 0);
-  const raw = w === 0 ? 0 : scored.reduce((s, t) => s + t.importance * t.score!.t, 0) / w;
+  const raw = w === 0 ? 0 : (BAR_GAIN * scored.reduce((s, t) => s + t.importance * t.score!.t, 0)) / w;
   const value = Math.round(Math.max(-1, Math.min(1, raw)) * 100);
   return { value, label: spectrumLabel(value) };
 }
