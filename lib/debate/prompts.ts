@@ -17,7 +17,7 @@ export const SETUP_TASK = `You are setting up the trial in one go: THE JUDGE's a
 
 AGENDA. Choose 1-4 topics that together settle the question. Simple questions get 1-2 topics; big life decisions get 3, at most 4. Topics must not overlap, and each must be arguable both ways.
 For each topic give: a short title (2-4 words), the sub-question it settles, importance (0-1, how much it should count; they will be normalised), research_speed ("quick" if facts are easy to look up, e.g. costs, statistics; "deep" if it needs nuanced research), and the Judge's one-sentence intro line that ends by inviting the prosecution to begin.
-Also write the opening line: call the court to order, restate the question in second person, and name the topics (max 40 words).
+Also write the opening line: call the court to order and restate the question in second person, nothing else. Don’t list the topics: they are on screen and each gets its own intro line (max 20 words).
 
 PERSONAS. Both future selves are the witness in a future where they said YES:
 - yes: the BEST version, at the point in time when that future is MOST LIKELY to be going well (e.g. a gap year is usually best a few months in).

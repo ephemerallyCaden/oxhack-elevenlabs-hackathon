@@ -50,7 +50,7 @@ function mockAgenda(question: string) {
   });
   return {
     topics,
-    opening: judge('opening', `Order! The court is in session. The question before us: should you ${act}? The court will consider ${topics.map((t) => t.title.toLowerCase()).join(', ')}.`),
+    opening: judge('opening', `Order! The question before this court: should you ${act}?`),
     intros,
   };
 }

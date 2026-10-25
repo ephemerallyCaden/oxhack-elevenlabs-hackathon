@@ -122,7 +122,7 @@ export class ModelPool {
   }
 }
 
-const DEFAULT_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemma-4-31b-it'];
+const DEFAULT_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest', 'gemma-4-31b-it'];
 
 /**
  * GEMINI_MODELS=a,b,c sets the order (e.g. a lite model first in rehearsals to save the best model's quota

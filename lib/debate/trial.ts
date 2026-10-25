@@ -30,9 +30,21 @@ import * as P from './prompts';
 import { computeSpectrum, MAX_TOPICS, normalise, orderAgenda } from './spectrum';
 
 /**
- * One structured LLM call → parsed object, or `fallback()` if no key / error / timeout.
- * Gemini calls wait for a rate-limit slot inside the same time budget (`ms`); on a 429 they wait the
- * delay Gemini asks for and retry once if there's time left.
+ * Which model writes the debate. DEBATE_LLM in .env.local: `mock` (testing, no API calls),
+ * `gemini`, `claude`, or `auto` (default: Claude if its key is set, else Gemini, else mock).
+ */
+function debateLlm(): 'claude' | 'gemini' | 'mock' {
+  const want = process.env.DEBATE_LLM ?? 'auto';
+  if (want === 'mock') return 'mock';
+  if ((want === 'claude' || want === 'auto') && hasClaudeKey()) return 'claude';
+  if ((want === 'gemini' || want === 'auto') && hasGeminiKey()) return 'gemini';
+  return 'mock';
+}
+
+/**
+ * One structured Claude/Gemini call → parsed object, or `fallback()` if no key / error / timeout.
+ * Gemini calls go through the model pool (gemini.ts + ratelimit.ts): they wait for a free slot and fail
+ * over to the next model within the same time budget (`ms`).
  */
 async function ask<S extends z.ZodType, R>(
   task: string,
@@ -44,10 +56,10 @@ async function ask<S extends z.ZodType, R>(
   fallback: () => R,
   priority: Priority = 'interactive',
 ): Promise<{ value: R; fallback: boolean }> {
+  const llm = debateLlm();
+  if (llm === 'mock') return { value: fallback(), fallback: true };
   const system = `${P.COURT}\n\n${task}`;
-  if (!hasClaudeKey()) {
-    if (!hasGeminiKey()) return { value: fallback(), fallback: true };
-    // The model pool (gemini.ts) waits for a free slot and rotates models within this time budget.
+  if (llm === 'gemini') {
     const deadline = Date.now() + ms;
     return withFallback(async (signal) => build(await askGemini(system, content, schema, signal, priority, deadline)), fallback, ms, label);
   }
