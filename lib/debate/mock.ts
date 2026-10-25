@@ -169,8 +169,8 @@ export function mockTopic(req: TopicRequest): TopicResponse {
   for (const turn of req.turns) {
     const cut = !cutUsed && !turn.answer && turn.side === 'yes' && turn.cycle === 2;
     const line = mockLine(req, turn, cut);
-    // Offline trials exercise the punch shot: YES lands one on its opening line, NO on its second.
-    if (!cut && !turn.answer && ((turn.side === 'yes' && turn.cycle === 1) || (turn.side === 'no' && turn.cycle === 2))) {
+    // Offline trials exercise the punch shot (one per topic): YES lands it on its opening line.
+    if (!cut && !turn.answer && turn.side === 'yes' && turn.cycle === 1) {
       line.text = line.text.replace(/\.$/, ' — and that changes');
       attachPunch(line, MOCK_PUNCH[turn.side], punched);
     }

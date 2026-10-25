@@ -61,7 +61,8 @@ async function ask<S extends z.ZodType, R>(
 ): Promise<{ value: R; fallback: boolean }> {
   const llm = debateLlm();
   if (llm === 'mock') return { value: fallback(), fallback: true };
-  const system = `${P.COURT}\n\n${task}`;
+  // The profile clerk only extracts facts from the onboarding transcript: it writes no courtroom lines.
+  const system = task === P.PROFILE_TASK ? task : `${P.COURT}\n\n${task}`;
   if (llm === 'gemini') {
     const deadline = Date.now() + ms;
     return withFallback(async (signal) => build(await askGemini(system, content, schema, signal, priority, deadline)), fallback, ms, label);
@@ -88,11 +89,14 @@ async function ask<S extends z.ZodType, R>(
 }
 
 const Spoken = z.object({ text: z.string(), tts: z.string() });
+/** Models sometimes start a line with its speaker ("Judge: …"), even after leading audio tags. */
+const SPEAKER_LABEL = /^((?:\[[^\]\n]{1,40}\]\s*)*)(?:the\s+)?(?:judge|prosecution|defen[cs]e)(?:\s*\([^)]*\))?\s*:\s*/i;
+export const unlabel = (s: string) => s.replace(SPEAKER_LABEL, '$1');
 /** Display text never shows voice cues: models sometimes put audio tags like [confident] in `text` too. */
-export const plain = (s: string) => s.replace(/\[[^\]\n]{1,40}\]\s*/g, '').replace(/\s{2,}/g, ' ').trim();
+export const plain = (s: string) => unlabel(s).replace(/\[[^\]\n]{1,40}\]\s*/g, '').replace(/\s{2,}/g, ' ').trim();
 const judgeLine = (kind: Line['kind'], s: { text: string; tts: string }, topic_id?: string): Line => {
   if (!s.text.trim()) throw new Error(`empty ${kind} line`); // → mock fallback
-  return { id: uid('line'), speaker: 'judge', kind, text: plain(s.text), tts: s.tts, cites: [], topic_id };
+  return { id: uid('line'), speaker: 'judge', kind, text: plain(s.text), tts: unlabel(s.tts), cites: [], topic_id };
 };
 
 // ─── setup (cut-scene): agenda + Judge lines + personas in ONE call ─────────
@@ -193,7 +197,7 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
       P.cardsBlock(req.cards),
       P.historyBlock(req.history),
       `CUT-IN ALLOWED: ${req.cutInAllowed ? 'yes' : 'no'}`,
-      `PUNCH ALLOWED FOR: ${(['yes', 'no'] as const).filter((s) => !punchedSides(req.history, req.topic.id).has(s)).map((s) => s.toUpperCase()).join(', ') || 'nobody'}`,
+      `PUNCH ALLOWED: ${punchedSides(req.history, req.topic.id).size ? 'no' : 'yes'}`,
       P.turnsBlock(req.turns, req.userPoint),
     ].join('\n'),
     TopicSchema,
@@ -215,7 +219,7 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
           speaker: SIDE_SPEAKER[turn.side],
           kind: turn.answer ? 'answer' : 'argument',
           text: plain(o.text),
-          tts: o.tts,
+          tts: unlabel(o.tts),
           cites: o.cites.filter((c) => valid.has(c)),
           ...base,
         };
@@ -225,8 +229,8 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
           cutUsed = true;
           const other = turn.side === 'yes' ? 'no' : 'yes';
           lines.push(
-            { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in', text: plain(o.cut_in.text), tts: o.cut_in.tts, cites: [], ...base },
-            { id: uid('line'), speaker: SIDE_SPEAKER[turn.side], kind: 'resume', text: plain(o.resume.text), tts: o.resume.tts, cites: [], ...base },
+            { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in', text: plain(o.cut_in.text), tts: unlabel(o.cut_in.tts), cites: [], ...base },
+            { id: uid('line'), speaker: SIDE_SPEAKER[turn.side], kind: 'resume', text: plain(o.resume.text), tts: unlabel(o.resume.tts), cites: [], ...base },
           );
         } else if (line.text.trim().endsWith('—')) {
           // No cut-in for this line: don't leave it hanging mid-sentence.
