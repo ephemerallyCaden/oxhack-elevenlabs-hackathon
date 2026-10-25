@@ -10,7 +10,7 @@ import HoldToTalk from "@/components/HoldToTalk";
 // B4 voice lab: hear one line as all three future selves, tune settings, blind-test, and check audio tags.
 const ROLES: VoiceRole[] = ["prosecution", "defense", "judge"];
 const LABEL: Record<VoiceRole, string> = { prosecution: "Poker You", defense: "Quant You", judge: "Judge" };
-const COLOR: Record<VoiceRole, string> = { prosecution: "bg-red-600", defense: "bg-blue-600", judge: "bg-amber-600" };
+const COLOR: Record<VoiceRole, string> = { prosecution: "bg-blue-600", defense: "bg-red-600", judge: "bg-amber-600" };
 const PAN: Record<VoiceRole, number> = { prosecution: -0.7, defense: 0.7, judge: 0 };
 const BLIND_LINE = "There's a sixty-one percent chance you're broke in eighteen months. Think about that.";
 const TAGS_TO_CHECK = ["shouting", "scoffs", "whispers", "laughs", "sighs", "gasps"];

@@ -13,6 +13,15 @@
       "h": 1768
     },
     {
+      "name": "bench",
+      "file": "/assets/intro-layers/bench.webp",
+      "weight": 0.0,
+      "x": -300,
+      "y": 611,
+      "w": 1492,
+      "h": 155
+    },
+    {
       "name": "mid",
       "file": "/assets/intro-layers/mid.webp",
       "weight": 0.3,
@@ -20,6 +29,15 @@
       "y": 595,
       "w": 1492,
       "h": 255
+    },
+    {
+      "name": "desks",
+      "file": "/assets/intro-layers/desks.webp",
+      "weight": 0.3,
+      "x": -300,
+      "y": 677,
+      "w": 1492,
+      "h": 173
     },
     {
       "name": "floor1",

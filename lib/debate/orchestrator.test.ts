@@ -389,3 +389,45 @@ describe('fixes from the PR #79 review', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+describe('surprise punches', () => {
+  it('offline trials land at most one punch per side per topic, as setup + punch', async () => {
+    const s = await play('Should I take a gap year before university?');
+    const punches = s.transcript.filter((l) => l.punch);
+    expect(punches.length).toBeGreaterThan(0);
+    for (const t of s.agenda) {
+      const mine = punches.filter((l) => l.topic_id === t.id);
+      expect(mine.filter((l) => l.speaker === 'prosecution').length).toBeLessThanOrEqual(1);
+      expect(mine.filter((l) => l.speaker === 'defense').length).toBeLessThanOrEqual(1);
+    }
+    for (const l of punches) {
+      expect(['prosecution', 'defense']).toContain(l.speaker);
+      expect(l.text.endsWith(l.punch!.text)).toBe(true);
+      expect(l.durationMs).toBeGreaterThan(0); // setup clip (estimated offline)
+      expect(l.punch!.durationMs).toBeGreaterThan(0); // punch clip
+    }
+  });
+
+  it('voices setup and punch as two clips, the punch with the hotter (less stable) settings', async () => {
+    const calls: { text: string; speaker: string; voiceSettings?: { stability: number } }[] = [];
+    vi.stubGlobal('fetch', (url: string, init: RequestInit) => {
+      if (url !== '/api/voice/tts') return Promise.reject(new Error('offline'));
+      const body = JSON.parse(init.body as string);
+      calls.push(body);
+      const audioUrl = `blob:${calls.length}`;
+      return Promise.resolve({ ok: true, json: async () => ({ audioUrl, durationMs: 1000, fallback: false }) });
+    });
+    try {
+      const s = await play('Should I take a gap year before university?');
+      const line = s.transcript.find((l) => l.punch)!;
+      expect(line.audioUrl).toBeTruthy();
+      expect(line.punch!.audioUrl).toBeTruthy();
+      expect(line.punch!.audioUrl).not.toBe(line.audioUrl);
+      const punchCall = calls.find((c) => c.text === line.punch!.tts)!;
+      expect(punchCall.voiceSettings!.stability).toBe(line.speaker === 'prosecution' ? 0.3 : 0.4);
+      expect(calls.find((c) => c.text === line.punch!.tts && !c.voiceSettings)).toBeUndefined();
+    } finally {
+      vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
+    }
+  });
+});

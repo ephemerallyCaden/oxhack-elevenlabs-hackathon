@@ -36,6 +36,9 @@ import type {
 } from '@/types';
 import { SPEAKER_SCENE } from '@/types';
 import { estimateMs, postJson, uid, withFallback } from './fallback';
+import { setupText } from './punch';
+import { punchVoiceSettings } from '@/lib/voice/configs';
+import type { VoiceSettings } from '@elevenlabs/elevenlabs-js/api';
 import { mockCards, mockJudgeInterrupt, mockProfile, mockSetup, mockTopic, mockVerdict } from './mock';
 import { addTopic, computeSpectrum, removeTopic } from './spectrum';
 import { buildTranscript } from './transcript';
@@ -188,14 +191,33 @@ export class TrialOrchestrator {
   private async prepare(line: Line): Promise<Line> {
     if (line.durationMs != null) return line;
     if (line.speaker === 'user') return { ...line, durationMs: 0 };
-    const r = await withFallback<TtsResponse | null>(
-      (signal) => postJson<TtsResponse>('/api/voice/tts', { text: line.tts || line.text, speaker: line.speaker, voiceId: this.opts.voiceId }, signal),
-      null,
-      TIMEOUTS.tts.client,
-      'tts',
-    );
-    return r.value && !r.value.fallback ? { ...line, audioUrl: r.value.audioUrl, durationMs: r.value.durationMs } : { ...line, durationMs: estimateMs(line.text) };
+    const speaker = line.speaker;
+    const voice = async (text: string, settings?: VoiceSettings) => {
+      const r = await withFallback<TtsResponse | null>(
+        (signal) => postJson<TtsResponse>('/api/voice/tts', { text, speaker, voiceId: this.opts.voiceId, voiceSettings: settings }, signal),
+        null,
+        TIMEOUTS.tts.client,
+        'tts',
+      );
+      return r.value && !r.value.fallback ? { audioUrl: r.value.audioUrl, durationMs: r.value.durationMs } : null;
+    };
+    if (!line.punch || speaker === 'judge') {
+      const v = await voice(line.tts || line.text);
+      return v ? { ...line, ...v } : { ...line, durationMs: estimateMs(line.text) };
+    }
+    // Surprise punch: setup and punch are separate clips, voiced in parallel; the punch hotter.
+    const setup = setupText(line);
+    const [a, b] = await Promise.all([
+      voice(line.tts || setup),
+      voice(line.punch.tts || line.punch.text, punchVoiceSettings(speaker)),
+    ]);
+    return {
+      ...line,
+      ...(a ?? { durationMs: estimateMs(setup) }),
+      punch: { ...line.punch, ...(b ?? { durationMs: estimateMs(line.punch.text) }) },
+    };
   }
+
 
   private async say(line: Line): Promise<SayResult> {
     const ready = await (this.voiced.get(line.id) ?? this.prepare(line));

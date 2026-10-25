@@ -23,6 +23,7 @@ import type {
 import { SIDE_SPEAKER } from '@/types';
 import { computeSpectrum, ledgerBalance, normalise, orderAgenda } from './spectrum';
 import { uid } from './fallback';
+import { attachPunch, punchedSides } from './punch';
 
 /** "Should I take a gap year?" → "take a gap year" */
 export function actionOf(question: string): string {
@@ -156,12 +157,23 @@ function mockLedgerEntry(topicId: string, line: Line): LedgerEntry {
 }
 
 /** A whole planned exchange + its tally + the Judge's ruling. Offline, YES gets cut off once (cycle 2). */
+const MOCK_PUNCH = {
+  yes: { text: 'everything.', tts: '[passionate] every... thing.' },
+  no: { text: 'absolutely nothing.', tts: '[concerned] absolutely... nothing.' },
+};
+
 export function mockTopic(req: TopicRequest): TopicResponse {
   const lines: Line[] = [];
   let cutUsed = !req.cutInAllowed;
+  const punched = punchedSides(req.history, req.topic.id);
   for (const turn of req.turns) {
     const cut = !cutUsed && !turn.answer && turn.side === 'yes' && turn.cycle === 2;
     const line = mockLine(req, turn, cut);
+    // Offline trials exercise the punch shot: YES lands one on its opening line, NO on its second.
+    if (!cut && !turn.answer && ((turn.side === 'yes' && turn.cycle === 1) || (turn.side === 'no' && turn.cycle === 2))) {
+      line.text = line.text.replace(/\.$/, ' — and that changes');
+      attachPunch(line, MOCK_PUNCH[turn.side], punched);
+    }
     lines.push(line);
     if (cut) {
       cutUsed = true;

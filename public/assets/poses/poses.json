@@ -1,0 +1,287 @@
+{
+  "frameMs": 200,
+  "roles": {
+    "prosecution": {
+      "width": 895,
+      "height": 572,
+      "faces": "right",
+      "poses": {
+        "breakdown1": {
+          "frames": [
+            "/assets/poses/prosecution/breakdown1.webp"
+          ],
+          "head": "side",
+          "centres": [
+            [
+              688.5,
+              226.0
+            ]
+          ],
+          "anim": "static"
+        },
+        "confident1": {
+          "frames": [
+            "/assets/poses/prosecution/confident1.webp"
+          ],
+          "head": "side",
+          "centres": [
+            [
+              456.0,
+              13.5
+            ]
+          ],
+          "anim": "static"
+        },
+        "confident2": {
+          "frames": [
+            "/assets/poses/prosecution/confident2-1.webp",
+            "/assets/poses/prosecution/confident2-2.webp"
+          ],
+          "head": "side",
+          "centres": [
+            [
+              531.0,
+              136.0
+            ],
+            [
+              531.0,
+              136.0
+            ]
+          ],
+          "anim": "once-hold"
+        },
+        "neutral1": {
+          "frames": [
+            "/assets/poses/prosecution/neutral1.webp"
+          ],
+          "head": "side",
+          "centres": [
+            [
+              438.5,
+              18.5
+            ]
+          ],
+          "anim": "static"
+        },
+        "neutral2": {
+          "frames": [
+            "/assets/poses/prosecution/neutral2-1.webp",
+            "/assets/poses/prosecution/neutral2-2.webp",
+            "/assets/poses/prosecution/neutral2-3.webp"
+          ],
+          "head": "front",
+          "centres": [
+            [
+              438.5,
+              18.5
+            ],
+            [
+              438.5,
+              18.5
+            ],
+            [
+              438.5,
+              18.5
+            ]
+          ],
+          "anim": "loop"
+        },
+        "shocked1": {
+          "frames": [
+            "/assets/poses/prosecution/shocked1-1.webp",
+            "/assets/poses/prosecution/shocked1-2.webp"
+          ],
+          "head": "side",
+          "centres": [
+            [
+              453.5,
+              23.5
+            ],
+            [
+              453.5,
+              -6.5
+            ]
+          ],
+          "anim": "once-hold"
+        },
+        "sweating1": {
+          "frames": [
+            "/assets/poses/prosecution/sweating1.webp"
+          ],
+          "head": "front",
+          "centres": [
+            [
+              438.5,
+              83.5
+            ]
+          ],
+          "anim": "static"
+        },
+        "sweating2": {
+          "frames": [
+            "/assets/poses/prosecution/sweating2.webp"
+          ],
+          "head": "side",
+          "centres": [
+            [
+              511.0,
+              133.5
+            ]
+          ],
+          "anim": "static"
+        }
+      }
+    },
+    "defense": {
+      "width": 895,
+      "height": 572,
+      "faces": "left",
+      "poses": {
+        "breakdown1": {
+          "frames": [
+            "/assets/poses/defense/breakdown1.webp"
+          ],
+          "head": "side",
+          "centres": [
+            [
+              206.5,
+              226.0
+            ]
+          ],
+          "anim": "static"
+        },
+        "confident1": {
+          "frames": [
+            "/assets/poses/defense/confident1.webp"
+          ],
+          "head": "side",
+          "centres": [
+            [
+              439.0,
+              13.5
+            ]
+          ],
+          "anim": "static"
+        },
+        "confident2": {
+          "frames": [
+            "/assets/poses/defense/confident2-1.webp",
+            "/assets/poses/defense/confident2-2.webp"
+          ],
+          "head": "side",
+          "centres": [
+            [
+              364.0,
+              136.0
+            ],
+            [
+              364.0,
+              136.0
+            ]
+          ],
+          "anim": "once-hold"
+        },
+        "neutral1": {
+          "frames": [
+            "/assets/poses/defense/neutral1.webp"
+          ],
+          "head": "side",
+          "centres": [
+            [
+              456.5,
+              18.5
+            ]
+          ],
+          "anim": "static"
+        },
+        "neutral2": {
+          "frames": [
+            "/assets/poses/defense/neutral2-1.webp",
+            "/assets/poses/defense/neutral2-2.webp",
+            "/assets/poses/defense/neutral2-3.webp"
+          ],
+          "head": "front",
+          "centres": [
+            [
+              456.5,
+              18.5
+            ],
+            [
+              456.5,
+              18.5
+            ],
+            [
+              456.5,
+              18.5
+            ]
+          ],
+          "anim": "loop"
+        },
+        "shocked1": {
+          "frames": [
+            "/assets/poses/defense/shocked1-1.webp",
+            "/assets/poses/defense/shocked1-2.webp"
+          ],
+          "head": "side",
+          "centres": [
+            [
+              441.5,
+              23.5
+            ],
+            [
+              441.5,
+              -6.5
+            ]
+          ],
+          "anim": "once-hold"
+        },
+        "sweating1": {
+          "frames": [
+            "/assets/poses/defense/sweating1.webp"
+          ],
+          "head": "front",
+          "centres": [
+            [
+              456.5,
+              83.5
+            ]
+          ],
+          "anim": "static"
+        },
+        "sweating2": {
+          "frames": [
+            "/assets/poses/defense/sweating2.webp"
+          ],
+          "head": "side",
+          "centres": [
+            [
+              384.0,
+              133.5
+            ]
+          ],
+          "anim": "static"
+        }
+      }
+    },
+    "judge": {
+      "width": 838,
+      "height": 378,
+      "faces": "right",
+      "poses": {
+        "neutral1": {
+          "frames": [
+            "/assets/poses/judge/neutral1.webp"
+          ],
+          "head": "front",
+          "centres": [
+            [
+              498.5,
+              -29.0
+            ]
+          ],
+          "anim": "static"
+        }
+      }
+    }
+  }
+}

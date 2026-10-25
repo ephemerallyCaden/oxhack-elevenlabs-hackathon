@@ -1,307 +1,81 @@
-/* Expression animations — ported from public/mockup-expressions.html.
-   All selectors are scoped under .char (the Character root).
-   The character uses a fixed internal px coordinate system; the stage scales it. */
+/* Character poses + expression particles. Ported from public/mockups/pose-cycling.html
+   (particles from public/mockup-expressions.html). Root: .pc (Character.tsx), with the
+   expression as .x-<expression> and .talking while the character speaks. */
 
-/* ===== CHARACTER STRUCTURE ===== */
-.char {
-  position: relative;
+/* ===== STRUCTURE ===== */
+.pc { position: absolute; }
+.pc-bob { position: absolute; inset: 0; }
+.pc-head { position: absolute; width: 0; height: 0; z-index: 1; } /* the head marker point */
+.pc-head-in { position: absolute; left: 0; top: 0; }
+.pc-face { position: absolute; inset: 0; width: 100%; height: 100%; }
+.pc-jaw { will-change: transform; }
+.pc-pose { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; } /* the suit, in front of the neck */
+.pc-flash {
+  position: absolute; inset: 0; z-index: 4; background: #fff; opacity: 0; pointer-events: none;
+  -webkit-mask-size: 100% 100%; mask-size: 100% 100%;
+  animation: bodyFlash 150ms ease-out 1;
 }
-.char .char-mirror {
-  position: absolute;
-  inset: 0;
-}
-.char .char-pose {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
-  height: 100%;
-}
-.char .face-container {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2;
-}
-.char .face-upper,
-.char .face-jaw {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  object-fit: cover;
-}
-.char .face-jaw {
-  will-change: transform;
-}
-.char .overlay {
-  position: absolute;
-  z-index: 3;
-  pointer-events: none;
-}
+@keyframes bodyFlash { from { opacity: 0.85; } to { opacity: 0; } }
 
-/* ===== TALKING — independent of expressions =====
-   Jaw: inline transform from JS TalkEngine on .face-jaw.
-   Bob: on .char-bob, a wrapper layer that no expression animates,
-   so talking composes with every expression instead of overriding it. */
-.char .char-bob {
-  position: absolute;
-  inset: 0;
-}
-.state-talking .char-bob {
-  animation: talkBob 0.4s ease-in-out infinite;
-}
-@keyframes talkBob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
-}
+/* ===== TALKING (jaw: useTalkEngine; bob on a wrapper no expression animates) ===== */
+.talking .pc-bob { animation: talkBob 0.4s ease-in-out infinite; }
+@keyframes talkBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
 
-/* ===== CONFIDENT — chin up, sparkle + body lean ===== */
-.state-confident .face-container {
-  transform: translateX(-50%) perspective(200px) rotateX(-3deg) scaleY(0.95);
-}
-.state-confident .char-pose {
-  transform: translateX(-50%) translateX(4px);
-  filter: brightness(1.15);
-  transition: transform 0.2s steps(2), filter 0.3s steps(3);
-}
-.state-confident .overlay-sparkle1 {
-  top: 2px; right: 8px;
-  width: 24px; height: 24px;
-  animation: sparkle 1.5s ease-in-out infinite;
-}
-.state-confident .overlay-sparkle2 {
-  top: 20px; left: 10px;
-  width: 16px; height: 16px;
-  animation: sparkle 1.5s ease-in-out 0.5s infinite;
-}
-@keyframes sparkle {
-  0%, 100% { transform: scale(0.8) rotate(0deg); opacity: 0.6; }
-  50% { transform: scale(1.2) rotate(10deg); opacity: 1; }
-}
+/* ===== PARTICLES =====
+   .pc-fx sits on the head point; --F = face unit (px), --m = 1 / -1 (mirrored for the defense).
+   Each particle: --dx/--dy centre and --w size, in face units. */
+.pc-fx { position: absolute; width: 0; height: 0; z-index: 5; pointer-events: none; }
+.fxp { position: absolute; width: 0; height: 0; display: none; left: calc(var(--m) * var(--F) * var(--dx) * 1px); top: calc(var(--F) * var(--dy) * 1px); }
+.fxp > img { position: absolute; display: block; max-width: none; width: calc(var(--F) * var(--w) * 1px); left: calc(var(--F) * var(--w) * -0.5px); top: calc(var(--F) * var(--w) * -0.5px); }
+.x-confident .fxp.spark, .x-sweating .fxp.sweat, .x-angry .fxp.vein, .x-shocked .fxp.bang, .x-breakdown .fxp.crack { display: block; }
 
-/* ===== SWEATING — squish, tremble, sweat drops + body shake ===== */
-.state-sweating .face-container {
-  animation: tremble 0.12s linear infinite;
-}
-.state-sweating .char-pose {
-  animation: bodyShake 0.15s steps(2) infinite;
-}
-@keyframes tremble {
-  0%, 100% { transform: translateX(-50%) scaleX(0.95) translateX(0); }
-  25% { transform: translateX(-50%) scaleX(0.95) translateX(-1px); }
-  75% { transform: translateX(-50%) scaleX(0.95) translateX(1px); }
-}
-@keyframes bodyShake {
-  0%, 100% { transform: translateX(-50%) translateX(0); }
-  50% { transform: translateX(-50%) translateX(3px); }
-}
-.state-sweating .overlay-sweat1 {
-  top: 10px; right: 18px;
-  width: 16px; height: 20px;
-  animation: sweatDrop 2s ease-in infinite;
-}
-.state-sweating .overlay-sweat2 {
-  top: 10px; right: 26px;
-  width: 12px; height: 16px;
-  animation: sweatDrop 2s ease-in 0.4s infinite;
-}
-.state-sweating .overlay-sweat3 {
-  top: 14px; right: 12px;
-  width: 10px; height: 13px;
-  animation: sweatDrop 2s ease-in 0.9s infinite;
-}
-@keyframes sweatDrop {
-  0% { transform: translateY(0); opacity: 0.9; }
-  80% { transform: translateY(50px); opacity: 0.7; }
-  100% { transform: translateY(60px); opacity: 0; }
-}
+/* Confident: sparkles */
+.fxp.spark img { animation: sparkle 1.5s ease-in-out var(--d) infinite; }
+@keyframes sparkle { 0%, 100% { transform: scale(0.8) rotate(0deg); opacity: 0.6; } 50% { transform: scale(1.2) rotate(10deg); opacity: 1; } }
 
-/* ===== SHOCKED — jaw drop, exclamation pop, flash + body jolt ===== */
-.state-shocked .face-container {
-  transform: translateX(-50%) scaleY(1.1) translateY(4px);
-  animation: shockBounce 0.3s ease-out 1;
-}
-.state-shocked .char-pose {
-  animation: bodyShock 0.3s steps(2) forwards;
-}
-@keyframes shockBounce {
-  0% { transform: translateX(-50%) scale(1.15); }
-  60% { transform: translateX(-50%) scaleY(1.12) translateY(5px); }
-  100% { transform: translateX(-50%) scaleY(1.1) translateY(4px); }
-}
-@keyframes bodyShock {
-  0% { transform: translateX(-50%) scale(1) translateY(0); }
-  100% { transform: translateX(-50%) scale(1.1) translateY(-6px); filter: brightness(1.2); }
-}
-.state-shocked .overlay-exclamation {
-  top: -30px; left: 50%;
-  width: 28px; height: 36px;
-  animation: exclamationPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards,
-             exclamationBounce 0.6s ease-in-out 0.5s infinite;
-}
-@keyframes exclamationPop {
-  0% { transform: translateX(-50%) scale(0); opacity: 0; }
-  60% { transform: translateX(-50%) scale(1.3); opacity: 1; }
-  100% { transform: translateX(-50%) scale(1); opacity: 1; }
-}
-@keyframes exclamationBounce {
-  0%, 100% { transform: translateX(-50%) scale(1) translateY(0); }
-  50% { transform: translateX(-50%) scale(1.15) translateY(-4px); }
-}
-.state-shocked .flash-overlay {
-  position: absolute;
-  inset: 0;
-  background: white;
-  border-radius: 12px;
-  animation: flashPulse 0.15s ease-out forwards;
-  z-index: 10;
-}
-@keyframes flashPulse {
-  0% { opacity: 0.8; }
-  100% { opacity: 0; }
-}
+/* Sweating: drops + head tremble */
+.fxp.sweat img { animation: sweatDrop 2s ease-in var(--d) infinite; opacity: 0; }
+@keyframes sweatDrop { 0% { transform: translateY(0); opacity: 0.9; } 80% { transform: translateY(calc(var(--F) * 0.85px)); opacity: 0.7; } 100% { transform: translateY(calc(var(--F) * 1px)); opacity: 0; } }
+.x-sweating .pc-head { animation: tremble 0.12s linear infinite; }
+@keyframes tremble { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-1px); } 75% { transform: translateX(1px); } }
 
-/* ===== ANGRY — veins, brow slam, red tint ===== */
-.state-angry .face-container {
-  animation: angryPulse 0.5s ease-in-out infinite;
-}
-@keyframes angryPulse {
-  0%, 100% { transform: translateX(-50%) perspective(200px) rotateX(-4deg) scale(1); }
-  50% { transform: translateX(-50%) perspective(200px) rotateX(-4deg) scale(1.02); }
-}
-.state-angry .overlay-vein1 {
-  top: -4px; right: 10px;
-  width: 30px; height: 30px;
-  animation: veinBounce1 0.45s ease-in-out infinite;
-}
-.state-angry .overlay-vein2 {
-  top: 8px; left: 8px;
-  width: 22px; height: 22px;
-  animation: veinBounce2 0.55s ease-in-out infinite;
-}
-@keyframes veinBounce1 {
-  0%, 100% { transform: scale(1) translateY(0); }
-  50% { transform: scale(1.25) translateY(-3px); }
-}
-@keyframes veinBounce2 {
-  0%, 100% { transform: scale(1) translateY(0); }
-  50% { transform: scale(1.2) translateY(-4px); }
-}
+/* Angry: veins, red tint, brows slam down */
+.fxp.vein img { animation: var(--anim) var(--t) ease-in-out infinite; }
+@keyframes veinBounce1 { 0%, 100% { transform: scale(1) translateY(0); } 50% { transform: scale(1.25) translateY(-3px); } }
+@keyframes veinBounce2 { 0%, 100% { transform: scale(1) translateY(0); } 50% { transform: scale(1.2) translateY(-4px); } }
+@keyframes veinBounce3 { 0%, 100% { transform: scale(1) translateY(0); } 50% { transform: scale(1.3) translateY(-2px); } }
+.x-angry .pc-face { animation: angryTint 0.5s ease-in-out infinite; }
+@keyframes angryTint { 0%, 100% { filter: sepia(0.2) saturate(1.25) hue-rotate(-12deg); } 50% { filter: sepia(0.45) saturate(1.7) hue-rotate(-22deg) brightness(0.97); } }
+.pc-brow { position: absolute; height: auto; max-width: none; z-index: 3; opacity: 0; pointer-events: none; transform: translate(-50%, -50%) scaleX(var(--bs, 1)); }
+.x-angry .pc-brow { animation: browSlam 0.15s ease-in forwards; }
+@keyframes browSlam { 0% { opacity: 0; transform: translate(-50%, -120%) scaleX(var(--bs, 1)); } 100% { opacity: 1; transform: translate(-50%, -50%) scaleX(var(--bs, 1)); } }
 
-/* Eyebrows: slam down on anger. Position set via CSS vars from FACE_CAL. */
-.face-eyebrow {
-  position: absolute;
-  width: 45%;
-  height: auto;
-  z-index: 3;
-  pointer-events: none;
-  opacity: 0;
-}
-.face-eyebrow-left {
-  left: var(--eye-left-x, 32%);
-  top: var(--eye-left-y, 24%);
-  transform: translate(-50%, -50%);
-}
-.face-eyebrow-right {
-  left: var(--eye-right-x, 68%);
-  top: var(--eye-right-y, 24%);
-  transform: translate(-50%, -50%) scaleX(-1);
-}
-.state-angry .face-eyebrow-left {
-  animation: browSlamL 0.15s ease-in forwards;
-}
-.state-angry .face-eyebrow-right {
-  animation: browSlamR 0.15s ease-in forwards;
-}
-@keyframes browSlamL {
-  0% { opacity: 0; transform: translate(-50%, -120%); }
-  100% { opacity: 1; transform: translate(-50%, -50%); }
-}
-@keyframes browSlamR {
-  0% { opacity: 0; transform: translate(-50%, -120%) scaleX(-1); }
-  100% { opacity: 1; transform: translate(-50%, -50%) scaleX(-1); }
-}
+/* Shocked: exclamation pop, head jolt, body flash (.pc-flash) */
+.fxp.bang img { animation: exclamationPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards, exclamationBounce 0.6s ease-in-out 0.5s infinite; }
+@keyframes exclamationPop { 0% { transform: scale(0); opacity: 0; } 60% { transform: scale(1.3); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes exclamationBounce { 0%, 100% { transform: scale(1) translateY(0); } 50% { transform: scale(1.15) translateY(-4px); } }
+.x-shocked .pc-head { animation: headShock 0.3s ease-out 1; }
+@keyframes headShock { 0% { transform: scale(1.15); } 100% { transform: scale(1); } }
 
-/* Side profile: one visible eye/eyebrow toward the facing edge. */
-.face-container.facing-right .face-eyebrow-right { display: none; }
-.face-container.facing-right .face-eyebrow-left {
-  left: 62%;
-  top: var(--eye-left-y, 24%);
+/* Breakdown: lightning cracks fan out from the head, grey face, shaking body */
+.fxp.crack { --len: 1.15; }
+.crack-slot {
+  position: absolute; left: calc(var(--F) * -0.25px); top: 0; width: calc(var(--F) * 0.5px); height: calc(var(--F) * 1.7px);
+  transform-origin: 50% 0; transform: rotate(var(--a));
+  filter: invert(1) drop-shadow(0 0 1px #000) drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
 }
-.face-container.facing-left .face-eyebrow-left { display: none; }
-.face-container.facing-left .face-eyebrow-right {
-  left: 38%;
-  top: var(--eye-right-y, 24%);
+.crack-slot img {
+  position: absolute; left: 0; top: calc(var(--F) * 0.42px); width: 100%; height: calc(var(--F) * var(--len) * 1px); opacity: 0;
+  animation: crackReveal 0.6s ease-out var(--d) forwards, crackFlicker 0.3s step-end calc(var(--d) + 0.8s) infinite;
 }
+@keyframes crackReveal { 0% { clip-path: inset(0 0 100% 0); opacity: 0; } 30% { opacity: 1; } 100% { clip-path: inset(0 0 0 0); opacity: 1; } }
+@keyframes crackFlicker { 0%, 49.9% { transform: scaleX(1); } 50%, 100% { transform: scaleX(-1); } }
+.x-breakdown .pc-face { filter: saturate(0.3) brightness(0.8); transition: filter 1s ease; }
+.x-breakdown .pc-pose { animation: bdShake 0.2s steps(2) infinite; }
+@keyframes bdShake { 0%, 100% { transform: rotate(-1deg) translateX(0); } 50% { transform: rotate(-1deg) translateX(-2px); } }
 
-.state-angry .face-tint {
-  position: absolute;
-  z-index: 2;
-  border-radius: 50%;
-  background: rgba(232, 64, 64, 0.1);
-  animation: redPulse 0.5s ease-in-out infinite;
-  pointer-events: none;
-}
-@keyframes redPulse {
-  0%, 100% { opacity: 0.05; }
-  50% { opacity: 0.15; }
-}
-
-/* ===== BREAKDOWN — melt, desaturate, crack fan + tilt shake ===== */
-.state-breakdown .face-container {
-  transform: translateX(-50%) perspective(200px) rotateX(8deg) translateY(3px);
-  filter: saturate(0.3) brightness(0.8);
-  transition: all 1s ease;
-}
-.state-breakdown .char-pose {
-  filter: grayscale(0.4) brightness(0.75);
-  animation: bodyBreakdown 0.2s steps(2) infinite;
-}
-@keyframes bodyBreakdown {
-  0%, 100% { transform: translateX(-50%) rotate(-2deg) translateX(0); }
-  50% { transform: translateX(-50%) rotate(-2deg) translateX(-4px); }
-}
-.state-breakdown .crack-fan {
-  position: absolute;
-  top: 38px; left: 50%;
-  width: 0; height: 0;
-  z-index: 5;
-}
-.state-breakdown .crack-slot {
-  position: absolute;
-  top: 0; left: -10px;
-  width: 20px; height: 60px;
-  transform-origin: top center;
-}
-.state-breakdown .crack-slot img {
-  width: 100%; height: 100%;
-  animation: crackReveal 0.6s ease-out forwards, crackFlicker 0.3s step-end 0.8s infinite;
-}
-.state-breakdown .crack-1 { transform: rotate(0deg); }
-.state-breakdown .crack-1 img { animation-delay: 0s; }
-.state-breakdown .crack-2 { transform: rotate(55deg); }
-.state-breakdown .crack-2 img { animation-delay: 0.1s; }
-.state-breakdown .crack-3 { transform: rotate(-50deg); }
-.state-breakdown .crack-3 img { animation-delay: 0.15s; }
-.state-breakdown .crack-4 { transform: rotate(120deg); }
-.state-breakdown .crack-4 img { animation-delay: 0.2s; }
-.state-breakdown .crack-5 { transform: rotate(-115deg); }
-.state-breakdown .crack-5 img { animation-delay: 0.25s; }
-.state-breakdown .crack-6 { transform: rotate(175deg); }
-.state-breakdown .crack-6 img { animation-delay: 0.3s; }
-@keyframes crackReveal {
-  0% { clip-path: inset(0 0 100% 0); opacity: 0; }
-  30% { opacity: 1; }
-  100% { clip-path: inset(0 0 0 0); opacity: 1; }
-}
-@keyframes crackFlicker {
-  0%, 49.9% { transform: scaleX(1); }
-  50%, 100% { transform: scaleX(-1); }
-}
+/* Pedestals in front of the lawyers (Courtroom.tsx) */
+.pc-pedestal { position: absolute; pointer-events: none; user-select: none; transform-origin: 50% 0; }
 
 /* ===== MANGA-NOIR STAGE (tuned in public/mockups/intro-crane.html) ===== */
 .manga-stage {
@@ -314,8 +88,7 @@
 .manga-camera {
   position: absolute;
   inset: 0;
-  transition: transform 0.8s ease-out;
-  transform-origin: center center;
+  transform-origin: center center; /* moves via the whip pan (whip.ts), never a CSS transition */
 }
 /* Depth planes of courtroom-bg-tall.png (scripts/make-intro-layers.py). At rest they
    recombine into the original image; the intro moves them at different rates. */
@@ -403,4 +176,34 @@
   pointer-events: none;
   border: 4px solid #000;
   box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(0, 0, 0, 0.3);
+}
+
+/* ===== SURPRISE PUNCH SHOT (tuned in public/mockups/punch-shot-pick.html) ===== */
+.punch-shot {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  overflow: hidden;
+}
+.punch-streak {
+  position: absolute;
+  left: 0;
+  background: #fff;
+  border-radius: 99px;
+  will-change: transform;
+  animation: punchStreak var(--dur) linear var(--delay) infinite, punchFlicker 0.12s steps(2) infinite;
+}
+@keyframes punchStreak {
+  from { transform: translateX(var(--from)); }
+  to { transform: translateX(var(--to)); }
+}
+@keyframes punchFlicker {
+  0% { opacity: var(--op); }
+  50% { opacity: calc(var(--op) * 0.35); }
+}
+.punch-char {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
 }

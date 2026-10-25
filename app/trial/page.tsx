@@ -9,11 +9,11 @@
 //   4. Crowd ambience via engine.setAmbience() during debate
 //   5. Voice playback via engine.playVoice() with stereo panning
 
-import { useEffect, useMemo, useRef, useState, useCallback, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import type { Line, Scene, Speaker, SttResponse } from '@/types';
 import { TrialOrchestrator } from '@/lib/debate/orchestrator';
 import { sessionVoiceId } from '@/components/onboarding/VoiceStep';
-import { sessionSelfie } from '@/components/onboarding/SelfieStep';
+import { useSessionHeads } from '@/components/onboarding/sessionHeads';
 import SharePanel from '@/components/share/SharePanel';
 import { sessionProfile, takeSessionQuestion } from '@/lib/onboarding/session';
 import { useTrialState } from '@/lib/debate/useTrial';
@@ -21,7 +21,10 @@ import { footnotes } from '@/lib/debate/transcript';
 import * as engine from '@/lib/audio/engine';
 import type { BgmName } from '@/lib/audio/assets';
 import Courtroom from '@/components/courtroom/Courtroom';
-import { deriveMoods } from '@/components/courtroom/expressions';
+import { deriveMoods, type CharacterMood } from '@/components/courtroom/expressions';
+import { runPunch, type PunchStage } from '@/components/courtroom/punchSequence';
+import { setupText } from '@/lib/debate/punch';
+import { SPEAKER_SCENE } from '@/types';
 
 // -- Scene -> BGM mapping --
 const SCENE_MUSIC: Record<Scene, BgmName | null> = {
@@ -32,10 +35,10 @@ const SCENE_MUSIC: Record<Scene, BgmName | null> = {
   cutscene: 'cutscene',
 };
 
-// -- Speaker display config --
+// -- Speaker display config (YES blue, NO red: the suits in the pose art) --
 const WHO: Record<Line['speaker'], { name: string; color: string }> = {
-  prosecution: { name: 'PROSECUTION \u00B7 YES', color: '#c2410c' },
-  defense: { name: 'DEFENSE \u00B7 NO', color: '#2563eb' },
+  prosecution: { name: 'PROSECUTION \u00B7 YES', color: '#3b82f6' },
+  defense: { name: 'DEFENSE \u00B7 NO', color: '#ef4444' },
   judge: { name: 'THE JUDGE', color: '#a16207' },
   user: { name: 'YOU', color: '#e4e4e7' },
 };
@@ -79,15 +82,13 @@ function useRecorder() {
   };
 }
 
-const noSubscribe = () => () => {};
-
 // -- Main trial page --
 export default function TrialPage() {
   // Onboarding (/) leaves the user's cloned voice + profile in sessionStorage; none → presenter voice.
   const orch = useMemo(() => new TrialOrchestrator({ voiceId: sessionVoiceId(), profile: sessionProfile() }), []);
   const s = useTrialState(orch);
-  // Selfie from onboarding (client-only, so the server render keeps the default face)
-  const faceSrc = useSyncExternalStore(noSubscribe, sessionSelfie, () => undefined);
+  // Head cut-outs from onboarding (client-only, so the server render keeps the default heads)
+  const heads = useSessionHeads();
   const recorder = useRecorder();
   const [holding, setHolding] = useState(false);
   const held = useRef(false);
@@ -100,6 +101,9 @@ export default function TrialPage() {
   const introMode =
     introFinished || s.phase === 'ask' || s.phase === 'done' ? null : s.current ? 'play' : 'hold';
   const finishIntro = useCallback(() => setIntroFinished(true), []);
+  // Surprise punch: which beat of the sequence is on screen, and a counter that shakes the screen.
+  const [punchStage, setPunchStage] = useState<PunchStage | null>(null);
+  const [shakeKey, setShakeKey] = useState(0);
 
   // Track previous scene/phase for change detection
   const prevScene = useRef<Scene>(s.scene);
@@ -183,6 +187,35 @@ export default function TrialPage() {
     if (line.speaker === 'user') {
       orch.lineEnded(line.id);
       return;
+    }
+    if (line.punch && (line.speaker === 'prosecution' || line.speaker === 'defense')) {
+      const speaker = line.speaker;
+      const ctl = new AbortController();
+      const sleep = (ms: number) =>
+        new Promise<void>((done) => {
+          const t = setTimeout(done, ms);
+          ctl.signal.addEventListener('abort', () => (clearTimeout(t), done()), { once: true });
+        });
+      void runPunch(
+        line,
+        {
+          stage: setPunchStage,
+          clip: (url, ms) => (url ? engine.playVoice(speaker, url).catch(() => {}) : sleep(ms)),
+          sfx: (name) => void engine.playSfx(name),
+          shake: () => setShakeKey((k) => k + 1),
+          sleep,
+        },
+        ctl.signal,
+      ).then(() => {
+        if (ctl.signal.aborted) return;
+        setPunchStage(null);
+        orch.lineEnded(line.id);
+      });
+      return () => {
+        ctl.abort();
+        engine.stopVoice(); // interrupted mid-punch: cut the clip
+        setPunchStage(null);
+      };
     }
     if (line.audioUrl) {
       const speaker = line.speaker as Exclude<Speaker, 'user'>;
@@ -292,16 +325,47 @@ export default function TrialPage() {
 
 
   // -- Expressions (sticky) + talking (independent), derived from the transcript --
+  // Surprise punch on screen: who punched, who reacts, which shot.
+  const punchLine = punchStage && s.phase === 'speaking' && line?.punch ? line : undefined;
+  const punchWho = punchLine?.speaker === 'prosecution' || punchLine?.speaker === 'defense' ? punchLine.speaker : undefined;
+  const punchOpp = punchWho === 'prosecution' ? 'defense' : 'prosecution';
+  const shot =
+    !punchWho ? undefined
+      : punchStage === 'to-judge' || punchStage === 'judge' ? ('judge' as const)
+        : punchStage === 'to-opponent' || punchStage === 'opponent' ? SPEAKER_SCENE[punchOpp]
+          : undefined;
+
   const moods = useMemo(() => {
     const m = deriveMoods(s);
     if (introMode) for (const who of ['prosecution', 'defense', 'judge'] as const) m[who] = { ...m[who], talking: false };
+    if (punchWho && punchStage) {
+      const shocked: CharacterMood = { expression: 'shocked', talking: false };
+      m[punchWho] = { ...m[punchWho], talking: punchStage === 'setup' };
+      if (punchStage === 'judge' || punchStage === 'to-opponent' || punchStage === 'opponent') m.judge = shocked;
+      if (punchStage === 'opponent') m[punchOpp] = shocked;
+    }
     return m;
-  }, [s, introMode]);
+  }, [s, introMode, punchWho, punchOpp, punchStage]);
+
+  const punch =
+    punchWho && punchLine?.punch && punchStage && punchStage !== 'setup'
+      ? {
+          who: punchWho,
+          stage: punchStage === 'cut' || punchStage === 'punch' ? punchStage : punchStage === 'to-judge' ? ('out' as const) : ('gone' as const),
+          // The speaker keeps their current expression; talks while the punch plays.
+          mood: { expression: moods[punchWho].expression, talking: punchStage === 'punch' },
+          typeMs: punchStage === 'punch' ? (punchLine.punch.durationMs ?? 1400) * 0.9 : 0,
+        }
+      : undefined;
 
   // -- Textbox content --
   const box =
     s.phase === 'speaking' && line
-      ? { name: WHO[line.speaker].name, color: WHO[line.speaker].color, text: line.text }
+      ? {
+          name: WHO[line.speaker].name,
+          color: WHO[line.speaker].color,
+          text: !line.punch ? line.text : !punchStage || punchStage === 'setup' ? setupText(line) : punchStage === 'cut' ? '' : line.punch.text,
+        }
       : s.phase === 'listening'
         ? {
             name: 'YOU',
@@ -361,7 +425,7 @@ export default function TrialPage() {
   );
 
   return (
-    <main className="relative h-dvh w-full overflow-hidden bg-black text-zinc-100">
+    <main className="relative h-dvh w-full overflow-hidden bg-black text-zinc-100" data-punch-stage={punchStage ?? undefined}>
       {/* Full-bleed manga courtroom */}
       <div className="absolute inset-0">
         <Courtroom
@@ -373,9 +437,13 @@ export default function TrialPage() {
           objection={s.phase === 'listening'}
           status={introMode === 'play' ? undefined : s.phase === 'preparing' || s.phase === 'thinking' ? s.status : undefined}
           controls={introMode ? undefined : controls}
-          faceSrc={faceSrc}
+          heads={heads}
+          interrupting={s.phase === 'listening'}
           intro={introMode}
           onIntroDone={finishIntro}
+          shot={shot}
+          punch={punch}
+          shakeKey={shakeKey}
         />
       </div>
 
@@ -397,7 +465,7 @@ export default function TrialPage() {
       {/* Top-right: spectrum + agenda (hidden through the intro) */}
       {!introMode && (
         <aside className="absolute right-4 top-4 z-50 w-72 rounded-lg bg-black/70 p-3">
-          <div className="relative h-2 rounded-full bg-gradient-to-r from-blue-600 via-zinc-600 to-orange-600">
+          <div className="relative h-2 rounded-full bg-gradient-to-r from-red-600 via-zinc-600 to-blue-600">
             <div className="absolute -top-1 h-4 w-1 rounded bg-white transition-all" style={{ left: pos }} />
           </div>
           <p className="mt-1 text-center text-xs font-bold">

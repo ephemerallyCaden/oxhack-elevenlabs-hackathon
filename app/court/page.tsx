@@ -13,7 +13,7 @@ export default function Court() {
           judge: { expression: 'idle', talking: false },
         }}
         speakerName="DEFENSE · NO"
-        speakerColor="#2563eb"
+        speakerColor="#ef4444"
         text="STOP RIGHT THERE! You're quoting the P90. The median poker player makes twelve thousand pounds. That's less than minimum wage."
       />
     </main>
