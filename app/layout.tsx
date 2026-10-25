@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Bangers, Geist, Geist_Mono } from "next/font/google";
+import { Bangers, Geist, Geist_Mono, Press_Start_2P } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -19,6 +19,13 @@ const bangers = Bangers({
   subsets: ["latin"],
 });
 
+// The spectrum HUD (components/courtroom/SpectrumBar.tsx)
+const pixel = Press_Start_2P({
+  variable: "--font-pixel",
+  weight: "400",
+  subsets: ["latin"],
+});
+
 export const metadata: Metadata = {
   title: "Roulette",
   description: "The Council of Future Selves — bet on your future.",
@@ -28,7 +35,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${bangers.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${bangers.variable} ${pixel.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>

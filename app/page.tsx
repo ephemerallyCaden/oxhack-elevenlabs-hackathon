@@ -47,6 +47,8 @@ function sessionHeadsJson() {
   }
 }
 
+// The title page's jury: a full gallery, seats per pew from the back row to the front.
+const GALLERY = [12, 13, 14, 15];
 const noSubscribe = () => () => {};
 const hasRestore = () => {
   try {
@@ -282,9 +284,7 @@ export default function Home() {
     <main className="court-ui" style={needsRestore && !restored ? { visibility: "hidden" } : undefined}>
       <div className="menu-bg" />
       {menu ? (
-        <div className="menu-grid">
-          {/* eslint-disable-next-line @next/next/no-img-element -- the logo, sized by the layout */}
-          <img className="menu-seal" src="/assets/logo/roulette-seal-1200.webp" alt="Roulette: the Court of Future Selves" />
+        <div className="menu-title">
           <div className="menu-actions">
             {step === "welcome" && (
               <>
@@ -292,7 +292,7 @@ export default function Home() {
                 <h1 className="ct-title-sm">Your future is on trial.</h1>
                 <p className="ct-body">Read one short paragraph out loud, then put your decision before the court.</p>
                 {error && <p role="alert" className="ct-alert">{error}</p>}
-                <div className="flex flex-col items-start gap-4">
+                <div className="flex flex-wrap items-center justify-center gap-x-7 gap-y-3">
                   <button className="ct-primary" onClick={begin} {...aimProps}>Begin</button>
                   <button className="ct-link" onClick={() => { clearSession(); router.push("/trial"); }}>Skip setup: go straight to court</button>
                   {past.length > 0 && (
@@ -303,7 +303,7 @@ export default function Home() {
                 </div>
                 {/* Always shown; greyed out until Supabase Auth is configured (NEXT_PUBLIC_SUPABASE_*). */}
                 {(
-                  <div className="flex flex-col gap-3 border-t-2 border-[var(--c-oak)] pt-5">
+                  <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 border-t-2 border-[var(--c-oak)] pt-4">
                     {signedInAs ? (
                       <p className="ct-small">
                         Signed in as {signedInAs}. <button className="ct-link" onClick={() => (setMyKey(undefined), void signOut())}>Sign out</button>
@@ -311,7 +311,7 @@ export default function Home() {
                     ) : (
                       <>
                         <span className="ct-small">{roster.length ? "Been here before? Find your face in the jury, or:" : "Been here before?"}</span>
-                        <button className="ct-google self-start" disabled={!authConfigured} onClick={() => (setError(""), void signInWithGoogle())}>
+                        <button className="ct-google" disabled={!authConfigured} onClick={() => (setError(""), void signInWithGoogle())}>
                           <b aria-hidden="true">G</b> Sign in with Google
                         </button>
                         {!authConfigured && <span className="ct-small">Sign-in isn’t switched on for this build yet.</span>}
@@ -324,7 +324,7 @@ export default function Home() {
 
             {step === "back" && returning && (
               <>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center justify-center gap-4">
                   {/* eslint-disable-next-line @next/next/no-img-element -- stored data URL */}
                   {returning.selfie && <img src={returning.selfie} alt="Your saved face" className="h-[92px] w-20 border-2 border-[var(--c-oak)] bg-[var(--c-wood)] object-contain" />}
                   <span className="ct-kicker">Court of Future Selves</span>
@@ -332,11 +332,11 @@ export default function Home() {
                 <h1 className="ct-title-sm">Welcome back{returning.profile.name ? `, ${returning.profile.name}` : ""}.</h1>
                 <p className="ct-body">The court remembers your voice and your face.</p>
                 {/* Shared demo laptop: the next person must find "someone new" as easily as "that's me". */}
-                <div className="flex flex-col items-start gap-3">
+                <div className="flex flex-wrap items-center justify-center gap-3">
                   <button className="ct-primary" onClick={() => welcomeBack(returning)} {...aimProps}>That’s me: ask a new question</button>
                   <button className="ct-ghost" onClick={() => void someoneNew()}>I’m someone new</button>
                 </div>
-                <button className="ct-link danger self-start" onClick={() => void forgetMe()}>Forget me (delete my voice &amp; face)</button>
+                <button className="ct-link danger" onClick={() => void forgetMe()}>Forget me (delete my voice &amp; face)</button>
                 {error && <p role="alert" className="ct-alert">{error}</p>}
               </>
             )}
@@ -411,6 +411,7 @@ export default function Home() {
         onRemove={menu ? (e) => forgetFace(e.email) : undefined}
         leaning={aim}
         compact={!menu}
+        pews={menu ? GALLERY : undefined}
       />
       {past.length > 0 && (
         <div className={`seam-strip${pastOpen ? " open" : ""}`} aria-hidden={!pastOpen} inert={!pastOpen}>

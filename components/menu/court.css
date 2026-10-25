@@ -73,25 +73,22 @@
 .ct-meter { position: relative; height: 6px; background: linear-gradient(90deg, #dc2626, #4a4840 50%, #2563eb); }
 .ct-meter > i { position: absolute; top: -4px; width: 3px; height: 14px; background: #fff; box-shadow: 0 0 0 1px #000; transform: translateX(-50%); }
 
-/* ── Menu: the seal on the left, the actions on the right, the jury below ── */
-/* Background: the seal's own lighting (warm umber glow, near-black edges). */
-.menu-bg { position: absolute; inset: 0; background: radial-gradient(ellipse 62% 72% at 28% 36%, #1f1e1c 0%, #141413 40%, #0c0c0b 66%, #050505 100%); }
+/* ── Menu: the title and actions up top, the jury gallery filling the rest ── */
+/* Background: a dim glow above the gallery (warm umber, near-black edges). */
+.menu-bg { position: absolute; inset: 0; background: radial-gradient(ellipse 70% 60% at 50% 22%, #1f1e1c 0%, #141413 40%, #0c0c0b 66%, #050505 100%); }
 /* The courtroom's ink fall-off along the bottom (expressions.css .manga-ink), without its vignette. */
 .menu-ink { position: absolute; inset: 0; z-index: 40; pointer-events: none; background: linear-gradient(0deg, rgb(0 0 0 / 0.45) 0%, rgb(0 0 0 / 0.15) 22%, transparent 40%); }
 .menu-bg::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle, rgb(0 0 0 / 0.18) 1px, transparent 1.2px) 0 0 / 4px 4px; }
-.menu-grid {
-  position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 54fr) minmax(360px, 46fr); align-items: center;
-  gap: 4vw; min-height: 100dvh; padding: 4vh 6vw calc(var(--jury-h) + 2vh);
-}
-.menu-seal { width: min(64vh, 44vw); aspect-ratio: 1; justify-self: center; filter: saturate(0.3) contrast(1.2) brightness(0.72) drop-shadow(0 26px 44px rgb(0 0 0 / 0.7)); user-select: none; }
-.menu-actions { display: flex; flex-direction: column; gap: 22px; max-width: 470px; }
+.menu-title { position: relative; z-index: 4; display: flex; justify-content: center; padding: 5vh 6vw 0; }
+.menu-actions { display: flex; flex-direction: column; align-items: center; gap: 16px; max-width: 680px; text-align: center; }
+.menu-actions .ct-body { margin-inline: auto; }
 .menu-step { position: relative; z-index: 2; min-height: 100dvh; display: flex; padding: 3vh 4vw calc(var(--jury-h-compact) + 2vh); }
 .menu-step-seal { position: absolute; left: 2.2vw; top: 2.2vh; width: clamp(72px, 7vw, 112px); filter: saturate(0.3) contrast(1.2) brightness(0.72) drop-shadow(0 8px 16px rgb(0 0 0 / 0.6)); }
 .menu-step-panel {
   width: min(760px, 92vw); margin: auto; padding: 32px 36px; display: flex; flex-direction: column; gap: 22px;
   background: rgb(23 20 16 / 0.94); border-top: 3px solid var(--c-oak); box-shadow: 0 24px 60px rgb(0 0 0 / 0.55);
 }
-.court-ui { --jury-h: 30vh; --jury-h-compact: 15vh; }
+.court-ui { --jury-h-compact: 15vh; }
 
 /* ── The jury box ── */
 .jury { filter: saturate(0.3) contrast(1.15) brightness(0.8); position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; flex-direction: column; align-items: center; pointer-events: none; }
@@ -133,6 +130,13 @@
   26% { translate: 0 -14px; scale: 0.98 1.03; } /* up */
   44% { translate: 0 0; scale: 1.03 0.96; } /* land */
 }
+/* Title page: the whole gallery. Each pew back (--depth) is narrower, smaller and darker. */
+.jury.gallery .jury-pew { width: calc(100vw - var(--depth) * 5vw); }
+.jury.gallery .jury-pew + .jury-pew { margin-top: -2.4vh; }
+.jury.gallery .juror, .jury.gallery .jury-slot { --h: calc(11.5vh - var(--depth) * 1.6vh); }
+.jury.gallery .jury-back > .jury-backrest { height: 4.2vh; }
+.jury.gallery .jury-front > .jury-backrest { height: 9vh; }
+.jury.gallery .jury-back .juror.kept img { filter: saturate(0.65) brightness(calc(0.92 - var(--depth) * 0.09)); }
 .jury.compact .jury-front { margin-top: 0; }
 .jury.compact .juror { --h: 7.8vh; }
 .jury.compact .jury-front > .jury-backrest { height: 5vh; }
@@ -210,17 +214,24 @@
 .ct-google b { display: grid; place-items: center; width: 1.3em; height: 1.3em; font: 700 15px/1 system-ui, sans-serif; color: var(--c-black); background: #fff; }
 
 @media (max-width: 760px) {
-  .court-ui { --jury-h: 18vh; }
-  .menu-grid { grid-template-columns: 1fr; padding-top: 3vh; }
-  .menu-seal { width: min(70vw, 34vh); }
+  .menu-title { padding-top: 3vh; }
   .jury-back { display: none; }
   /* Keep the middle five seats (kept faces sit in the middle first). */
   .jury-front .jury-heads > :nth-child(1), .jury-front .jury-heads > :nth-child(n + 7),
   .jury-front .jury-plates > :nth-child(1), .jury-front .jury-plates > :nth-child(n + 7) { display: none; }
+  .jury.gallery .jury-front .jury-heads > *, .jury.gallery .jury-front .jury-plates > * { display: flex; }
+  /* The gallery's 15-seat front pew: its middle five. */
+  .jury.gallery .jury-front .jury-heads > :nth-child(-n + 5), .jury.gallery .jury-front .jury-heads > :nth-child(n + 11),
+  .jury.gallery .jury-front .jury-plates > :nth-child(-n + 5), .jury.gallery .jury-front .jury-plates > :nth-child(n + 11) { display: none; }
   .seam-half { width: 100%; height: 50%; }
   .seam-yes { top: 0; bottom: auto; } .seam-no { top: 50%; }
   .seam-fig { display: none; }
   .seam-band, .seam-band.wide { width: auto; margin: 0 14px; min-height: 100dvh; border: 0; }
+}
+/* Short laptop screens: the back-most pew would run into the title (faces fill it last). */
+@media (max-height: 820px) {
+  .jury.gallery .jury-pew:first-child { display: none; }
+  .menu-title { padding-top: 3.5vh; }
 }
 @media (prefers-reduced-motion: reduce) {
   .seam-streak, .jury .juror img, .jury:not(.compact) .juror.kept img { animation: none; }
