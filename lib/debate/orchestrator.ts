@@ -103,6 +103,9 @@ export function planAfterInterrupt(side: Side, cycle: number, total: number): To
   return turns;
 }
 
+/** Thrown inside a stopped trial to unwind run() (see TrialOrchestrator.stop). */
+const STOPPED = new Error('trial stopped');
+
 export class TrialOrchestrator {
   private state: TrialState = this.initial();
   private listeners = new Set<() => void>();
@@ -176,6 +179,7 @@ export class TrialOrchestrator {
     try {
       await this.run();
     } catch (err) {
+      if (err === STOPPED) return; // replaced by a newer trial: finish quietly
       console.error('[trial] crashed', err);
       this.set({ phase: 'done', status: 'The court is adjourned (something broke).' });
     }
@@ -238,7 +242,7 @@ export class TrialOrchestrator {
   private async say(line: Line): Promise<SayResult> {
     const ready = await (this.voiced.get(line.id) ?? this.prepare(line));
     this.voiced.delete(line.id);
-    if (this.stopped) return 'done';
+    if (this.stopped) throw STOPPED; // unwinds run(): a replaced trial says nothing more
     const done = new Promise<SayResult>((r) => (this.sayResolve = r));
     this.set({
       phase: 'speaking',
@@ -250,6 +254,7 @@ export class TrialOrchestrator {
     });
     const result = await done;
     this.sayResolve = undefined;
+    if (this.stopped) throw STOPPED;
     this.recordLedger();
     // The line is over: no interrupting it while the next one is generated/voiced.
     if (result === 'done') this.set({ canInterrupt: false });
@@ -304,7 +309,7 @@ export class TrialOrchestrator {
     await this.sayHandled(setup.opening);
 
     let topic: Topic | undefined;
-    while ((topic = this.state.agenda.find((t) => t.status === 'pending'))) {
+    while (!this.stopped && (topic = this.state.agenda.find((t) => t.status === 'pending'))) {
       this.patchTopic(topic.id, { status: 'active' });
       this.set({ activeTopicId: topic.id, cycle: 1, totalCycles: BASE_CYCLES });
       // Usually written already. If not (the agenda just changed), write it now with priority, hidden behind the intro.

@@ -181,6 +181,11 @@
 .ct-share button { border-radius: 0; font-family: var(--ui); color: var(--c-black); background: var(--c-plaster); }
 .ct-share button:hover:not(:disabled) { background: #fff; }
 
+/* The verdict screen covers the trial and scrolls when its band is taller than the window (laptops):
+   the YES/NO fields and the record drawer stay pinned while the band scrolls. */
+.court-ui.verdict-screen { position: fixed; inset: 0; overflow-y: auto; }
+.verdict-screen .seam-half, .verdict-screen .seam-strip { position: fixed; }
+
 /* ── Chips (confirm step) ── */
 .ct-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .ct-chip { display: inline-flex; align-items: baseline; gap: 0.5em; padding: 0.45em 0.75em; background: var(--c-wood); border: 2px solid var(--c-oak); font: 500 16px/1.2 var(--ui); color: var(--c-plaster); text-align: left; }

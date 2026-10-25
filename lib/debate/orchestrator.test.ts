@@ -471,3 +471,36 @@ describe('surprise punches', () => {
     }
   });
 });
+
+describe('stop(): a replaced trial goes quiet', () => {
+  it('makes no more API calls and sends no more updates once stopped', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', (url: string) => {
+      calls.push(String(url));
+      return Promise.reject(new Error('offline'));
+    });
+    try {
+      const orch = new TrialOrchestrator({});
+      let updates = 0;
+      orch.subscribe(() => updates++);
+      orch.start('Should I learn to sail?');
+      await new Promise((r) => setTimeout(r, 0));
+      orch.stop();
+      const [nCalls, nUpdates] = [calls.length, updates];
+      await new Promise((r) => setTimeout(r, 200));
+      expect(calls.length).toBe(nCalls);
+      expect(updates).toBe(nUpdates);
+    } finally {
+      vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
+    }
+  });
+
+  it('a stopped trial waiting on a line is released (it never hangs)', async () => {
+    const orch = new TrialOrchestrator({});
+    let speaking = false;
+    orch.subscribe(() => (speaking ||= orch.getState().phase === 'speaking'));
+    orch.start('Should I learn to sail?');
+    await vi.waitFor(() => expect(speaking).toBe(true), { timeout: 3000 });
+    expect(() => orch.stop()).not.toThrow();
+  });
+});

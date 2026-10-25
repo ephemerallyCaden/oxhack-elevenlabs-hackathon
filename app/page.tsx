@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import type { UserProfile } from "@/types";
 import type { SavedUser } from "@/lib/users/store";
@@ -89,6 +89,8 @@ export default function Home() {
   const past = useMemo(() => parsePastTrials(pastJson), [pastJson]);
 
   // Back from Google mid-onboarding (the draft), or "New case" from the verdict (keeps voice + face).
+  // Hidden until checked, so "New case" doesn't flash the title page for a frame on its way to the confirm step.
+  const [restored, setRestored] = useState(false);
   useEffect(() => {
     void Promise.resolve().then(() => {
       const draft = takeDraft();
@@ -103,16 +105,18 @@ export default function Home() {
         setStep("confirm");
         history.replaceState(null, "", "/");
       }
+      setRestored(true);
     });
   }, []);
 
   // The jury: every saved face (thumbnail + first name). Decoration: a slow or failed fetch leaves silhouettes.
-  useEffect(() => {
+  const loadJury = useCallback(() => {
     fetch("/api/jury", { method: "POST", signal: AbortSignal.timeout(5000) })
       .then((r) => (r.ok ? r.json() : { jurors: [] }))
-      .then(({ jurors }: { jurors: { name?: string; face: string }[] }) => setStored(jurors.map((j) => ({ email: "", name: j.name, face: j.face }))))
+      .then(({ jurors }: { jurors: { key: string; name?: string; face: string }[] }) => setStored(jurors.map((j) => ({ email: "", key: j.key, name: j.name, face: j.face }))))
       .catch(() => {});
   }, []);
+  useEffect(loadJury, [loadJury]);
 
   // Signed in → their saved file, if they kept one → "Welcome back".
   useEffect(() => {
@@ -180,6 +184,7 @@ export default function Home() {
     clearSession();
     bump((n) => n + 1);
     setStep("welcome");
+    loadJury(); // your face leaves the jury now, not in a minute
   }
 
   function forgetFace(email: string) {
@@ -214,7 +219,10 @@ export default function Home() {
       const heads = sessionHeadsJson();
       const body = { profile, voiceId: sessionVoiceId() ?? null, ...(heads ? { heads } : { selfie }) };
       const r = await authedPost("/api/users", session, body, AbortSignal.timeout(5000)).catch(() => null);
-      if (r?.ok && session.user.email) addToRoster({ email: session.user.email, name: profile.name, face: selfie ? await faceThumb(selfie) : undefined });
+      if (r?.ok && session.user.email) {
+        const { juryKey } = (await r.json().catch(() => ({}))) as { juryKey?: string };
+        addToRoster({ email: session.user.email, name: profile.name, face: selfie ? await faceThumb(selfie) : undefined, key: juryKey });
+      } else if (r?.status === 503) console.warn("[menu] sign-in isn't configured on the server: your voice and face weren't kept");
     }
     router.push("/trial");
   }
@@ -228,7 +236,7 @@ export default function Home() {
   const pickJuror = authConfigured ? (e: RosterEntry) => e.email && e.email !== signedInAs && void signInWithGoogle(e.email) : undefined;
 
   return (
-    <main className="court-ui">
+    <main className="court-ui" style={restored ? undefined : { visibility: "hidden" }}>
       <div className="menu-bg" />
       {menu ? (
         <div className="menu-grid">
@@ -344,7 +352,15 @@ export default function Home() {
           </div>
         </div>
       )}
-      <Jury roster={[...yours, ...roster, ...stored]} signedInAs={signedInAs} onPick={pickJuror} onRemove={(e) => forgetFace(e.email)} leaning={aim} compact={!menu} />
+      {/* Kept faces are also saved users: seat each person once. Taps only on the title page (mid-onboarding a tap would throw the progress away). */}
+      <Jury
+        roster={[...yours, ...roster, ...stored.filter((j) => !roster.some((r) => r.key && r.key === j.key))]}
+        signedInAs={signedInAs}
+        onPick={menu ? pickJuror : undefined}
+        onRemove={menu ? (e) => forgetFace(e.email) : undefined}
+        leaning={aim}
+        compact={!menu}
+      />
       {past.length > 0 && (
         <div className={`seam-strip${pastOpen ? " open" : ""}`} aria-hidden={!pastOpen} inert={!pastOpen}>
           <div className="grid grid-cols-2 md:grid-cols-4">

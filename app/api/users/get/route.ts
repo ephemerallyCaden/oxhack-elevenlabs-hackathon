@@ -1,9 +1,10 @@
-import { requireUser, unauthorized } from "@/lib/auth/server";
+import { authAvailable, authUnavailable, requireUser, unauthorized } from "@/lib/auth/server";
 import { getUser } from "@/lib/users/store";
 
 // POST → { user } (the signed-in user's own saved voice, face and profile) or 404.
 // POST (not GET): Next 16 Cache Components prerenders GET handlers.
 export async function POST(req: Request) {
+  if (!authAvailable()) return authUnavailable();
   const me = await requireUser(req);
   if (!me) return unauthorized();
   const user = await getUser(me.id);

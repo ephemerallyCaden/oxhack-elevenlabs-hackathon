@@ -46,8 +46,9 @@ export function signInWithGoogle(email?: string) {
   });
 }
 
+/** This tab only ("local"): never ends the user's sessions on their other devices, no network wait. */
 export async function signOut() {
-  await auth()?.signOut();
+  await auth()?.signOut({ scope: "local" });
 }
 
 /** POST with the session's access token (the server checks it). */

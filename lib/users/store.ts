@@ -63,21 +63,22 @@ export async function getUser(id: string): Promise<SavedUser | null> {
   }
 }
 
-/** The jury on the homepage: every saved user's front face + name, newest first. Nothing else. */
-export async function listFaces(limit = 15): Promise<{ name?: string; selfie: string }[]> {
-  type Row = { profile: UserProfile | null; selfie: string | null };
+/** The jury on the homepage: every saved user's front face + first name, newest first (server-side only). */
+export async function listFaces(limit = 15): Promise<{ id: string; name?: string; selfie: string }[]> {
+  type Row = { id: string; profile: UserProfile | null; selfie: string | null };
   let rows: Row[] = [];
   if (supabase) {
-    const { data } = await supabase.from("users").select("profile, selfie").not("selfie", "is", null).order("updated_at", { ascending: false }).limit(limit);
+    const { data } = await supabase.from("users").select("id, profile, selfie").not("selfie", "is", null).order("updated_at", { ascending: false }).limit(limit);
     rows = (data ?? []) as Row[];
   } else {
     const files = await readdir(DIR).catch(() => [] as string[]);
     const saved = await Promise.all(files.filter((f) => f.endsWith(".json")).map((f) => readFile(join(DIR, f), "utf8").then((t) => JSON.parse(t) as SavedUser).catch(() => null)));
-    rows = saved.filter((u): u is SavedUser => !!u).slice(0, limit).map((u) => ({ profile: u.profile, selfie: packFaces(u) }));
+    rows = saved.filter((u): u is SavedUser => !!u).slice(0, limit).map((u) => ({ id: u.id, profile: u.profile, selfie: packFaces(u) }));
   }
   return rows.flatMap((r) => {
     const { selfie } = unpackFaces(r.selfie);
-    return selfie ? [{ name: r.profile?.name?.split(/\s+/)[0], selfie }] : [];
+    const name = typeof r.profile?.name === "string" ? r.profile.name.trim().split(/\s+/)[0].slice(0, 20) || undefined : undefined;
+    return selfie ? [{ id: r.id, name, selfie }] : [];
   });
 }
 

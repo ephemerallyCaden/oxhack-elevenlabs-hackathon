@@ -65,7 +65,9 @@ describe('/api/users* require a verified Google session', () => {
   it('saves under the signed-in user id, never one the client picks', async () => {
     const r = await save(req({ id: 'someone-elses-id-123456', profile: { name: 'Maya' } }, 'good-token'));
     expect(r.status).toBe(200);
-    expect((await r.json()).id).toBe(MAYA);
+    const body = await r.json();
+    expect(body.id).toBe(MAYA);
+    expect(body.juryKey).toMatch(/^[\w-]{12}$/); // opaque: lets this browser skip its own seat in the jury
     expect([...rows.keys()]).toEqual([MAYA]);
   });
 
@@ -107,5 +109,13 @@ describe('voice clones stay tied to their owner', () => {
     await del(req({}, 'good-token'));
     expect(voices.get('leo')).toBe('user_someone-else-0000000000');
     expect(voices.get('presenter')).toBe('Presenter voice');
+  });
+});
+
+describe('images the server will decode later', () => {
+  it('only accepts PNG/JPEG/WebP faces (no SVG)', async () => {
+    const svg = 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=';
+    expect((await save(req({ profile: {}, selfie: svg }, 'good-token'))).status).toBe(400);
+    expect((await save(req({ profile: {}, heads: { front: { src: svg } } }, 'good-token'))).status).toBe(400);
   });
 });

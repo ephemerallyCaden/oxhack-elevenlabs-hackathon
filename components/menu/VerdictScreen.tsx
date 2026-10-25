@@ -37,7 +37,7 @@ export default function VerdictScreen({
   const tone = side === 'yes' ? 'var(--c-yes)' : side === 'no' ? 'var(--c-no)' : 'var(--c-stone)';
 
   return (
-    <section className="court-ui fixed inset-0 z-[60]" aria-label="Verdict">
+    <section className="court-ui verdict-screen z-[60]" aria-label="Verdict">
       <Seam
         yes={yes}
         no={no}
