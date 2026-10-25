@@ -71,8 +71,23 @@ describe('writeTopic: a model punch with a label and tags is cleaned like the li
       return schema.parse(o);
     });
     const res = await writeTopic({ question: 'Should I?', topic, cards: [], history: [], turns: [{ side: 'yes', cycle: 1 }, { side: 'no', cycle: 1 }], cutInAllowed: true, urgent: true });
-    expect(res.lines[0].text.endsWith('—')).toBe(true);
+    expect(res.lines[0].text).toBe('The top players earn more than —');
+    expect(res.lines[0].tts?.endsWith('—')).toBe(true);
     expect(res.lines[1].kind).toBe('cut_in');
+  });
+
+  it('a line ending in a full stop before a cut-in loses the stop, not gains " . —"', async () => {
+    askGemini.mockImplementation(async (_s: string, _c: string, schema: { parse: (x: unknown) => unknown }) => {
+      const o = out(empty);
+      o.lines[0].text = 'The median earns less.';
+      o.lines[0].tts = '[concerned] The median earns less.';
+      o.lines[0].cut_in = { text: 'Hold on!', tts: '[interrupting] Hold on!' };
+      o.lines[0].resume = { text: 'Let me finish.', tts: '[confident] Let me finish.' };
+      return schema.parse(o);
+    });
+    const res = await writeTopic({ question: 'Should I?', topic, cards: [], history: [], turns: [{ side: 'yes', cycle: 1 }, { side: 'no', cycle: 1 }], cutInAllowed: true, urgent: true });
+    expect(res.lines[0].text).toBe('The median earns less —');
+    expect(res.lines[0].tts).toBe('[concerned] The median earns less —');
   });
 
   it('a line that is only a speaker label counts as empty (→ the mock)', async () => {

@@ -112,10 +112,22 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   const shown = textLetter ? quoted.replace(/\p{L}/u, textLetter) : quoted;
   // The punch's spoken form (numbers written out, "..." beats), without its delivery tag.
   const spoken = draft!.tts.replace(/^\s*\[[^\]]+\]\s*/, '').trim() || punch;
+  /** A partial overlap of the clip with the punch is cut only if the text overlapped too, or the clip lines up
+   *  with the setup right before it ("…more than | every quant"): a coincidence ("…returns seven | percent"
+   *  for the text's "7%") never cuts a setup word. */
+  const clipOverlap = (tts: string, tail: string) => {
+    const k = overlap(tts, tail);
+    if (k <= 0) return false;
+    if (textOverlap) return true;
+    const clip = words(tts);
+    const setup = words(cut.rest);
+    return setup.length > 0 && clip[clip.length - k - 1] === setup[setup.length - 1];
+  };
   const refuse = () => {
     if (!already) line.text = joinSentence(cut.rest, shown);
     // The voice line must say the whole sentence too (it may hold only the setup, as the prompt asks).
-    if (line.tts?.trim() && !endsWithWords(line.tts, spoken) && !endsWithWords(line.tts, punch)) line.tts = joinSentence(before(line.tts, spoken).rest, spoken);
+    if (line.tts?.trim() && !endsWithWords(line.tts, spoken) && !endsWithWords(line.tts, punch))
+      line.tts = joinSentence(clipOverlap(line.tts, spoken) ? before(line.tts, spoken).rest : line.tts, spoken);
     return false;
   };
   if (line.speaker !== 'prosecution' && line.speaker !== 'defense') return refuse();
@@ -132,16 +144,17 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   // The setup clip is voiced from `tts`: if it also says (part of) the punch, in either form, cut it.
   if (line.tts?.trim()) {
     const t = line.tts;
-    // Partial overlaps when the text had one too, or the clip runs past the setup into the punch (else
-    // "freedom, freedom to fail" — same word count in clip and text — would lose a word in the clip).
-    const partial = textOverlap || words(t).length > words(cut.rest).length;
+    // Partial overlaps only where clipOverlap allows them (else "freedom, freedom to fail" — same word
+    // count in clip and text — would lose a word in the clip).
     const rest = endsWithWords(t, spoken)
       ? before(t, spoken).rest
       : endsWithWords(t, punch)
         ? before(t, punch).rest
-        : partial
-          ? before(t, overlap(t, spoken) ? spoken : punch).rest
-          : t.trim();
+        : clipOverlap(t, spoken)
+          ? before(t, spoken).rest
+          : clipOverlap(t, punch)
+            ? before(t, punch).rest
+            : t.trim();
     line.tts = words(rest).length ? rest : ''; // nothing left but a tag: voice the setup text instead
   }
   return true;

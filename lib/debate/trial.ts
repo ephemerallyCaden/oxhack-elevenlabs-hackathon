@@ -236,7 +236,9 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
         if (!cutUsed && !turn.answer && plain(o.cut_in.text) && plain(o.resume.text)) {
           cutUsed = true;
           // The cut-in interrupts this line: it must end cut off (a punch on it is dropped by design).
-          if (!line.text.trim().endsWith('—')) line.text = `${line.text.trim()} —`;
+          const cutOff = (s: string) => (s.trim().endsWith('—') ? s.trim() : `${s.trim().replace(/[.!?…]+$/, '')} —`);
+          line.text = cutOff(line.text);
+          if (line.tts?.trim()) line.tts = cutOff(line.tts);
           const other = turn.side === 'yes' ? 'no' : 'yes';
           lines.push(
             { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in', text: plain(o.cut_in.text), tts: unlabel(o.cut_in.tts), cites: [], ...base },

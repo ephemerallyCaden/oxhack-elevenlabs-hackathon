@@ -202,6 +202,15 @@ describe('attachPunch', () => {
     expect(l.text).toBe('I said no more excuses.');
   });
 
+  it('a spoken-number coincidence never cuts a setup word from the clip', () => {
+    const l = line('prosecution', 'The fund returns 7%', { tts: '[confident] The fund returns seven percent' });
+    attachPunch(l, { text: 'percent of nothing.', tts: '' }, new Set());
+    expect(l.tts).toBe('[confident] The fund returns seven percent');
+    const r = line('defense', 'In 2 years you will be 2', { tts: '[concerned] In two years you will be two' });
+    attachPunch(r, { text: 'two years behind.', tts: '' }, new Set<Side>(['yes']));
+    expect(r.tts).toBe('[concerned] In two years you will be two two years behind.');
+  });
+
   it('leaves a cut-off line alone (the cut-in finishes it)', () => {
     const l = line('defense', 'And the median is —');
     attachPunch(l, { text: 'nothing.', tts: '' }, new Set());
