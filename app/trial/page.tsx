@@ -21,7 +21,10 @@ import { footnotes } from '@/lib/debate/transcript';
 import * as engine from '@/lib/audio/engine';
 import type { BgmName } from '@/lib/audio/assets';
 import Courtroom from '@/components/courtroom/Courtroom';
-import { deriveMoods } from '@/components/courtroom/expressions';
+import { deriveMoods, type CharacterMood } from '@/components/courtroom/expressions';
+import { runPunch, type PunchStage } from '@/components/courtroom/punchSequence';
+import { setupText } from '@/lib/debate/punch';
+import { SPEAKER_SCENE } from '@/types';
 
 // -- Scene -> BGM mapping --
 const SCENE_MUSIC: Record<Scene, BgmName | null> = {
@@ -100,6 +103,9 @@ export default function TrialPage() {
   const introMode =
     introFinished || s.phase === 'ask' || s.phase === 'done' ? null : s.current ? 'play' : 'hold';
   const finishIntro = useCallback(() => setIntroFinished(true), []);
+  // Surprise punch: which beat of the sequence is on screen, and a counter that shakes the screen.
+  const [punchStage, setPunchStage] = useState<PunchStage | null>(null);
+  const [shakeKey, setShakeKey] = useState(0);
 
   // Track previous scene/phase for change detection
   const prevScene = useRef<Scene>(s.scene);
@@ -183,6 +189,35 @@ export default function TrialPage() {
     if (line.speaker === 'user') {
       orch.lineEnded(line.id);
       return;
+    }
+    if (line.punch && (line.speaker === 'prosecution' || line.speaker === 'defense')) {
+      const speaker = line.speaker;
+      const ctl = new AbortController();
+      const sleep = (ms: number) =>
+        new Promise<void>((done) => {
+          const t = setTimeout(done, ms);
+          ctl.signal.addEventListener('abort', () => (clearTimeout(t), done()), { once: true });
+        });
+      void runPunch(
+        line,
+        {
+          stage: setPunchStage,
+          clip: (url, ms) => (url ? engine.playVoice(speaker, url).catch(() => {}) : sleep(ms)),
+          sfx: (name) => void engine.playSfx(name),
+          shake: () => setShakeKey((k) => k + 1),
+          sleep,
+        },
+        ctl.signal,
+      ).then(() => {
+        if (ctl.signal.aborted) return;
+        setPunchStage(null);
+        orch.lineEnded(line.id);
+      });
+      return () => {
+        ctl.abort();
+        engine.stopVoice(); // interrupted mid-punch: cut the clip
+        setPunchStage(null);
+      };
     }
     if (line.audioUrl) {
       const speaker = line.speaker as Exclude<Speaker, 'user'>;
@@ -292,16 +327,47 @@ export default function TrialPage() {
 
 
   // -- Expressions (sticky) + talking (independent), derived from the transcript --
+  // Surprise punch on screen: who punched, who reacts, which shot.
+  const punchLine = punchStage && s.phase === 'speaking' && line?.punch ? line : undefined;
+  const punchWho = punchLine?.speaker === 'prosecution' || punchLine?.speaker === 'defense' ? punchLine.speaker : undefined;
+  const punchOpp = punchWho === 'prosecution' ? 'defense' : 'prosecution';
+  const shot =
+    !punchWho ? undefined
+      : punchStage === 'to-judge' || punchStage === 'judge' ? ('judge' as const)
+        : punchStage === 'to-opponent' || punchStage === 'opponent' ? SPEAKER_SCENE[punchOpp]
+          : undefined;
+
   const moods = useMemo(() => {
     const m = deriveMoods(s);
     if (introMode) for (const who of ['prosecution', 'defense', 'judge'] as const) m[who] = { ...m[who], talking: false };
+    if (punchWho && punchStage) {
+      const shocked: CharacterMood = { expression: 'shocked', talking: false };
+      m[punchWho] = { ...m[punchWho], talking: punchStage === 'setup' };
+      if (punchStage === 'judge' || punchStage === 'to-opponent' || punchStage === 'opponent') m.judge = shocked;
+      if (punchStage === 'opponent') m[punchOpp] = shocked;
+    }
     return m;
-  }, [s, introMode]);
+  }, [s, introMode, punchWho, punchOpp, punchStage]);
+
+  const punch =
+    punchWho && punchLine?.punch && punchStage && punchStage !== 'setup'
+      ? {
+          who: punchWho,
+          stage: punchStage === 'cut' || punchStage === 'punch' ? punchStage : punchStage === 'to-judge' ? ('out' as const) : ('gone' as const),
+          // The speaker keeps their current expression; talks while the punch plays.
+          mood: { expression: moods[punchWho].expression, talking: punchStage === 'punch' },
+          typeMs: punchStage === 'punch' ? (punchLine.punch.durationMs ?? 1400) * 0.9 : 0,
+        }
+      : undefined;
 
   // -- Textbox content --
   const box =
     s.phase === 'speaking' && line
-      ? { name: WHO[line.speaker].name, color: WHO[line.speaker].color, text: line.text }
+      ? {
+          name: WHO[line.speaker].name,
+          color: WHO[line.speaker].color,
+          text: !line.punch ? line.text : !punchStage || punchStage === 'setup' ? setupText(line) : punchStage === 'cut' ? '' : line.punch.text,
+        }
       : s.phase === 'listening'
         ? {
             name: 'YOU',
@@ -361,7 +427,7 @@ export default function TrialPage() {
   );
 
   return (
-    <main className="relative h-dvh w-full overflow-hidden bg-black text-zinc-100">
+    <main className="relative h-dvh w-full overflow-hidden bg-black text-zinc-100" data-punch-stage={punchStage ?? undefined}>
       {/* Full-bleed manga courtroom */}
       <div className="absolute inset-0">
         <Courtroom
@@ -376,6 +442,9 @@ export default function TrialPage() {
           faceSrc={faceSrc}
           intro={introMode}
           onIntroDone={finishIntro}
+          shot={shot}
+          punch={punch}
+          shakeKey={shakeKey}
         />
       </div>
 

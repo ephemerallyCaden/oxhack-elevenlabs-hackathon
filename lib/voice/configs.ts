@@ -12,6 +12,12 @@ export const VOICE_SETTINGS: Record<VoiceRole, VoiceSettings> = {
   judge: { stability: 0.8, similarityBoost: 1.0, useSpeakerBoost: true },
 };
 
+/** Surprise punches are delivered hotter: less stable = more expressive (floor 0.3, see DESIGN.md). */
+export function punchVoiceSettings(role: VoiceRole): VoiceSettings {
+  const s = VOICE_SETTINGS[role];
+  return { ...s, stability: Math.max(0.3, (s.stability ?? 0.5) - 0.2) };
+}
+
 // Audio tags each role may use — all verified acted (not read aloud) on eleven_v4 by transcribing the output.
 // research/14's [SHOUT]/[BEAT]/[SCOFF] are structure markers: use [shouting] / "..." / [scoffs] instead.
 // D3's script prompt should only use these.

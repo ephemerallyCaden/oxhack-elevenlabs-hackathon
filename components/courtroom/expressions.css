@@ -314,8 +314,7 @@
 .manga-camera {
   position: absolute;
   inset: 0;
-  transition: transform 0.8s ease-out;
-  transform-origin: center center;
+  transform-origin: center center; /* moves via the whip pan (whip.ts), never a CSS transition */
 }
 /* Depth planes of courtroom-bg-tall.png (scripts/make-intro-layers.py). At rest they
    recombine into the original image; the intro moves them at different rates. */
@@ -403,4 +402,39 @@
   pointer-events: none;
   border: 4px solid #000;
   box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(0, 0, 0, 0.3);
+}
+
+/* ===== SURPRISE PUNCH SHOT (tuned in public/mockups/punch-shot-pick.html) ===== */
+.punch-shot {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  overflow: hidden;
+}
+.punch-streak {
+  position: absolute;
+  left: 0;
+  background: #fff;
+  border-radius: 99px;
+  will-change: transform;
+  animation: punchStreak var(--dur) linear var(--delay) infinite, punchFlicker 0.12s steps(2) infinite;
+}
+@keyframes punchStreak {
+  from { transform: translateX(var(--from)); }
+  to { transform: translateX(var(--to)); }
+}
+@keyframes punchFlicker {
+  0% { opacity: var(--op); }
+  50% { opacity: calc(var(--op) * 0.35); }
+}
+.punch-char {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+/* The placeholder pose cards are full rectangles; in the punch shot show them as shoulders
+   only (real pose art replaces this). */
+.punch-char .char-pose {
+  clip-path: ellipse(48% 26% at 50% 50%);
 }

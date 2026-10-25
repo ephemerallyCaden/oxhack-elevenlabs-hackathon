@@ -28,6 +28,7 @@ import { TIMEOUTS } from './timeouts';
 import { mergeProfile, mockJudgeInterrupt, mockProfile, mockSetup, mockTopic, mockVerdict, onboardingText } from './mock';
 import * as P from './prompts';
 import { computeSpectrum, MAX_TOPICS, normalise, orderAgenda } from './spectrum';
+import { attachPunch, punchedSides } from './punch';
 
 /**
  * Which model writes the debate. DEBATE_LLM in .env.local: `mock` (testing, no API calls),
@@ -158,6 +159,7 @@ const TopicSchema = z.object({
       cites: z.array(z.string()),
       cut_in: Spoken.describe('The other side cutting in; empty strings if none'),
       resume: Spoken.describe("The speaker's comeback after the cut-in; empty strings if none"),
+      punch: Spoken.describe('Surprise punch: the climactic final 2-8 words, said after "text"; empty strings if none'),
     }),
   ),
   ledger: z.array(
@@ -187,6 +189,7 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
       P.cardsBlock(req.cards),
       P.historyBlock(req.history),
       `CUT-IN ALLOWED: ${req.cutInAllowed ? 'yes' : 'no'}`,
+      `PUNCH ALLOWED FOR: ${(['yes', 'no'] as const).filter((s) => !punchedSides(req.history, req.topic.id).has(s)).map((s) => s.toUpperCase()).join(', ') || 'nobody'}`,
       P.turnsBlock(req.turns, req.userPoint),
     ].join('\n'),
     TopicSchema,
@@ -199,6 +202,7 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
       const lines: Line[] = [];
       const byIndex: Line[] = [];
       let cutUsed = !req.cutInAllowed;
+      const punched = punchedSides(req.history, req.topic.id);
       req.turns.forEach((turn, i) => {
         const o = out.lines[i];
         const base = { topic_id: req.topic.id, cycle: turn.cycle };
@@ -224,6 +228,8 @@ export async function writeTopic(req: TopicRequest): Promise<TopicResponse> {
           // No cut-in for this line: don't leave it hanging mid-sentence.
           line.text = line.text.trim().replace(/—$/, '.');
           if (line.tts) line.tts = line.tts.trim().replace(/—$/, '.');
+        } else {
+          attachPunch(line, o.punch, punched);
         }
       });
       const userLine = [...req.history].reverse().find((l) => l.speaker === 'user');

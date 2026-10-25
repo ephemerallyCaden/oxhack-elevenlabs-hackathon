@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task 1 — Surprise punch shot · your pick</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #050507; color: #ccc; font-family: system-ui, sans-serif; }
+  body { display: flex; overflow: hidden; }
+  #fit { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  #stageBox { width: 960px; height: 540px; flex: none; }
+  #panel { width: 340px; flex: none; height: 100%; overflow-y: auto; background: #0d0d12; border-left: 1px solid #222; padding: 14px; font-size: 12px; }
+
+  .stage { position: relative; width: 960px; height: 540px; overflow: hidden; background: #000; }
+  .fill { position: absolute; inset: 0; }
+  .cam { position: absolute; inset: 0; transform-origin: center center; }
+  .plane { position: absolute; inset: 0; }
+  .plane-img { position: absolute; display: block; max-width: none; pointer-events: none; filter: saturate(0.3) contrast(1.25) brightness(0.68); }
+  .plane[data-plane="far"] .plane-img, .plane[data-plane="mid"] .plane-img {
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, transparent 176px, #000 303px, #000 1157px, transparent 1284px);
+            mask-image: linear-gradient(90deg, transparent 0, transparent 176px, #000 303px, #000 1157px, transparent 1284px); }
+  .fx-speed { pointer-events: none; z-index: 20; background: repeating-conic-gradient(from 0deg at 50% 45%, transparent 0deg 2.8deg, rgba(0,0,0,.04) 2.8deg 3deg); }
+  .fx-halftone { pointer-events: none; z-index: 21; background-image: radial-gradient(circle, rgba(0,0,0,.15) 1px, transparent 1px); background-size: 4px 4px; mix-blend-mode: multiply; }
+  .fx-ink { pointer-events: none; z-index: 22; background: linear-gradient(0deg, rgba(0,0,0,.5) 0%, rgba(0,0,0,.2) 25%, transparent 45%), radial-gradient(ellipse 80% 80% at 50% 45%, transparent 40%, rgba(0,0,0,.6) 100%); }
+  .fx-scan { pointer-events: none; z-index: 50; background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,.06) 2px 3px); }
+  .fx-vig { pointer-events: none; z-index: 51; border: 4px solid #000; box-shadow: inset 0 0 80px rgba(0,0,0,.5), inset 0 0 20px rgba(0,0,0,.3); }
+
+  /* ── characters (subset of components/courtroom/expressions.css) ── */
+  .spot { position: absolute; transform: translate(-50%, -50%); }
+  .char { position: relative; }
+  .char-bob { position: absolute; inset: 0; }
+  .state-talking .char-bob { animation: talkBob .4s ease-in-out infinite; }
+  @keyframes talkBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+  .mirror { position: absolute; inset: 0; }
+  .facing-left-pose { transform: scaleX(-1); }          /* mirror lives on a wrapper so expression animations can't undo it */
+  .char-pose { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; height: 100%; }
+  .face-container { position: absolute; left: 50%; transform: translateX(-50%); z-index: 2; }
+  .face-upper, .face-jaw { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+  .face-upper { clip-path: inset(0 0 13% 0); }
+  .face-jaw { clip-path: inset(85% 0 0 0); transform-origin: center 87%; }
+  .overlay { position: absolute; z-index: 3; pointer-events: none; display: none; }
+  .flash-overlay { position: absolute; inset: 0; background: white; border-radius: 12px; z-index: 10; display: none; }
+  .state-shocked .flash-overlay { display: block; animation: flashPulse .15s ease-out forwards; }
+  .state-shocked .overlay-exclamation { display: block; top: -30px; left: 50%; width: 28px; height: 36px;
+    animation: exclamationPop .4s cubic-bezier(.175,.885,.32,1.275) forwards, exclamationBounce .6s ease-in-out .5s infinite; }
+  .state-shocked .face-container { transform: translateX(-50%) scaleY(1.1) translateY(4px); animation: shockBounce .3s ease-out 1; }
+  .state-shocked .char-pose { animation: bodyShock .3s steps(2) forwards; }
+  @keyframes shockBounce { 0% { transform: translateX(-50%) scale(1.15); } 60% { transform: translateX(-50%) scaleY(1.12) translateY(5px); } 100% { transform: translateX(-50%) scaleY(1.1) translateY(4px); } }
+  @keyframes bodyShock { 0% { transform: translateX(-50%) scale(1) translateY(0); } 100% { transform: translateX(-50%) scale(1.1) translateY(-6px); filter: brightness(1.2); } }
+  @keyframes exclamationPop { 0% { transform: translateX(-50%) scale(0); opacity: 0; } 60% { transform: translateX(-50%) scale(1.3); opacity: 1; } 100% { transform: translateX(-50%) scale(1); opacity: 1; } }
+  @keyframes exclamationBounce { 0%,100% { transform: translateX(-50%) scale(1) translateY(0); } 50% { transform: translateX(-50%) scale(1.15) translateY(-4px); } }
+  @keyframes flashPulse { 0% { opacity: .8; } 100% { opacity: 0; } }
+
+  /* ── punch shot: flat speaker colour + scrolling streaks + big character ── */
+  #punch { position: absolute; inset: 0; z-index: 30; display: none; overflow: hidden; }
+  .streak { position: absolute; left: 0; background: #fff; border-radius: 99px; will-change: transform;
+    animation: streakMove var(--dur) linear infinite; animation-delay: var(--delay); }
+  .streak.flicker { animation: streakMove var(--dur) linear infinite, streakFlicker .12s steps(2) infinite; animation-delay: var(--delay), 0s; }
+  @keyframes streakMove { from { transform: translateX(var(--from)); } to { transform: translateX(var(--to)); } }
+  @keyframes streakFlicker { 0% { opacity: var(--op); } 50% { opacity: calc(var(--op) * .35); } }
+  #punchChar { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  /* Placeholder pose cards are full rectangles; in the punch shot, show them as shoulders
+     only (real pose art replaces this). */
+  #punchChar .char-pose { clip-path: ellipse(48% 26% at 50% 50%); }
+
+  /* ── textbox ── */
+  .textbox { position: absolute; left: 0; right: 0; bottom: 0; height: 22%; z-index: 60; background: #08080e; border-top: 3px solid #2a3050; padding: 12px 24px; display: flex; flex-direction: column; justify-content: center; }
+  .tb-name { font-family: 'Press Start 2P', monospace; font-size: 10px; letter-spacing: .2em; margin-bottom: 8px; }
+  .tb-text { font-family: 'VT323', monospace; font-size: 22px; color: #e0e0e0; line-height: 1.3; min-height: 29px; }
+  .tb-text.punch { font-size: 34px; font-weight: 700; line-height: 1.1; }
+  #phaseTag { position: absolute; right: 8px; top: 8px; z-index: 90; font: 10px monospace; color: #888; background: rgba(0,0,0,.6); padding: 2px 6px; border-radius: 3px; }
+
+  /* ── panel ── */
+  #panel h2 { font-size: 13px; color: #fff; margin: 12px 0 6px; }
+  #panel h2:first-child { margin-top: 0; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .row label { width: 118px; flex: none; color: #999; }
+  .row input[type=range] { flex: 1; }
+  .row output { width: 44px; text-align: right; color: #f0b830; font-family: monospace; }
+  select, button { background: #16161d; color: #ddd; border: 1px solid #333; border-radius: 4px; padding: 5px 8px; font-size: 12px; cursor: pointer; }
+  button.on { border-color: #f0b830; color: #f0b830; }
+  .vars { display: grid; grid-template-columns: repeat(1, 1fr); gap: 4px; }
+  .vars button { padding: 7px 0; font-weight: 700; }
+  .desc { color: #777; font-size: 11px; margin: 4px 0; min-height: 30px; }
+  .btns { display: flex; flex-wrap: wrap; gap: 4px; }
+  .go { background: #a11; border-color: #f44; color: #fff; font-weight: 700; padding: 8px 10px; }
+  .go.blue { background: #1352a8; border-color: #4a9eff; }
+  textarea { width: 100%; height: 120px; background: #08080b; color: #8fd; border: 1px solid #222; font: 10px monospace; padding: 6px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><filter id="hblur" x="-20%" y="-5%" width="140%" height="110%"><feGaussianBlur id="hblurStd" stdDeviation="0 0"/></filter></svg>
+<div id="fit"><div id="stageBox">
+<div class="stage" id="stage">
+  <div class="fill" id="shaker">
+    <div class="fill" id="blurWrap">
+      <div class="fill" id="scene"><div class="cam" id="cam"></div></div>
+      <div class="fill fx-speed"></div>
+      <div class="fill fx-halftone"></div>
+      <div class="fill fx-ink"></div>
+      <div id="punch"><div class="fill" id="streaks"></div><div id="punchChar"></div></div>
+    </div>
+  </div>
+  <div class="fill fx-scan"></div>
+  <div class="fill fx-vig"></div>
+  <div class="textbox"><div class="tb-name" id="tbName"></div><div class="tb-text" id="tbText"></div></div>
+  <div id="phaseTag">base</div>
+</div>
+</div></div>
+
+<div id="panel">
+  <h2>Variation</h2>
+  <div class="vars" id="vars"></div>
+  <div class="desc" id="vdesc"></div>
+  <div class="btns" style="margin-top:6px">
+    <button class="go" data-who="prosecution">▶ YES punch</button>
+    <button class="go blue" data-who="defense">▶ NO punch</button>
+    <button id="reset">Base scene</button>
+    <button id="slow">Slow-mo ×4</button>
+  </div>
+  <h2>Streaks</h2><div id="sStreak"></div>
+  <div class="row"><label>Flicker</label><input type="checkbox" id="flicker"></div>
+  <h2>Pan (whip)</h2>
+  <div class="row"><label>Acceleration</label><select id="ease"><option value="outCubic">Fast start, ease out</option><option value="inOutExpo">Expo in-out (snap)</option><option value="outExpo">Very fast start</option><option value="linear">Linear</option></select></div>
+  <div class="row"><label>Stepped (on twos)</label><input type="checkbox" id="stepped"></div>
+  <div id="sPan"></div>
+  <h2>Shake</h2><div id="sShake"></div>
+  <h2>Timing (locked; editable)</h2><div id="sTime"></div>
+  <h2>Values (copy to share)</h2>
+  <textarea id="out" readonly></textarea>
+</div>
+
+<script>
+// ─── Scene constants (same as the build: components/courtroom/intro.ts + Courtroom.tsx) ───
+const KX = 0.978369, KY = 0.958622, OX = -45.18375, OY = 230.870625;
+const CAM = {   // today's CAMERA, in px (translate % of 960×540)
+  yes:     { S: 2.2, tx: 208.32, ty: -100.44 },
+  no:      { S: 2.2, tx: -206.4, ty: -100.44 },
+  judge:   { S: 2.0, tx: 0,      ty: -42.66 },
+  witness: { S: 1.4, tx: 0.96,   ty: -77.22 },
+};
+const MARKER = { prosecution: [23.3, 78], defense: [76.5, 78], judge: [50, 62.5] };
+const CHAR = { prosecution: { w: 160, h: 240, face: 65, top: 10, pose: 'prosecutor', name: 'PROSECUTION · YES', col: '#c2410c' },
+               defense:     { w: 160, h: 240, face: 65, top: 10, pose: 'defendant',  name: 'DEFENSE · NO',      col: '#2563eb' },
+               judge:       { w: 120, h: 180, face: 55, top: 8,  pose: 'judge',      name: 'THE JUDGE',         col: '#a16207' } };
+const PUNCH_BG = { prosecution: '#ff3a3a', defense: '#1aa3ff' };   // brighter than the body colours (#c73030 / #3580cc)
+const LINES = {
+  prosecution: { setup: "You think poker's a gamble? The top one percent of players earn more than…", punch: 'every quant on Wall Street.' },
+  defense:     { setup: 'Fine, the top one percent. But the median player takes home…',            punch: 'twelve thousand pounds a year.' },
+};
+const OPP = { prosecution: 'defense', defense: 'prosecution' };
+const SCENE_OF = { prosecution: 'yes', defense: 'no' };
+
+// ─── Variations ───
+const VARIATIONS = [
+  { name: 'V1 Clip-faithful', desc: 'Like the reference: medium-speed sparse streaks 2–4px; whip eases out, light blur; a jolt of shake.',
+    p: { count: 26, thMin: 2, thMax: 4, lenMin: 80, lenMax: 260, speed: 1400, flicker: false, ease: 'outCubic', stepped: false, blur: 10, shakePx: 6, shakeMs: 220, shakeRot: 0 } },
+  { name: 'V2 Hyper', desc: 'Very fast, dense, thin streaks; expo snap whip with heavy blur; strong shake.',
+    p: { count: 70, thMin: 1, thMax: 2, lenMin: 120, lenMax: 420, speed: 3200, flicker: false, ease: 'inOutExpo', stepped: false, blur: 26, shakePx: 12, shakeMs: 300, shakeRot: 0 } },
+  { name: 'V3 Bold ink', desc: 'Slow, sparse, thick 6–10px streaks; very-fast-start whip, medium blur; medium shake.',
+    p: { count: 14, thMin: 6, thMax: 10, lenMin: 140, lenMax: 380, speed: 700, flicker: false, ease: 'outExpo', stepped: false, blur: 16, shakePx: 9, shakeMs: 260, shakeRot: 0 } },
+  { name: 'V4 Stutter', desc: 'Fast uneven flickering streaks; choppy stepped whip ("on twos"), heavy blur; violent shake with rotation.',
+    p: { count: 40, thMin: 2, thMax: 5, lenMin: 60, lenMax: 300, speed: 2400, flicker: true, ease: 'inOutExpo', stepped: true, blur: 24, shakePx: 16, shakeMs: 360, shakeRot: 1.2 } },
+  { name: 'V5 Minimal', desc: 'Slow, very sparse, fine streaks; linear whip, light blur; subtle shake.',
+    p: { count: 10, thMin: 1, thMax: 2, lenMin: 60, lenMax: 160, speed: 600, flicker: false, ease: 'linear', stepped: false, blur: 8, shakePx: 4, shakeMs: 180, shakeRot: 0 } },
+  { name: '★ Your pick', desc: 'Your tuned values (from V1): dense flickering streaks 1–4px, very-fast-start 200ms whips, 11px shakes, 900ms reactions, plus a shake on the hard cut.',
+    p: { count: 91, thMin: 1, thMax: 4, lenMin: 80, lenMax: 260, speed: 1400, flicker: true, ease: 'outExpo', stepped: false, blur: 10, shakePx: 11, shakeMs: 220, shakeRot: 0,
+         setupMs: 2000, pauseMs: 600, punchMs: 1400, whipMs: 200, holdMs: 900 } },
+];
+VARIATIONS.splice(0, VARIATIONS.length - 1);   // this page: only your pick
+const TIMING = { setupMs: 2000, pauseMs: 600, punchMs: 1400, whipMs: 500, holdMs: 500 };
+const SLIDERS = {
+  sStreak: [['count', 'Count', 4, 120, 1], ['thMin', 'Thickness min', 1, 14, 1], ['thMax', 'Thickness max', 1, 16, 1], ['lenMin', 'Length min', 20, 400, 10], ['lenMax', 'Length max', 40, 700, 10], ['speed', 'Speed px/s', 200, 5000, 50]],
+  sPan: [['blur', 'Blur px', 0, 40, 1], ['whipMs', 'Whip ms', 150, 1000, 10]],
+  sShake: [['shakePx', 'Shake px', 0, 30, 1], ['shakeMs', 'Shake ms', 60, 800, 10], ['shakeRot', 'Rotation °', 0, 4, 0.1]],
+  sTime: [['setupMs', 'Setup ms', 500, 4000, 50], ['pauseMs', 'Pause ms', 0, 1500, 50], ['punchMs', 'Punch ms', 400, 3000, 50], ['holdMs', 'Reaction hold ms', 100, 1500, 50]],
+};
+let variation = 0, slow = 1, params = { ...VARIATIONS[0].p, ...TIMING };
+
+const EASE = {
+  outCubic: t => 1 - (1 - t) ** 3,
+  inOutExpo: t => t <= 0 ? 0 : t >= 1 ? 1 : t < .5 ? 2 ** (20 * t - 10) / 2 : (2 - 2 ** (-20 * t + 10)) / 2,
+  outExpo: t => t >= 1 ? 1 : 1 - 2 ** (-10 * t),
+  linear: t => t,
+};
+const $ = id => document.getElementById(id);
+const stage = $('stage'), cam = $('cam'), shaker = $('shaker'), blurWrap = $('blurWrap'), punchEl = $('punch');
+
+// ─── Characters ───
+function charHTML(role, extra = '') {
+  const c = CHAR[role];
+  return `<div class="char" data-role="${role}" ${extra} style="width:${c.w}px;height:${c.h}px">
+    <div class="flash-overlay"></div>
+    <div class="char-bob">
+      <div class="mirror"><img class="char-pose" src="/assets/pose-bodies/${c.pose}-front.svg" alt=""></div>
+      <div class="face-container" style="width:${c.face}px;height:${c.face}px;top:${c.top}px">
+        <img class="face-upper" src="/assets/face.png" alt=""><img class="face-jaw" src="/assets/face.png" alt="">
+      </div>
+      <img class="overlay overlay-exclamation" src="/assets/expressions/exclamation.png" alt="">
+    </div></div>`;
+}
+function setFacing(el, role, facing) {
+  const pose = el.querySelector('.char-pose'), mirror = el.querySelector('.mirror');
+  pose.src = `/assets/pose-bodies/${CHAR[role].pose}-${facing === 'front' ? 'front' : 'side'}.svg`;
+  mirror.classList.toggle('facing-left-pose', facing === 'left');
+}
+const talkers = new Map();
+function setTalking(el, on) {
+  clearInterval(talkers.get(el)); talkers.delete(el);
+  el.classList.toggle('state-talking', on);
+  const jaw = el.querySelector('.face-jaw');
+  if (!on) { jaw.style.transform = ''; return; }
+  let open = false;
+  talkers.set(el, setInterval(() => { open = !open; jaw.style.transform = `translateY(${open ? 5 : 0}px) rotate(${(Math.random() * 40 - 20).toFixed(1)}deg)`; }, 120));
+}
+function setShocked(el, on) {
+  el.classList.remove('state-shocked'); if (on) { void el.offsetWidth; el.classList.add('state-shocked'); }
+}
+const roleEl = role => cam.querySelector(`.char[data-role="${role}"]`);
+
+// ─── Build the courtroom (depth planes at rest) ───
+async function build() {
+  const layers = (await (await fetch('/assets/intro-layers/layers.json')).json()).layers;
+  cam.innerHTML = layers.map(L => {
+    const st = `left:${KX * (L.x - OX)}px;top:${KY * (L.y - OY) - 18}px;width:${KX * L.w}px;height:${KY * L.h}px`;
+    const riders = L.name === 'far' ? ['judge'] : L.name === 'mid' ? ['prosecution', 'defense'] : [];
+    return `<div class="plane" data-plane="${L.name}"><img class="plane-img" src="${L.file}" style="${st}" alt="">${
+      riders.map(r => `<div class="spot" style="left:${MARKER[r][0]}%;top:${MARKER[r][1]}%">${charHTML(r)}</div>`).join('')}</div>`;
+  }).join('');
+  setCamera(CAM.witness);
+}
+
+// ─── Camera + whip ───
+function camCss(c) { return `scale(${c.S}) translate(${c.tx}px, ${c.ty}px)`; }
+function setCamera(c) { cam.style.transform = camCss(c); }
+function lerpCam(a, b, p) {
+  // interpolate the visible centre linearly and the zoom geometrically
+  const S = Math.exp(Math.log(a.S) + (Math.log(b.S) - Math.log(a.S)) * p);
+  return { S, tx: a.tx + (b.tx - a.tx) * p, ty: a.ty + (b.ty - a.ty) * p };
+}
+function setBlur(px) {
+  $('hblurStd').setAttribute('stdDeviation', `${px.toFixed(2)} ${(px * 0.08).toFixed(2)}`);
+  blurWrap.style.filter = px > 0.3 ? 'url(#hblur)' : '';
+}
+// p(t) for the whip: chosen acceleration, optionally quantised to 12 steps ("on twos")
+function whipP(t) { const tt = params.stepped ? Math.round(t * 12) / 12 : t; return EASE[params.ease](tt); }
+function whipFrame(from, to, t, punchDir) {
+  const p = whipP(t);
+  setCamera(lerpCam(from, to, p));
+  setBlur(params.blur * Math.sin(Math.PI * Math.min(1, t)));
+  if (punchDir != null) punchEl.style.transform = `translateX(${punchDir * 110 * p}%)`;
+}
+
+// ─── Punch layer ───
+function buildStreaks(dir) {   // dir −1: streaks travel left (speaker faces right), +1: travel right
+  const r = (a, b) => a + Math.random() * (b - a);
+  const box = $('streaks'); box.innerHTML = '';
+  for (let i = 0; i < params.count; i++) {
+    const L = r(params.lenMin, params.lenMax), th = r(params.thMin, Math.max(params.thMin, params.thMax));
+    const from = dir < 0 ? 960 + 20 : -L - 20, to = dir < 0 ? -L - 20 : 960 + 20;
+    const dur = (960 + L + 40) / params.speed, op = r(0.55, 0.95);
+    const s = document.createElement('div'); s.className = 'streak' + (params.flicker ? ' flicker' : '');
+    s.style.cssText = `top:${r(0, 98)}%;width:${L}px;height:${th}px;opacity:${op};--op:${op};--from:${from}px;--to:${to}px;--dur:${(dur * slow).toFixed(3)}s;--delay:${(-Math.random() * dur * slow).toFixed(3)}s`;
+    box.appendChild(s);
+  }
+}
+function showPunch(who) {
+  const facing = who === 'prosecution' ? 'right' : 'left';
+  punchEl.style.background = PUNCH_BG[who];
+  punchEl.style.transform = ''; punchEl.style.display = 'block';
+  buildStreaks(facing === 'right' ? -1 : 1);
+  // Head + shoulders, top of head cropped, face on the side it faces from.
+  const c = CHAR[who], k = 5.6, fx = facing === 'right' ? 0.30 * 960 : 0.70 * 960, fy = 165;
+  const pc = $('punchChar');
+  pc.innerHTML = charHTML(who, 'data-punch');
+  pc.style.transform = `translate(${fx - (c.w / 2) * k}px, ${fy - (c.top + c.face / 2) * k}px) scale(${k})`;
+  setFacing(pc.firstElementChild, who, facing);
+  return pc.firstElementChild;
+}
+function hidePunch() { punchEl.style.display = 'none'; punchEl.style.transform = ''; $('punchChar').innerHTML = ''; $('streaks').innerHTML = ''; }
+
+// ─── Textbox ───
+let typeTimer = null;
+function textbox(who, text, { punch = false, typeMs = 0 } = {}) {
+  clearInterval(typeTimer);
+  $('tbName').textContent = who ? CHAR[who].name : ''; $('tbName').style.color = who ? CHAR[who].col : '#999';
+  const t = $('tbText'); t.className = 'tb-text' + (punch ? ' punch' : ''); t.style.color = punch ? PUNCH_BG[who] : '';
+  if (!typeMs) { t.textContent = text; return; }
+  t.textContent = ''; let i = 0; const step = Math.max(16, typeMs / text.length);
+  typeTimer = setInterval(() => { t.textContent = text.slice(0, ++i); if (i >= text.length) clearInterval(typeTimer); }, step);
+}
+
+// ─── Shake ───
+const frame = () => new Promise(r => requestAnimationFrame(r));
+async function shake(id) {
+  const t0 = performance.now(), D = params.shakeMs * slow;
+  for (;;) {
+    await frame(); if (id !== runId) return;
+    const k = Math.min(1, (performance.now() - t0) / D);
+    if (k >= 1) { shaker.style.transform = ''; return; }
+    const a = params.shakePx * (1 - k) ** 2, r = () => (Math.random() * 2 - 1) * a;
+    shaker.style.transform = `translate(${r()}px, ${r()}px)` + (params.shakeRot ? ` rotate(${(r() / Math.max(1, params.shakePx)) * params.shakeRot}deg)` : '');
+  }
+}
+
+// ─── Sequence ───
+let runId = 0;
+const sleep = (ms, id) => new Promise(r => setTimeout(() => r(id === runId), ms));
+function phase(p) { stage.dataset.phase = p; $('phaseTag').textContent = `${VARIATIONS[variation].name} · ${p}${slow > 1 ? ' · slow ×4' : ''}`; }
+function resetChars() {
+  for (const role of ['prosecution', 'defense', 'judge']) { const el = roleEl(role); setTalking(el, false); setShocked(el, false); setFacing(el, role, 'front'); }
+}
+async function whip(id, from, to, punchDir) {
+  const t0 = performance.now(), D = params.whipMs * slow;
+  for (;;) {
+    await frame(); if (id !== runId) return false;
+    const t = Math.min(1, (performance.now() - t0) / D);
+    whipFrame(from, to, t, punchDir);
+    if (t >= 1) break;
+  }
+  setBlur(0); return true;
+}
+async function play(who) {
+  const id = ++runId, opp = OPP[who];
+  clearInterval(typeTimer); shaker.style.transform = ''; setBlur(0); hidePunch(); resetChars();
+  // 1. Setup line on the speaker's close-up.
+  phase('setup');
+  const speakerCam = CAM[SCENE_OF[who]], spEl = roleEl(who);
+  setFacing(spEl, who, who === 'prosecution' ? 'right' : 'left');
+  setCamera(speakerCam); setTalking(spEl, true);
+  textbox(who, LINES[who].setup);
+  if (!(await sleep(params.setupMs * slow, id))) return;
+  // 2. Hard cut to the punch shot (+ sting), dramatic pause.
+  setTalking(spEl, false);
+  phase('cut → pause');
+  const big = showPunch(who);
+  shake(id);                                     // softens the hard cut
+  textbox(who, '', { punch: true });
+  if (!(await sleep(params.pauseMs * slow, id))) return;
+  // 3. The punch: voice + type-in + shake.
+  phase('punch');
+  setTalking(big, true); shake(id);
+  textbox(who, LINES[who].punch, { punch: true, typeMs: params.punchMs * slow * 0.9 });
+  if (!(await sleep(params.punchMs * slow, id))) return;
+  setTalking(big, false);
+  // 4. Whip to the Judge: shocked + shake (+ gasp).
+  phase('whip → judge');
+  const dir = who === 'prosecution' ? -1 : 1;   // camera pans toward centre; layer exits the other way
+  if (!(await whip(id, speakerCam, CAM.judge, dir))) return;
+  hidePunch(); setFacing(spEl, who, 'front');
+  phase('judge reacts');
+  setShocked(roleEl('judge'), true); shake(id);
+  if (!(await sleep(params.holdMs * slow, id))) return;
+  // 5. Whip to the opponent: shocked + shake (+ gasp).
+  phase('whip → opponent');
+  setFacing(roleEl(opp), opp, opp === 'prosecution' ? 'right' : 'left');
+  if (!(await whip(id, CAM.judge, CAM[SCENE_OF[opp]]))) return;
+  phase('opponent reacts');
+  setShocked(roleEl(opp), true); shake(id);
+  if (!(await sleep(params.holdMs * slow, id))) return;
+  phase('end');
+}
+function base() {
+  runId++; clearInterval(typeTimer); shaker.style.transform = ''; setBlur(0); hidePunch(); resetChars();
+  setCamera(CAM.witness); textbox(null, ''); phase('base');
+}
+
+// ─── Panel ───
+function syncPanel() {
+  $('ease').value = params.ease; $('stepped').checked = params.stepped; $('flicker').checked = params.flicker;
+  for (const group of Object.values(SLIDERS)) for (const [k] of group) { $('s_' + k).value = params[k]; $('o_' + k).value = params[k]; }
+  $('out').value = JSON.stringify({ variation: VARIATIONS[variation].name, ...params }, null, 1);
+  [...$('vars').children].forEach((b, i) => b.classList.toggle('on', i === variation));
+  $('vdesc').textContent = VARIATIONS[variation].desc;
+}
+function setVariation(i) { if (!VARIATIONS[i]) return; variation = i; params = { ...params, ...VARIATIONS[i].p }; syncPanel(); base(); }
+VARIATIONS.forEach((v, i) => { const b = document.createElement('button'); b.textContent = '★ Your pick'; b.title = v.name; b.onclick = () => setVariation(i); $('vars').appendChild(b); });
+for (const [box, group] of Object.entries(SLIDERS)) {
+  $(box).innerHTML = group.map(([k, label, min, max, step]) => `<div class="row"><label>${label}</label><input type="range" id="s_${k}" min="${min}" max="${max}" step="${step}"><output id="o_${k}"></output></div>`).join('');
+  for (const [k] of group) $('s_' + k).oninput = e => { params[k] = +e.target.value; syncPanel(); };
+}
+$('ease').onchange = e => { params.ease = e.target.value; syncPanel(); };
+$('stepped').onchange = e => { params.stepped = e.target.checked; syncPanel(); };
+$('flicker').onchange = e => { params.flicker = e.target.checked; syncPanel(); };
+document.querySelectorAll('[data-who]').forEach(b => b.onclick = () => play(b.dataset.who));
+$('reset').onclick = base;
+$('slow').onclick = e => { slow = slow > 1 ? 1 : 4; e.target.classList.toggle('on', slow > 1); };
+document.addEventListener('keydown', e => {
+  if (/^Digit[1-5]$/.test(e.code)) setVariation(+e.code.slice(5) - 1);
+  if (e.code === 'KeyY') play('prosecution'); if (e.code === 'KeyN') play('defense');
+});
+function fit() { const f = $('fit').getBoundingClientRect(); $('stageBox').style.transform = `scale(${Math.min(f.width / 960, f.height / 540) * 0.96})`; }
+addEventListener('resize', fit);
+
+// Hooks for automated screenshots: show(who, stage, t) renders one moment without timing.
+window.__punch = {
+  play, base, setVariation,
+  show(who, st, t = 0.5) {
+    runId++; clearInterval(typeTimer); shaker.style.transform = ''; setBlur(0); hidePunch(); resetChars();
+    const opp = OPP[who], spCam = CAM[SCENE_OF[who]], spEl = roleEl(who), dir = who === 'prosecution' ? -1 : 1;
+    if (st === 'setup') { setFacing(spEl, who, who === 'prosecution' ? 'right' : 'left'); setCamera(spCam); setTalking(spEl, true); textbox(who, LINES[who].setup); }
+    if (st === 'pause') { setCamera(spCam); showPunch(who); textbox(who, '', { punch: true }); }
+    if (st === 'punch') { setCamera(spCam); setTalking(showPunch(who), true); textbox(who, LINES[who].punch, { punch: true }); }
+    if (st === 'whip1') { showPunch(who); textbox(who, LINES[who].punch, { punch: true }); whipFrame(spCam, CAM.judge, t, dir); }
+    if (st === 'judge') { setCamera(CAM.judge); setShocked(roleEl('judge'), true); textbox(who, LINES[who].punch, { punch: true }); }
+    if (st === 'whip2') { setShocked(roleEl('judge'), true); setFacing(roleEl(opp), opp, opp === 'prosecution' ? 'right' : 'left'); whipFrame(CAM.judge, CAM[SCENE_OF[opp]], t); textbox(who, LINES[who].punch, { punch: true }); }
+    if (st === 'opp') { setFacing(roleEl(opp), opp, opp === 'prosecution' ? 'right' : 'left'); setCamera(CAM[SCENE_OF[opp]]); setShocked(roleEl('judge'), true); setShocked(roleEl(opp), true); textbox(who, LINES[who].punch, { punch: true }); }
+    phase(`${st}${st.startsWith('whip') ? ' ' + Math.round(t * 100) + '%' : ''}`);
+  },
+};
+build().then(() => { fit(); setVariation(VARIATIONS.length - 1); document.body.dataset.ready = '1'; });
+</script>
+</body>
+</html>
