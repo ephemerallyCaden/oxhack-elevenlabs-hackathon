@@ -253,7 +253,7 @@ export class TrialOrchestrator {
     const done = new Promise<SayResult>((r) => (this.sayResolve = r));
     this.set({
       phase: 'speaking',
-      scene: SPEAKER_SCENE[ready.speaker],
+      scene: ready.kind === 'verdict' ? 'witness' : SPEAKER_SCENE[ready.speaker], // verdict: wide shot, both sides' reactions in view
       current: ready,
       status: undefined,
       transcript: [...this.state.transcript, ready],
