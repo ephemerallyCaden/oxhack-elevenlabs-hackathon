@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { UserProfile } from '@/types';
 import { planAfterInterrupt, TrialOrchestrator, type TrialState } from './orchestrator';
 import { computeSpectrum } from './spectrum';
+import { mockSetup } from './mock';
 
 // Offline: every API call fails, so the whole trial runs on the decision-aware mocks.
 vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));
@@ -374,7 +375,18 @@ describe('fixes from the PR #79 review', () => {
 
   it("after an agenda change, the next topic's call starts before its intro has finished (no waiting)", async () => {
     const events: string[] = [];
+    // The mock agenda stops at MAX_TOPICS (2); this scenario needs a third topic to move on to, so the
+    // setup call answers with the mock agenda plus one more topic (the orchestrator takes any length).
+    const base = mockSetup({ question: 'Should I learn to sail?' });
+    const extra = { ...base.topics[base.topics.length - 1], id: 'topic-extra', title: 'Long-term consequences' };
+    const setup = {
+      ...base,
+      topics: [...base.topics, extra],
+      intros: { ...base.intros, [extra.id]: { ...base.intros[base.topics[base.topics.length - 1].id], id: 'intro-extra', topic_id: extra.id } },
+      fallback: false,
+    };
     vi.stubGlobal('fetch', (url: string, init?: { body?: string }) => {
+      if (String(url) === '/api/trial/setup') return Promise.resolve(new Response(JSON.stringify(setup), { headers: { 'Content-Type': 'application/json' } }));
       if (String(url) === '/api/trial/topic') events.push(`call:${JSON.parse(init?.body ?? '{}').topic?.id}`);
       return Promise.reject(new Error('offline'));
     });

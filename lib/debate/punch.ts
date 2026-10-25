@@ -35,15 +35,23 @@ function punchTts(speaker: 'prosecution' | 'defense', tts: string, text: string)
 
 /**
  * Attach the model's punch draft to `line` if the rules allow it; mutates `line` and `used`.
- * `line.text`/`line.tts` come in as the setup; on success `text` becomes setup + punch.
+ * `line.text`/`line.tts` come in as the setup; on success `text` becomes setup + punch. A refused
+ * punch is still the end of the sentence (the model wrote the setup to stop short of it), so it is
+ * put back on the line as ordinary words.
  */
 export function attachPunch(line: Line, draft: { text: string; tts: string } | undefined, used: Set<Side>): boolean {
   const punch = draft?.text.trim();
-  if (!punch || line.text.trim().endsWith('—')) return false;
-  if (line.speaker !== 'prosecution' && line.speaker !== 'defense') return false;
+  if (!punch || line.text.trim().endsWith('—') || !line.text.trim()) return false;
+  const refuse = () => {
+    line.text = `${line.text.trim()} ${punch}`;
+    const spoken = draft!.tts.replace(/^\s*\[[^\]]+\]\s*/, '').trim() || punch;
+    if (line.tts?.trim()) line.tts = `${line.tts.trim()} ${spoken}`;
+    return false;
+  };
+  if (line.speaker !== 'prosecution' && line.speaker !== 'defense') return refuse();
   const side: Side = line.speaker === 'prosecution' ? 'yes' : 'no';
   const words = punch.split(/\s+/).length;
-  if (used.size > 0 || words > MAX_WORDS || !line.text.trim()) return false;
+  if (used.size > 0 || words > MAX_WORDS) return refuse();
   used.add(side);
   line.text = `${line.text.trim()} ${punch}`;
   line.punch = { text: punch, tts: punchTts(line.speaker, draft!.tts, punch) };

@@ -22,6 +22,30 @@ describe('attachPunch', () => {
     expect(attachPunch(line('defense', 'c'), { text: 'three', tts: '' }, used)).toBe(false);
   });
 
+  it('lets the defense land the punch on a fresh topic', () => {
+    const l = line('defense', 'The median player earns');
+    expect(attachPunch(l, { text: 'less than minimum wage.', tts: '[concerned] less than minimum wage.' }, new Set())).toBe(true);
+    expect(l.punch?.text).toBe('less than minimum wage.');
+  });
+
+  it('puts a refused punch back on the line, so the sentence never stops short', () => {
+    const used = new Set<Side>(['yes']);
+    const l = line('defense', 'The median player earns', { tts: '[concerned] The median player earns' });
+    expect(attachPunch(l, { text: 'less than minimum wage.', tts: '[concerned] less than... minimum wage.' }, used)).toBe(false);
+    expect(l.text).toBe('The median player earns less than minimum wage.');
+    expect(l.tts).toBe('[concerned] The median player earns less than... minimum wage.');
+    expect(l.punch).toBeUndefined();
+    const long = line('prosecution', 'It pays');
+    expect(attachPunch(long, { text: 'one two three four five six seven eight nine ten eleven.', tts: '' }, new Set())).toBe(false);
+    expect(long.text).toBe('It pays one two three four five six seven eight nine ten eleven.');
+  });
+
+  it('leaves a cut-off line alone (the cut-in finishes it)', () => {
+    const l = line('defense', 'And the median is —');
+    attachPunch(l, { text: 'nothing.', tts: '' }, new Set());
+    expect(l.text).toBe('And the median is —');
+  });
+
   it('counts punches from earlier calls on the same topic, not other topics', () => {
     const history = [line('prosecution', 'x y', { punch: { text: 'y' } }), line('defense', 'p q', { topic_id: 't2', punch: { text: 'q' } })];
     expect([...punchedSides(history, 't1')]).toEqual(['yes']);

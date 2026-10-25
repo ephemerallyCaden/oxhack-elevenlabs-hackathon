@@ -13,6 +13,10 @@ export const hasGeminiKey = () => Boolean(process.env.GEMINI_API_KEY);
 
 let client: GoogleGenAI | null = null;
 
+const CALL_BUDGET_MS = 4000; // left for the call itself
+const RETRY_HOLD_MS = 2000; // a model that answered malformed JSON sits out the retry
+const RETRY_WAIT_MS = 2500; // the retry may wait at most this long for a slot
+
 /**
  * One structured call → object validated against `schema` (throws → caller's mock fallback).
  * Tries the pool's models in order; a model that's out of quota or overloaded is held and the next one
@@ -32,7 +36,7 @@ export async function askGemini<S extends z.ZodType>(
   let malformed = false;
   for (let attempt = 0; attempt < geminiPool.models.length + 1; attempt++) {
     // Claims a slot atomically (waits if every model is busy); leaves ~4s of the budget for the call itself.
-    const model = await geminiPool.acquire(priority, deadline - 4000, signal);
+    const model = await geminiPool.acquire(priority, deadline - CALL_BUDGET_MS, signal);
     try {
       if (model.startsWith('groq:')) return schema.parse(JSON.parse(await askGroq(model.slice(5), system, content, json, signal)));
       client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -51,11 +55,18 @@ export async function askGemini<S extends z.ZodType>(
       return schema.parse(JSON.parse(res.text ?? ''));
     } catch (err) {
       // Free models sometimes answer with JSON that breaks the schema (lines as bare strings, a missing
-      // field): ask once more instead of dropping straight to the mock lines.
+      // field): ask once more instead of dropping straight to the mock lines, but only on another model
+      // (the same prompt tends to fail the same way) that is free almost at once, with time left for the
+      // call. Otherwise fail fast so the caller's mock arrives on time.
       if ((err instanceof z.ZodError || err instanceof SyntaxError) && !malformed && !signal.aborted) {
         malformed = true;
-        console.warn(`[gemini] ${model}: answer didn't fit the schema, asking again`);
-        continue;
+        geminiPool.fail(model, { kind: 'overload', ms: RETRY_HOLD_MS });
+        const next = geminiPool.pick(priority);
+        if (next && next.wait <= RETRY_WAIT_MS && Date.now() + next.wait < deadline - CALL_BUDGET_MS) {
+          console.warn(`[gemini] ${model}: answer didn't fit the schema, asking ${next.model}`);
+          continue;
+        }
+        throw err;
       }
       const q = classifyGeminiError(err);
       if (!q || signal.aborted) throw err;

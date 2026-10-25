@@ -131,9 +131,25 @@ export class TrialOrchestrator {
   };
   getState = () => this.state;
   private set(patch: Partial<TrialState>) {
+    if (this.stopped) return;
     this.state = { ...this.state, ...patch };
     this.listeners.forEach((fn) => fn());
   }
+
+  private stopped = false;
+  /**
+   * A newer trial replaced this one (the page remounted for a new "Take it to court"). From now on it
+   * makes no network calls (they fall back to the mocks at once), shows nothing and finishes silently,
+   * so it can't compete with the new trial for the model and search rate limits.
+   */
+  stop() {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.listeners.clear();
+    this.sayResolve?.('done');
+  }
+  private post = <T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> =>
+    this.stopped ? Promise.reject(new Error('trial stopped')) : postJson<T>(url, body, signal);
   private initial(): TrialState {
     return { phase: 'ask', scene: 'witness', question: '', agenda: [], cycle: 0, totalCycles: BASE_CYCLES, canInterrupt: false, spectrum: { value: 0, label: 'Toss-up' }, transcript: [], cards: [], ledger: [], fallbacks: [] };
   }
@@ -146,7 +162,7 @@ export class TrialOrchestrator {
 
   /** POST with timeout + mock fallback; records which calls fell back. */
   private async call<T extends { fallback?: boolean }>(url: string, body: unknown, fallback: () => T, ms: number): Promise<T> {
-    const r = await withFallback((signal) => postJson<T>(url, body, signal), fallback, ms, url);
+    const r = await withFallback((signal) => this.post<T>(url, body, signal), fallback, ms, url);
     if (r.fallback || r.value.fallback) this.set({ fallbacks: [...this.state.fallbacks, url.replace('/api/', '')] });
     return r.value;
   }
@@ -194,7 +210,7 @@ export class TrialOrchestrator {
     const speaker = line.speaker;
     const voice = async (text: string, settings?: VoiceSettings) => {
       const r = await withFallback<TtsResponse | null>(
-        (signal) => postJson<TtsResponse>('/api/voice/tts', { text, speaker, voiceId: this.opts.voiceId, voiceSettings: settings }, signal),
+        (signal) => this.post<TtsResponse>('/api/voice/tts', { text, speaker, voiceId: this.opts.voiceId, voiceSettings: settings }, signal),
         null,
         TIMEOUTS.tts.client,
         'tts',
@@ -222,6 +238,7 @@ export class TrialOrchestrator {
   private async say(line: Line): Promise<SayResult> {
     const ready = await (this.voiced.get(line.id) ?? this.prepare(line));
     this.voiced.delete(line.id);
+    if (this.stopped) return 'done';
     const done = new Promise<SayResult>((r) => (this.sayResolve = r));
     this.set({
       phase: 'speaking',
@@ -263,7 +280,7 @@ export class TrialOrchestrator {
       // Deep search lands later and is used by later cycles/topics. No mock: quick cards already cover it.
       for (const side of ['yes', 'no'] as const) {
         withFallback(
-          (signal) => postJson<ResearchResponse>('/api/research', { question: this.state.question, topic, side, tier: 'deep' }, signal),
+          (signal) => this.post<ResearchResponse>('/api/research', { question: this.state.question, topic, side, tier: 'deep' }, signal),
           { cards: [], fallback: true },
           TIMEOUTS.deepResearch.client,
           'deep research',

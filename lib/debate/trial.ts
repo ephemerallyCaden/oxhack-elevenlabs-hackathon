@@ -90,8 +90,10 @@ async function ask<S extends z.ZodType, R>(
 
 const Spoken = z.object({ text: z.string(), tts: z.string() });
 /** Models sometimes start a line with its speaker ("Judge: …"), even after leading audio tags. */
-const SPEAKER_LABEL = /^((?:\[[^\]\n]{1,40}\]\s*)*)(?:the\s+)?(?:judge|prosecution|defen[cs]e)(?:\s*\([^)]*\))?\s*:\s*/i;
-export const unlabel = (s: string) => s.replace(SPEAKER_LABEL, '$1');
+const SPEAKER_LABEL = /^((?:\[[^\]\n]{1,40}\]\s*)*)(?:the\s+)?(?:judge|prosecution|defen[cs]e|witness|future\s+you)(?:\s*\([^)]*\))?\s*:\s*/i;
+// Side labels only in capitals ("YES:"), so a sentence opening "No: …" keeps its word.
+const SIDE_LABEL = /^((?:\[[^\]\n]{1,40}\]\s*)*)(?:YES|NO)\s*:\s*/;
+export const unlabel = (s: string) => s.replace(SPEAKER_LABEL, '$1').replace(SIDE_LABEL, '$1');
 /** Display text never shows voice cues: models sometimes put audio tags like [confident] in `text` too. */
 export const plain = (s: string) => unlabel(s).replace(/\[[^\]\n]{1,40}\]\s*/g, '').replace(/\s{2,}/g, ' ').trim();
 const judgeLine = (kind: Line['kind'], s: { text: string; tts: string }, topic_id?: string): Line => {

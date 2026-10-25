@@ -29,6 +29,6 @@ export async function askGroq(model: string, system: string, content: string, js
   if (!res.ok) throw new Error(`Groq ${res.status}: ${(await res.text()).slice(0, 600)}`);
   const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
   const text = body.choices?.[0]?.message?.content;
-  if (!text) throw new Error('Groq: empty response');
+  if (!text) throw new SyntaxError('Groq: empty response'); // like Gemini's JSON.parse(''): a malformed answer, retried once
   return text;
 }

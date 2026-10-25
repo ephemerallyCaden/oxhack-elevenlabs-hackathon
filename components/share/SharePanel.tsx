@@ -3,23 +3,28 @@
 import { useState } from "react";
 import QRCode from "qrcode";
 import type { Transcript } from "@/types";
+import { slimTranscript } from "@/lib/share/slim";
 
 // At the verdict: nothing is stored unless the user asks. "Save & share" saves the trial (transcript +
 // verdict, no voice or face) for 7 days and shows a QR code + link to /t/[id] for their phone.
 export default function SharePanel({ transcript, onSaved }: { transcript: Transcript; onSaved?: (id: string) => void }) {
   const [state, setState] = useState<"ask" | "saving" | "saved" | "failed">("ask");
-  const [link, setLink] = useState<{ url: string; qr: string } | null>(null);
+  const [link, setLink] = useState<{ url: string; qr?: string } | null>(null);
 
   async function save() {
     setState("saving");
     try {
-      const r = await fetch("/api/trials", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript }) });
+      // Words only: the voice audio never leaves the browser (and would exceed the 4.5 MB body limit).
+      const body = JSON.stringify({ transcript: slimTranscript(transcript) });
+      const r = await fetch("/api/trials", { method: "POST", headers: { "Content-Type": "application/json" }, body });
       if (!r.ok) throw new Error(String(r.status));
       const { id } = (await r.json()) as { id: string };
       onSaved?.(id);
       const url = `${window.location.origin}/t/${id}`;
-      setLink({ url, qr: await QRCode.toDataURL(url, { margin: 1, width: 220 }) });
+      // Saved: show the link now. The QR is a bonus; if it fails the link still works (no retry, no second save).
+      setLink({ url });
       setState("saved");
+      QRCode.toDataURL(url, { margin: 1, width: 220 }).then((qr) => setLink({ url, qr }), () => {});
     } catch {
       setState("failed");
     }
@@ -30,7 +35,7 @@ export default function SharePanel({ transcript, onSaved }: { transcript: Transc
       {state === "saved" && link ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element -- generated data URL */}
-          <img src={link.qr} alt="QR code to your trial" className="size-28 rounded bg-white p-1" />
+          {link.qr && <img src={link.qr} alt="QR code to your trial" className="size-28 rounded bg-white p-1" />}
           <div className="flex flex-col gap-1 text-sm">
             <span className="font-bold text-amber-400">Take your trial home</span>
             <span className="text-zinc-400">Scan for the full transcript and sources. The link works for 7 days.</span>

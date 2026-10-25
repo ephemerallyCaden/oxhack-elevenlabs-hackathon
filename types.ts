@@ -234,7 +234,7 @@ export interface SetupRequest {
   profile?: UserProfile;
 }
 export interface SetupResponse {
-  /** 1-4 topics, quick-to-research first, importance normalised. */
+  /** 1-MAX_TOPICS (lib/debate/spectrum.ts) topics, quick-to-research first, importance normalised. */
   topics: Topic[];
   /** Judge's opening: names the question and the agenda. */
   opening: Line;

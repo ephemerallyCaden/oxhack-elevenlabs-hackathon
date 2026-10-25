@@ -21,7 +21,7 @@ import type {
   VerdictResponse,
 } from '@/types';
 import { SIDE_SPEAKER } from '@/types';
-import { computeSpectrum, ledgerBalance, normalise, orderAgenda } from './spectrum';
+import { computeSpectrum, ledgerBalance, MAX_TOPICS, normalise, orderAgenda } from './spectrum';
 import { uid } from './fallback';
 import { attachPunch, punchedSides } from './punch';
 
@@ -44,7 +44,7 @@ function mockAgenda(question: string) {
     { id: 'topic-happiness', title: 'Happiness', question: `Will you be happier if you ${act}?`, importance: 0.35, research_speed: 'quick', status: 'pending', added_by: 'judge' },
     { id: 'topic-long-term', title: 'Long-term consequences', question: `Where does choosing to ${act} leave you in five years?`, importance: 0.3, research_speed: 'deep', status: 'pending', added_by: 'judge' },
   ];
-  const topics = orderAgenda(normalise(raw));
+  const topics = orderAgenda(normalise(raw.slice(0, MAX_TOPICS))); // same cap as the live agenda
   const intros: Record<string, Line> = {};
   topics.forEach((t, i) => {
     intros[t.id] = judge('intro', `${i === 0 ? 'First' : i === topics.length - 1 ? 'Finally' : 'Next'}: ${t.title.toLowerCase()}. ${t.question} Prosecution, you may begin.`, t.id);

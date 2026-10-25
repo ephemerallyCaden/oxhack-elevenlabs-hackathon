@@ -87,6 +87,14 @@ function TypedInput({
   );
 }
 
+/** The trial on screen. A new trial page (layout.tsx remounts it per push) stops the one it replaces. */
+let live: TrialOrchestrator | null = null;
+
+/** engine.unlock() can hang without a user gesture, or reject (Safari): never let it block the trial. */
+function unlockSoon(ms = 1500): Promise<boolean> {
+  return Promise.race([engine.unlock().then(() => true, () => false), new Promise<boolean>((r) => setTimeout(() => r(false), ms))]);
+}
+
 // -- Main trial page --
 export default function TrialPage() {
   // Onboarding (/) leaves the user's cloned voice + profile in sessionStorage; none → presenter voice.
@@ -119,20 +127,36 @@ export default function TrialPage() {
   const [shakeKey, setShakeKey] = useState(0);
 
   // Track previous scene/phase for change detection
-  const prevScene = useRef<Scene>(s.scene);
-  const prevPhase = useRef(s.phase);
+  const prevScene = useRef<Scene | undefined>(s.scene);
+  const prevPhase = useRef<typeof s.phase | undefined>(s.phase);
+
+  // Leaving the court (Back, or the route kept alive in the background): stop the music, crowd and
+  // voice. Coming back re-runs the music effect (the refs are cleared so it picks the track again).
+  useEffect(
+    () => () => {
+      void engine.setMusic(null);
+      void engine.setAmbience(false);
+      engine.stopVoice();
+      prevScene.current = undefined;
+      prevPhase.current = undefined;
+    },
+    [],
+  );
 
   // -- Audio unlock on first user gesture --
   const unlockAudio = useCallback(async () => {
     if (audioUnlocked) return;
-    await engine.unlock();
-    setAudioUnlocked(true);
+    if (await unlockSoon()) setAudioUnlocked(true);
   }, [audioUnlocked]);
 
   // -- 0. Arrived from onboarding: start straight away with the confirmed question --
   // (the "Take it to court" click on / counts as the user gesture for audio)
   const autoStarted = useRef(false);
   useEffect(() => {
+    if (live !== orch) {
+      live?.stop(); // e.g. Back during "preparing", then a new question: the old trial must not keep calling APIs
+      live = orch;
+    }
     if (autoStarted.current) return;
     autoStarted.current = true;
     const q = takeSessionQuestion();
@@ -140,8 +164,10 @@ export default function TrialPage() {
       queueMicrotask(() => setAskOpen(true));
       return;
     }
-    void engine.unlock().then(() => {
-      setAudioUnlocked(true);
+    // Start even if the browser won't unlock audio (no gesture, Safari): a silent trial beats a stuck carpet.
+    void unlockSoon().then((ok) => {
+      if (ok) setAudioUnlocked(true);
+      else void engine.unlock().then(() => setAudioUnlocked(true), () => {}); // late unlock still gets the music
       orch.start(q);
     });
   }, [orch]);
@@ -314,8 +340,13 @@ export default function TrialPage() {
 
   // -- Keyboard handler: Space to hold-to-talk --
   useEffect(() => {
-    // Space on a focused control (input, button, link: e.g. the verdict screen) is that control's.
-    const free = () => !['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(document.activeElement?.tagName ?? '');
+    // Space is hold-to-talk, except in a text field or on the verdict screen's buttons (they take Space),
+    // and not while the court is still hidden behind the intro (nothing on screen to talk to).
+    const free = () => {
+      const el = document.activeElement;
+      if (el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) return false;
+      return !el?.closest('[aria-label="Verdict"]') && !(introMode && !asking);
+    };
     const kd = (e: KeyboardEvent) => e.code === 'Space' && !e.repeat && free() && (e.preventDefault(), down());
     const ku = (e: KeyboardEvent) => e.code === 'Space' && free() && (e.preventDefault(), up());
     window.addEventListener('keydown', kd);
@@ -440,8 +471,8 @@ export default function TrialPage() {
         />
       </div>
 
-      {/* Top-left: question + topic/cycle (hidden through the intro) */}
-      {!introMode && (
+      {/* Top-left: question + topic/cycle (hidden through the intro, shown while asking) */}
+      {(!introMode || asking) && (
         <header className="absolute left-4 top-4 z-50 max-w-md rounded-lg bg-black/70 px-4 py-2">
           <h1 className="text-sm font-black tracking-tight">Court of Future Selves</h1>
           <p className="text-xs text-zinc-400">

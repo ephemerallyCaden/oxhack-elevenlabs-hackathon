@@ -8,6 +8,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 import { LOCAL_DIR, supabase } from "@/lib/supabase";
 import type { Transcript } from "@/types";
+import { slimTranscript } from "./slim";
 
 const DIR = join(LOCAL_DIR, "trials");
 
@@ -25,22 +26,14 @@ async function purgeExpired() {
   const files = await readdir(DIR).catch(() => [] as string[]);
   for (const f of files) {
     const p = join(DIR, f);
-    if ((await stat(p)).mtime < cutoff()) await rm(p, { force: true });
+    const s = await stat(p).catch(() => null); // another save's purge may have removed it already
+    if (s && s.mtime < cutoff()) await rm(p, { force: true });
   }
-}
-
-/** Drop audio (data: URLs are ~100 KB per line) and TTS-only text before saving. */
-function slim(t: Transcript): Transcript {
-  return {
-    ...t,
-    lines: t.lines.map(({ audioUrl, tts, ...l }) => (void audioUrl, void tts, l)),
-    verdict: t.verdict && { ...t.verdict, line: { ...t.verdict.line, audioUrl: undefined, tts: undefined } },
-  };
 }
 
 export async function saveTrial(t: Transcript): Promise<string> {
   const id = randomBytes(6).toString("base64url");
-  const transcript = slim(t);
+  const transcript = slimTranscript(t); // again server-side: never trust the client to have done it
   if (supabase) {
     const { error } = await supabase.from("trials").insert({ id, question: transcript.question, transcript });
     if (error) throw new Error(`supabase insert: ${error.message}`);

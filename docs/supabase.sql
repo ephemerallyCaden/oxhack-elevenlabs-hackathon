@@ -28,9 +28,16 @@ alter table public.users enable row level security;
 
 -- Optional: delete trials older than 7 days every night, even if nobody saves a new one.
 -- (The app already hides expired trials and deletes them on each new save.)
--- Enable "pg_cron" first: Database → Extensions → pg_cron.
-select cron.schedule(
-  'delete-old-trials',
-  '0 3 * * *',
-  $$delete from public.trials where created_at < now() - interval '7 days'$$
-);
+-- Enable "pg_cron" first: Database → Extensions → pg_cron. Without it this block does nothing, so the
+-- whole file still runs in one paste (a bare cron.schedule would fail and roll the tables back).
+do $do$
+begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.schedule(
+      'delete-old-trials',
+      '0 3 * * *',
+      $$delete from public.trials where created_at < now() - interval '7 days'$$
+    );
+  end if;
+end
+$do$;

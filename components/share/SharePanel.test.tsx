@@ -42,3 +42,52 @@ describe("SharePanel", () => {
     expect(screen.getByRole("button", { name: "Save & share this trial" })).toBeTruthy();
   });
 });
+
+describe("SharePanel: retries, double clicks, what leaves the browser", () => {
+  const voiced: Transcript = {
+    question: "Should I move?",
+    lines: [{ id: "l1", speaker: "prosecution", kind: "argument", text: "It pays everything.", tts: "[passionate] It pays", cites: [], audioUrl: "data:audio/mpeg;base64,AAAA", punch: { text: "everything.", tts: "[passionate] every... thing.", audioUrl: "data:audio/mpeg;base64,BBBB" } }],
+    sources: [],
+  };
+
+  it("sends the words only: no voice audio or TTS text, punch clips included", async () => {
+    const fetchMock = vi.fn(async (...args: [string, RequestInit?]) => (void args, new Response(JSON.stringify({ id: "abc12345" }), { status: 200 })));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SharePanel transcript={voiced} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save & share this trial" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = String(fetchMock.mock.calls[0][1]?.body);
+    expect(body).not.toContain("data:audio");
+    expect(body).not.toContain("[passionate]");
+    expect(JSON.parse(body).transcript.lines[0].punch).toEqual({ text: "everything." });
+  });
+
+  it("can't be double-submitted while saving, and a retry after a failure works", async () => {
+    let fail = true;
+    const fetchMock = vi.fn(async () => (fail ? new Response("{}", { status: 500 }) : new Response(JSON.stringify({ id: "abc12345" }), { status: 200 })));
+    vi.stubGlobal("fetch", fetchMock);
+    const onSaved = vi.fn();
+    render(<SharePanel transcript={transcript} onSaved={onSaved} />);
+    const button = screen.getByRole("button", { name: "Save & share this trial" });
+    fireEvent.click(button);
+    expect(screen.getByRole("button", { name: "Saving…" }).hasAttribute("disabled")).toBe(true);
+    await waitFor(() => expect(screen.getByText(/Couldn’t save it, try again/)).toBeTruthy());
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Save & share this trial" }));
+    await waitFor(() => expect(screen.getByRole("link")).toBeTruthy());
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(onSaved).toHaveBeenCalledWith("abc12345");
+  });
+
+  it("shows the link even if the QR code fails (no second save)", async () => {
+    const qrcode = (await import("qrcode")).default as unknown as { toDataURL: ReturnType<typeof vi.fn> };
+    qrcode.toDataURL.mockRejectedValueOnce(new Error("canvas"));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "abc12345" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SharePanel transcript={transcript} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save & share this trial" }));
+    await waitFor(() => expect(screen.getByRole("link").getAttribute("href")).toMatch(/\/t\/abc12345$/));
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

@@ -37,7 +37,47 @@ describe('askGemini (model pool caller)', () => {
     groq.mockResolvedValue('{"lines": "not even an array"}');
     const { askGemini } = await import('./gemini');
 
-    await expect(askGemini('system', 'content', schema, new AbortController().signal)).rejects.toThrow();
+    await expect(askGemini('system', 'content', schema, new AbortController().signal)).rejects.toBeInstanceOf(z.ZodError);
     expect(groq).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries broken JSON (not just a schema mismatch) on the next model', async () => {
+    const { askGroq } = await import('./groq');
+    const groq = vi.mocked(askGroq);
+    groq.mockReset();
+    groq.mockResolvedValueOnce('{"lines": [');
+    groq.mockResolvedValueOnce(JSON.stringify({ lines: [{ text: 'Fixed.' }] }));
+    const { askGemini } = await import('./gemini');
+
+    await expect(askGemini('system', 'content', schema, new AbortController().signal)).resolves.toEqual({ lines: [{ text: 'Fixed.' }] });
+    const models = groq.mock.calls.map((c) => c[0]);
+    expect(models[1]).not.toBe(models[0]); // the model that answered badly sits out the retry
+  });
+
+  it('does not retry once the request is aborted', async () => {
+    const { askGroq } = await import('./groq');
+    const groq = vi.mocked(askGroq);
+    groq.mockReset();
+    const ctl = new AbortController();
+    groq.mockImplementationOnce(async () => {
+      ctl.abort();
+      return '{"lines": "nope"}';
+    });
+    const { askGemini } = await import('./gemini');
+
+    await expect(askGemini('system', 'content', schema, ctl.signal)).rejects.toBeInstanceOf(z.ZodError);
+    expect(groq).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry without time left for another call (the mock must arrive on time)', async () => {
+    const { askGroq } = await import('./groq');
+    const groq = vi.mocked(askGroq);
+    groq.mockReset();
+    groq.mockResolvedValue('{"lines": "nope"}');
+    const { askGemini } = await import('./gemini');
+
+    const deadline = Date.now() + 3900; // less than the 4s a call needs once the first answer is in
+    await expect(askGemini('system', 'content', schema, new AbortController().signal, 'interactive', deadline)).rejects.toBeInstanceOf(z.ZodError);
+    expect(groq).toHaveBeenCalledTimes(1);
   });
 });
