@@ -3,7 +3,7 @@
 // (whip.ts). While `target` is null the intro (useIntroCrane) drives the camera instead;
 // it always lands on the witness shot, so the next whip starts from there.
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
-import { SHOT, WHIP, sameShot, shotCss, whipAt, whipBlur, type Shot } from './whip';
+import { OBJECTION, SHOT, WHIP, objectionAt, sameShot, shotCss, whipAt, whipBlur, type Shot } from './whip';
 
 interface Refs {
   camera: RefObject<HTMLDivElement | null>;
@@ -20,17 +20,45 @@ export interface Slide {
   dir: -1 | 1;
 }
 
-export function useWhipCamera(refs: Refs, target: Shot | null, slide?: Slide) {
+/** `pullBack`: move with the OBJECTION! pull-back instead of a whip; `onFrame` sees each of its frames. */
+export interface PullBack {
+  pullBack: boolean;
+  onFrame?: (now: Shot, from: Shot) => void;
+}
+
+export function useWhipCamera(refs: Refs, target: Shot | null, slide?: Slide, pull?: PullBack) {
   const at = useRef<Shot | null>(null); // where the camera is now
   const slideRef = useRef<Slide | undefined>(undefined);
+  const pullRef = useRef<PullBack | undefined>(undefined);
   useEffect(() => {
     slideRef.current = slide;
+    pullRef.current = pull;
   });
 
   useLayoutEffect(
-    () => moveTo(refs, at, target, slideRef),
-    [target?.S, target?.tx, target?.ty, target === null], // eslint-disable-line react-hooks/exhaustive-deps
+    () => (pull?.pullBack ? pullTo(refs, at, target, pullRef) : moveTo(refs, at, target, slideRef)),
+    [target?.S, target?.tx, target?.ty, target === null, pull?.pullBack], // eslint-disable-line react-hooks/exhaustive-deps
   );
+}
+
+/** The OBJECTION! pull-back from wherever the camera is to `target` (no motion blur). */
+function pullTo(refs: Refs, at: { current: Shot | null }, target: Shot | null, pull: { current: PullBack | undefined }) {
+  const cam = refs.camera.current;
+  const from = at.current;
+  if (!cam || !target || !from) return moveTo(refs, at, target, { current: undefined });
+  let raf = 0;
+  const t0 = performance.now();
+  const step = () => {
+    const t = Math.min(1, (performance.now() - t0) / OBJECTION.ms);
+    const pose = objectionAt(from, target, t);
+    cam.style.transform = shotCss(pose);
+    at.current = pose;
+    pull.current?.onFrame?.(pose, from);
+    if (t < 1) raf = requestAnimationFrame(step);
+  };
+  setBlur(refs, 0);
+  raf = requestAnimationFrame(step);
+  return () => cancelAnimationFrame(raf);
 }
 
 /** Snap (first frame, or same shot) or whip the camera to `target`. Returns a cancel function. */

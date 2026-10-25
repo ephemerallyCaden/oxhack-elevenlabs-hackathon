@@ -207,3 +207,108 @@
   top: 0;
   transform-origin: 0 0;
 }
+
+/* ===== OBJECTION! (animation-vision #5, tuned in public/mockups/interrupt-objection.html) ===== */
+/* Radial black vignette: its gradient follows the pull-back zoom (whip.ts vignetteAt), set per frame. */
+.objection-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 24; /* over the scene, under the textbox */
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease-out;
+}
+.objection-vignette.on {
+  opacity: 1;
+  transition: none;
+  animation: vignetteBreathe 1.6s ease-in-out 0.55s infinite; /* while listening */
+}
+@keyframes vignetteBreathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.92; }
+}
+/* White speed lines rushing out from the centre while the camera pulls back */
+.objection-burst {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  pointer-events: none;
+  opacity: 0;
+  transform-origin: 50% 46%;
+  background: repeating-conic-gradient(from 0deg at 50% 46%, transparent 0deg 4.2deg, rgba(255, 255, 255, 0.9) 4.2deg 4.6deg);
+  -webkit-mask-image: radial-gradient(circle at 50% 46%, transparent 18%, #000 42%);
+  mask-image: radial-gradient(circle at 50% 46%, transparent 18%, #000 42%);
+  animation: objectionBurst 0.55s ease-out forwards;
+}
+@keyframes objectionBurst {
+  0% { opacity: 0; transform: scale(0.7); }
+  25% { opacity: 0.55; transform: scale(1.1); }
+  100% { opacity: 0; transform: scale(1.9); }
+}
+/* One white frame, then the OBJECTION! burst slams in, holds, and leaves */
+.objection-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  background: #fff;
+  pointer-events: none;
+  animation: objectionFlash 0.11s linear forwards;
+}
+@keyframes objectionFlash {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+.objection-word {
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  z-index: 46;
+  width: 560px;
+  height: 250px;
+  pointer-events: none;
+  animation: objectionSlam 1.66s forwards;
+}
+.objection-word svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+.objection-word span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-bangers), Impact, sans-serif;
+  font-size: 96px;
+  letter-spacing: 4px;
+  color: #fff;
+  -webkit-text-stroke: 5px #08080e;
+  paint-order: stroke fill;
+  text-shadow: 6px 6px 0 #c81e1e;
+  transform: rotate(-7deg);
+}
+/* slam 320ms (overshooting), hold until ~1.44s, then 220ms out */
+@keyframes objectionSlam {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(3.2) rotate(-18deg); animation-timing-function: cubic-bezier(0.2, 1.5, 0.45, 1); }
+  7.7% { opacity: 1; transform: translate(-50%, -50%) scale(0.88) rotate(-4deg); }
+  12.5% { transform: translate(-50%, -50%) scale(1.07) rotate(-7deg); }
+  19.3% { transform: translate(-50%, -50%) scale(1) rotate(-6deg); }
+  86.7% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-6deg); animation-timing-function: ease-in; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.25) rotate(-6deg); }
+}
+/* Turning to face the user: a quick squash on the lawyer; the Judge (already front-on) jolts */
+.pc-turn-pop { animation: turnPop 0.11s ease-out; }
+@keyframes turnPop {
+  0% { transform: scale(1.1, 0.92); }
+  100% { transform: scale(1); }
+}
+.pc-jolt .pc-head { animation: jolt 0.3s ease-out 1; }
+@keyframes jolt {
+  0% { transform: scale(1.18) translateY(-4px); }
+  100% { transform: scale(1); }
+}
+.rec-dot { color: #ef4444; animation: recBlink 1s steps(2) infinite; }
+@keyframes recBlink {
+  50% { opacity: 0.2; }
+}

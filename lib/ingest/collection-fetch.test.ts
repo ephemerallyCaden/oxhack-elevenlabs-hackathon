@@ -181,3 +181,19 @@ test("shared failures leave no stuck promise or success-cache entry", async () =
   assert.equal((await fetcher.ons()).status, "live");
   assert.equal(calls, 2);
 });
+
+test("ONS skips contradictory and unusable date labels without relabeling their values", async () => {
+  const fetcher = createCollectionFetcher({ fetchImpl: async () => Response.json({
+    description: { cdid: "D7G7", unit: "%", title: "CPI annual rate", releaseDate: "2026-10-15T08:00:00.000Z" },
+    months: [
+      { date: "2026 SEP", value: "2.7", year: "2026", month: "September" },
+      { date: "2030 MAR", value: "3.8", year: "2026", month: "October" },
+      { date: "unavailable", value: "4.1", year: "2026", month: "November" },
+    ],
+  }) });
+  const report = await fetcher.ons();
+  assert.equal(report.status, "live");
+  assert.equal(report.records.length, 1);
+  assert.match(report.records[0].text, /2\.7% for 2026 SEP/);
+  assert.doesNotMatch(report.records[0].text, /3\.8|4\.1|2030/);
+});

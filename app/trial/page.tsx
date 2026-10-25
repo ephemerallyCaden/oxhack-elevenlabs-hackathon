@@ -425,6 +425,7 @@ export default function TrialPage() {
           controls={introMode ? undefined : controls}
           heads={heads}
           interrupting={s.phase === 'listening'}
+          interrupted={s.interruptTarget === 'user' ? undefined : s.interruptTarget}
           intro={introMode}
           onIntroDone={finishIntro}
           shot={shot}

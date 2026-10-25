@@ -10,7 +10,13 @@ export const researchRequestSchema = z.object({
   side: z.enum(["yes", "no"]), tier: z.enum(["quick", "deep"]),
 }).strict() satisfies z.ZodType<ResearchRequest>;
 export type TopicResearchRequest = z.infer<typeof researchRequestSchema>;
-export type ResearchEvidenceCard = EvidenceCard;
+/** Dates, coverage and caveats travel beside the card. The engine's prompts and the UI print only `claim`,
+ * `evidence` and the source, so this never reaches the debaters or the viewer. */
+export type CardProvenance = {
+  capturedAt: string; publishedAt?: string; limitations: string[];
+  discussion?: { coverage: string; kind: "post" | "reply"; parentText?: string };
+};
+export type ResearchEvidenceCard = EvidenceCard & { provenance: CardProvenance };
 export const passageSelectionsSchema = z.object({ selections: z.array(z.object({
   recordId: z.string().max(150), quote: z.string().trim().min(20).max(700),
   side: z.enum(["yes", "no"]),

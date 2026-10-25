@@ -12,10 +12,10 @@ const preview = (channel: string) => `<div data-post="${channel}/42"><div class=
 describe("bounded social adapters", () => {
   it.each(["json", "sse"])("discovers Telegram channels through %s MCP and preserves original post metadata", async format => {
     const ctx = context();
-    const envelope = JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: [
-      "URL: https://t.me/s/TravelLife/42", "URL: https://t.me/s/ProgrammingTutorials", "URL: https://t.me.evil.example/s/FakeLife",
-      "URL: https://t.me/s/CareerBreak", "URL: https://t.me/s/ThirdChannel", "URL: https://t.me/+privateInvite",
-    ].join("\n") }] } });
+    const envelope = JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify({ results: [
+      "https://t.me/s/TravelLife/42", "https://t.me/s/ProgrammingTutorials", "https://t.me.evil.example/s/FakeLife",
+      "https://t.me/s/CareerBreak", "https://t.me/s/ThirdChannel", "https://t.me/+privateInvite",
+    ].map(url => ({ url })) }) }] } });
     vi.mocked(ctx.transport.text).mockImplementation(async target => target.includes("mcp.exa.ai") ? (format === "json" ? envelope : `event: message\r\ndata: ${envelope}\r\n\r\n`) : preview(target.split("/").at(-1)!));
     const result = await adapter("telegram").collect(ctx);
     expect(result.records).toHaveLength(2);
@@ -35,7 +35,7 @@ describe("bounded social adapters", () => {
     expect(vi.mocked(ctx.transport.json).mock.calls[0][0]).toBe("https://api.exa.ai/search");
     const anonymous = context();
     vi.mocked(anonymous.transport.text).mockResolvedValue(JSON.stringify({ result: { isError: true, content: [{ type: "text", text: "quota" }] } }));
-    await expect(adapter("telegram").collect(anonymous)).rejects.toThrow("discovery service");
+    await expect(adapter("telegram").collect(anonymous)).rejects.toMatchObject({ status: 429 });
     expect(anonymous.transport.text).toHaveBeenCalledTimes(1);
   });
 

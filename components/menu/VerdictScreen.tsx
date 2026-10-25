@@ -63,11 +63,9 @@ export default function VerdictScreen({
               <ol className="flex flex-col gap-2">
                 {transcript.sources.map((c, i) => (
                   <li key={c.id} className="ct-small !text-[#d9d7d0]">
-                    [{i + 1}] {c.evidence} ·{' '}
-                    {c.source_url ? (
-                      <a className="ct-link" href={c.source_url} target="_blank" rel="noreferrer">{c.source_name}</a>
-                    ) : (
-                      c.source_name
+                    [{i + 1}] {c.evidence}
+                    {c.source_url && (
+                      <a className="ct-link block break-all !text-xs" href={c.source_url} target="_blank" rel="noreferrer">{c.source_url}</a>
                     )}
                   </li>
                 ))}

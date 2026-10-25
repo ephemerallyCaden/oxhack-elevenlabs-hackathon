@@ -6,6 +6,7 @@ import { createResearchQueue, ResearchDeadlineError, withinDeadline } from "./re
 import { createPassageSelector, type PassageSelector } from "./research-selection";
 import { createCommunityFetcher, interleaveRecords } from "./community-fetch";
 import { allowedSourceRecord } from "./source-policy";
+import { createWebSearch } from "./web-search";
 
 export type PublicCaptureTool = {
   /** Unique identifier for one fixed public capture and extraction settings. */
@@ -13,12 +14,14 @@ export type PublicCaptureTool = {
   matches: (request: TopicResearchRequest) => boolean;
   read: (signal: AbortSignal) => Promise<CollectionReport>;
 };
-export type ResearchDiagnostics = { status: "ok" | "partial" | "unsupported" | "unavailable" | "not_configured" | "timeout" | "cancelled";
+/** `no_support`: sources were retrieved, but no admissible passage supported the requested side. */
+export type ResearchDiagnostics = { status: "ok" | "partial" | "no_support" | "unsupported" | "unavailable" | "not_configured" | "timeout" | "cancelled";
   tools: { id: string; status: CollectionReport["status"] }[]; warnings: string[]; acceptedCards: number };
 export type TopicResearchResponse = { cards: ResearchEvidenceCard[]; fallback: boolean; diagnostics: ResearchDiagnostics };
 type Options = { fetcher?: ReturnType<typeof createCollectionFetcher>; selector?: PassageSelector;
   publicCaptures?: PublicCaptureTool[]; quickMs?: number; deepMs?: number;
-  community?: ReturnType<typeof createCommunityFetcher> | false };
+  community?: ReturnType<typeof createCommunityFetcher> | false;
+  webSearch?: ReturnType<typeof createWebSearch> | false };
 type Action = { id: string; key: string; read: PublicCaptureTool["read"]; budgetMs?: number };
 const budget = (value: number | undefined, max: number) => Number.isFinite(value) ? Math.max(1, Math.min(value!, max)) : max;
 const digest = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 20);
@@ -29,6 +32,7 @@ export function createResearchAgent(options: Options = {}) {
   const fetcher = options.fetcher ?? createCollectionFetcher();
   const select = options.selector ?? createPassageSelector();
   const community = options.community === false ? undefined : options.community ?? createCommunityFetcher();
+  const webSearch = options.webSearch === false ? undefined : options.webSearch ?? createWebSearch();
   const captures = options.publicCaptures ?? [];
   if (captures.length > 8 || new Set(captures.map(tool => tool.id)).size !== captures.length) throw new Error("Invalid public capture registry");
   const acquisitionQueue = createResearchQueue(3);
@@ -66,6 +70,11 @@ export function createResearchAgent(options: Options = {}) {
             const query = plan.query;
             actions.push({ id: "thunderbit-search", key: `search:${query}`, read: () => fetcher.search(query) });
           }
+          const webQuery = webSearch?.plan(req);
+          if (webSearch && webQuery) {
+            // Runs first: quick research must land its page excerpts during the opening cut-scene.
+            actions.unshift({ id: "exa", key: `web:${webQuery}`, budgetMs: 2400, read: signal => webSearch.collect(webQuery, signal) });
+          }
           for (const action of community?.plan(req) ?? []) {
             actions.push({ id: action.id, key: `community:${action.id}:${action.query}`, budgetMs: 20000,
               read: signal => community!.collect(action, signal) });
@@ -96,15 +105,18 @@ export function createResearchAgent(options: Options = {}) {
           const seen = new Set<string>();
           const cards: ResearchEvidenceCard[] = [];
           for (const selection of parsed.data.selections) {
+            // The model classifies passages without knowing the requested side.
+            if (selection.side !== req.side) continue;
             const record = byId.get(selection.recordId);
-            if (!record || selection.side !== req.side || !record.text.includes(selection.quote) || seen.has(record.sourceUrl)) {
-              diagnostics.warnings.push("Rejected an unknown, unsupported, duplicate or wrong-side passage."); continue;
+            if (!record || !record.text.includes(selection.quote) || seen.has(record.sourceUrl)) {
+              diagnostics.warnings.push("Rejected an unknown, unsupported or duplicate passage."); continue;
             }
             seen.add(record.sourceUrl);
             cards.push(makeCard(req, record, selection.quote));
             if (cards.length >= (req.tier === "quick" ? 3 : 6)) break;
           }
-          diagnostics.status = cards.length >= (req.tier === "quick" ? 2 : 3) ? "ok" : cards.length ? "partial" : "unavailable";
+          diagnostics.status = cards.length >= (req.tier === "quick" ? 2 : 3) ? "ok" : cards.length ? "partial" : "no_support";
+          if (!cards.length) diagnostics.warnings.push("Sources were retrieved, but no admissible passage supported the requested side.");
           diagnostics.warnings.push("Exact excerpt matching does not establish semantic relevance, support for a side, or independent factual verification.");
           signal.throwIfAborted();
           return finish(cards);
@@ -122,13 +134,33 @@ export function createResearchAgent(options: Options = {}) {
   };
 }
 
+const CLAIM_CHARS = 160;
+
+/** The point in one line: the quote's first sentence, cut if it runs long. */
+function shortClaim(quote: string): string {
+  const sentence = /^[\s\S]*?[.!?](?=\s|$)/.exec(quote)?.[0] ?? quote;
+  return sentence.length <= CLAIM_CHARS ? sentence : `${sentence.slice(0, CLAIM_CHARS - 1).trimEnd()}…`;
+}
+
+/** Extractive: the model cannot invent a claim, URL or strength. `evidence` is the verbatim passage,
+ * readable as-is on the verdict screen; everything else about the record goes to `provenance`. */
 function makeCard(req: TopicResearchRequest, record: CollectionRecord, quote: string): ResearchEvidenceCard {
   const source = new URL(record.sourceUrl);
-  return { id: `${req.topic.id}:${req.side}:${req.tier}:${digest(`${req.question}\n${req.topic.question}\n${record.id}\n${quote}`)}`,
+  const discussion = record.discussion;
+  return {
+    id: `${req.topic.id}:${req.side}:${req.tier}:${digest(`${req.question}\n${req.topic.question}\n${record.id}\n${quote}`)}`,
     topic_id: req.topic.id, side: req.side, tier: req.tier,
-    // Extractive first slice: the model cannot invent a separate claim or source URL.
-    claim: quote, evidence: `${quote}\nSource publication date: ${record.publishedAt ?? "not provided"}. Collected: ${record.capturedAt}. Collection time does not establish currentness.${record.discussion ? `\nDiscussion coverage: ${record.discussion.coverage}${record.discussion.kind === "reply" ? `\nParent context (not the quoted reply): ${record.discussion.parentText}` : ""}` : ""}\nScope: ${record.limitations.join(" ")} Independent verification has not been performed.`,
+    claim: shortClaim(quote),
+    evidence: discussion ? `${quote} (personal account from an online discussion)` : quote,
     source_name: record.collector === "ons" ? "Office for National Statistics" : `${source.hostname} — ${record.title}`,
-    source_url: record.sourceUrl, strength: 1, // conservative until source/claim quality is independently reviewed
+    source_url: record.sourceUrl,
+    strength: 1, // conservative until source/claim quality is independently reviewed
+    provenance: {
+      capturedAt: record.capturedAt,
+      ...(record.publishedAt ? { publishedAt: record.publishedAt } : {}),
+      limitations: [...record.limitations, "Independent verification has not been performed."],
+      ...(discussion ? { discussion: { coverage: discussion.coverage, kind: discussion.kind,
+        ...(discussion.kind === "reply" && discussion.parentText ? { parentText: discussion.parentText } : {}) } } : {}),
+    },
   };
 }

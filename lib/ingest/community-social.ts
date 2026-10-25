@@ -2,6 +2,7 @@ import { load } from "cheerio";
 import type { CollectionReport } from "./collection-fetch";
 import type { CommunityAdapter, CommunityRecordInput } from "./community-types";
 import { communityRecord, htmlText } from "./community-utils";
+import { searchExa } from "./exa-search";
 
 type Row = Record<string, unknown>;
 const obj = (value: unknown): Row => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
@@ -12,19 +13,6 @@ const opinion = "Public community opinion, not a verified fact or representative
 const finish = (records: CollectionReport["records"], warnings: string[]): CollectionReport => ({ status: "live", records, warnings });
 const missing = (name: string): CollectionReport => ({ status: "not_configured", records: [], warnings: [`${name} is not configured.`] });
 const url = (base: string, params: Record<string, string>) => `${base}?${new URLSearchParams(params)}`;
-
-function mcpText(body: string): string {
-  const candidates = body.trim().startsWith("{") ? [body] : body.split(/\r\n|\r|\n/).filter(line => line.startsWith("data:")).map(line => line.slice(5).trim());
-  for (const candidate of candidates.slice(0, 40)) {
-    let envelope: Row;
-    try { envelope = obj(JSON.parse(candidate)); } catch { continue; }
-    const result = obj(envelope.result);
-    if (envelope.error || result.isError) throw new Error("Public discovery service returned an error.");
-    const text = rows(result.content).filter(item => item.type === "text").map(item => str(item.text)).join("\n");
-    if (text) return text.slice(0, 50000);
-  }
-  throw new Error("Public discovery returned an unreadable response.");
-}
 
 function channelFromUrl(value: string): string | null {
   try {
@@ -42,21 +30,9 @@ const telegram: CommunityAdapter = {
   matches: () => true, configured: () => true,
   async collect(ctx) {
     const query = `${ctx.query} life experience site:t.me/s/`;
-    let links: string[];
-    if (ctx.env.EXA_API_KEY?.trim()) {
-      const result = obj(await ctx.transport.json("https://api.exa.ai/search", ctx.signal, {
-        method: "POST", headers: { "Content-Type": "application/json", "x-api-key": ctx.env.EXA_API_KEY.trim() },
-        body: JSON.stringify({ query, type: "auto", numResults: 5, includeDomains: ["t.me"] }),
-      }));
-      if (!Array.isArray(result.results)) throw new Error("Public discovery returned an unreadable response.");
-      links = rows(result.results).map(row => str(row.url));
-    } else {
-      const body = await ctx.transport.text("https://mcp.exa.ai/mcp", ctx.signal, {
-        method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "web_search_exa", arguments: { query, numResults: 5, type: "auto", contextMaxCharacters: 10000 } } }),
-      });
-      links = mcpText(body).split(/\r\n|\r|\n/).filter(line => /^URL:\s*/i.test(line.trim())).map(line => line.trim().replace(/^URL:\s*/i, ""));
-    }
+    const results = await searchExa({ query, domains: ["t.me"], apiKey: ctx.env.EXA_API_KEY,
+      transport: ctx.transport, signal: ctx.signal });
+    const links = results.map(result => result.url);
     const channels = [...new Set(links.map(channelFromUrl).filter((name): name is string => !!name))].slice(0, 2);
     const records: CollectionReport["records"] = [];
     const warnings = ["Web-index discovery and at most two public Telegram previews only; private posts, media, discussion replies and older history are omitted."];

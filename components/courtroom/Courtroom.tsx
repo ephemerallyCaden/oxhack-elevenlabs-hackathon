@@ -2,7 +2,7 @@
 // Manga-noir courtroom scene (960×540). Background depth planes, camera, characters + expressions,
 // and the crane-up intro. Camera transforms precomputed with the validated formula from
 // research/courtroom-manga-camera.html against the marker positions below.
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import './expressions.css';
 import type { Scene } from '@/types';
 import Character from './Character';
@@ -16,7 +16,7 @@ import { useIntroCrane, type IntroMode } from './useIntroCrane';
 import PunchShot, { PUNCH_BG } from './PunchShot';
 import { shake } from './shake';
 import { useWhipCamera } from './useWhipCamera';
-import { SHOT } from './whip';
+import { OBJECTION, SHOT, vignetteAt, vignetteCss } from './whip';
 
 /* Face points (stage px): the head marker of each character's rest pose sits here. From the
    #ff0000 markers measured in courtroom-bg.png; the tall background's planes keep that framing.
@@ -40,6 +40,19 @@ function preloadPoses() {
   for (const src of ALL_FRAMES) new Image().src = src;
 }
 
+/** Jagged comic burst behind OBJECTION! (26 spikes, irregular but the same every render). */
+const BURST = Array.from({ length: 52 }, (_, i) => {
+  const a = (i / 52) * Math.PI * 2;
+  const r = i % 2 ? 0.74 + 0.06 * Math.abs(Math.sin(i * 2.7)) : 1 + 0.12 * Math.abs(Math.sin(i * 1.3));
+  return `${(280 + Math.cos(a) * 270 * r).toFixed(1)},${(125 + Math.sin(a) * 118 * r).toFixed(1)}`;
+}).join(' ');
+
+/** Who turns to face the user on an interrupt, in order: the interrupted one, then the rest. */
+const turnOrder = (first?: CourtActor): CourtActor[] => {
+  const all: CourtActor[] = ['prosecution', 'defense', 'judge'];
+  return first ? [first, ...all.filter((r) => r !== first)] : all;
+};
+
 export default function Courtroom({
   scene,
   moods,
@@ -51,6 +64,7 @@ export default function Courtroom({
   controls,
   heads,
   interrupting = false,
+  interrupted,
   intro = null,
   onIntroDone,
   shot,
@@ -68,6 +82,8 @@ export default function Courtroom({
   heads?: Heads;
   /** The user is interrupting: everyone turns to face front. */
   interrupting?: boolean;
+  /** Who the user interrupted: they turn to face the user first. */
+  interrupted?: CourtActor;
   /** Rendered inside the textbox (right side) so it scales with the stage. */
   controls?: React.ReactNode;
   /** Crane-up intro: 'hold' = still on the carpet (loading), 'play' = run it. */
@@ -88,14 +104,41 @@ export default function Courtroom({
   const blur = useRef<HTMLDivElement>(null);
   const blurStd = useRef<SVGFEGaussianBlurElement>(null);
   const punchLayer = useRef<HTMLDivElement>(null);
+  const vignette = useRef<HTMLDivElement>(null);
   const filterId = `whip-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   useIntroCrane({ stage, camera, shaker, ghosts, lines }, intro, onIntroDone);
+
+  // OBJECTION!: each interrupt (rising edge of `objection`) gets a number, which keys its one-shot effects.
+  const pullBack = !!objection && !intro;
+  const [hit, setHit] = useState({ on: false, n: 0 });
+  if (hit.on !== pullBack) setHit({ on: pullBack, n: pullBack ? hit.n + 1 : hit.n });
+  // How many of turnOrder() have turned to face the user so far in interrupt `n` (staggered).
+  const [turned, setTurned] = useState({ n: 0, count: 0 });
+  const order = turnOrder(interrupted);
+  const facing = (role: CourtActor) => pullBack && turned.n === hit.n && order.indexOf(role) < turned.count;
+  useEffect(() => {
+    if (!pullBack) return;
+    const n = hit.n;
+    const ids = [1, 2, 3].map((count) =>
+      setTimeout(() => setTurned({ n, count }), OBJECTION.turnMs + (count - 1) * OBJECTION.staggerMs),
+    );
+    if (shaker.current) shake(shaker.current, OBJECTION.shake.px, OBJECTION.shake.ms);
+    return () => ids.forEach(clearTimeout);
+  }, [pullBack, hit.n]);
+
   // Every change of shot outside the intro is a whip pan; the punch shot slides off with it.
+  // An interrupt instead pulls back hard to the wide shot, the vignette darkening with the zoom.
   const view = shot ?? scene;
   useWhipCamera(
     { camera, blur, blurStd, filterId },
-    intro ? null : SHOT[view],
+    intro ? null : pullBack ? OBJECTION.shot : SHOT[view],
     punch?.stage === 'out' ? { ref: punchLayer, dir: punch.who === 'prosecution' ? -1 : 1 } : undefined,
+    {
+      pullBack,
+      onFrame: (now, from) => {
+        if (vignette.current) vignette.current.style.background = vignetteCss(vignetteAt(from.S, now.S));
+      },
+    },
   );
   useEffect(() => {
     if (shakeKey && shaker.current) return shake(shaker.current);
@@ -121,16 +164,16 @@ export default function Courtroom({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img className="manga-plane-img" src={p.file} alt="" style={p.style} />
                   {RIDES[p.name]?.map((role) => (
-                    <div key={role} className="absolute" style={at(role)}>
-                      <Character role={role} mood={moods[role]} heads={heads} interrupting={interrupting} />
+                    <div key={role} className={`absolute${facing(role) ? ' pc-jolt' : ''}`} style={at(role)}>
+                      <Character role={role} mood={moods[role]} heads={heads} interrupting={pullBack ? facing(role) : interrupting} />
                     </div>
                   ))}
                 </div>
               ))}
               <div className="manga-plane" data-plane="lawyers" data-weight={DESK_WEIGHT}>
                 {LAWYERS.map((role) => (
-                  <div key={role} className="absolute" style={at(role)}>
-                    <Character role={role} mood={moods[role]} heads={heads} interrupting={interrupting} />
+                  <div key={role} className={`absolute${facing(role) ? ' pc-turn-pop' : ''}`} style={at(role)}>
+                    <Character role={role} mood={moods[role]} heads={heads} interrupting={pullBack ? facing(role) : interrupting} />
                   </div>
                 ))}
               </div>
@@ -157,16 +200,20 @@ export default function Courtroom({
           <div className="manga-zoomlines" ref={lines} />
           <div className="manga-halftone" />
           <div className="manga-ink" />
+          <div className={`objection-vignette${pullBack ? ' on' : ''}`} ref={vignette} />
+          {pullBack && <div key={`burst-${hit.n}`} className="objection-burst" />}
         </div>
 
         {/* Viewport-fixed overlays (not affected by camera) */}
         <div className="manga-scanlines" />
         <div className="manga-vignette" />
-        {objection && (
-          <div
-            className="absolute left-1/2 top-[30%] z-40 -translate-x-1/2 -rotate-3 border-4 border-white bg-[#08080e] px-6 py-2 font-mono text-4xl font-black tracking-widest text-white"
-          >
-            OBJECTION!
+        {pullBack && <div key={`flash-${hit.n}`} className="objection-flash" />}
+        {pullBack && (
+          <div key={`word-${hit.n}`} className="objection-word" role="img" aria-label="Objection!">
+            <svg viewBox="0 0 560 250" aria-hidden>
+              <polygon points={BURST} fill="#c81e1e" stroke="#08080e" strokeWidth={8} strokeLinejoin="round" transform="rotate(-6 280 125)" />
+            </svg>
+            <span aria-hidden>OBJECTION!</span>
           </div>
         )}
         {status && (
@@ -181,6 +228,7 @@ export default function Courtroom({
             text={text}
             controls={controls}
             punch={punch && { color: PUNCH_BG[punch.who], typeMs: punch.typeMs ?? 0 }}
+            rec={pullBack}
           />
         )}
       </div>
