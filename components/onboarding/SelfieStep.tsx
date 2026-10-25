@@ -25,6 +25,7 @@ export default function SelfieStep({ onDone }: { onDone: (dataUrl: string | null
   const stream = useRef<MediaStream | null>(null);
   const [shot, setShot] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [ready, setReady] = useState(false); // camera has frames: Take photo is disabled until then
 
   useEffect(() => {
     let cancelled = false;
@@ -87,7 +88,7 @@ export default function SelfieStep({ onDone }: { onDone: (dataUrl: string | null
         <div className="relative w-full overflow-hidden rounded-2xl bg-zinc-900" style={{ aspectRatio: "16 / 9" }}>
           {/* eslint-disable-next-line @next/next/no-img-element -- data URL preview */}
           {shot && <img src={shot} alt="Your selfie" className="absolute left-1/2 top-1/2 h-[60%] -translate-x-1/2 -translate-y-1/2" />}
-          <video ref={video} autoPlay playsInline muted className={`h-full w-full -scale-x-100 object-cover ${shot ? "opacity-0" : ""}`} />
+          <video ref={video} autoPlay playsInline muted onLoadedData={() => setReady(true)} className={`h-full w-full -scale-x-100 object-cover ${shot ? "opacity-0" : ""}`} />
           {!shot && (
             <div className="pointer-events-none absolute left-1/2 top-1/2 h-[60%] -translate-x-1/2 -translate-y-1/2 border-2 border-dashed border-amber-400/70" style={{ aspectRatio: `${W} / ${H}` }}>
               {[FACE_CAL.eyeViewerLeft, FACE_CAL.eyeViewerRight].map((e, i) => (
@@ -99,7 +100,7 @@ export default function SelfieStep({ onDone }: { onDone: (dataUrl: string | null
         </div>
       )}
       <div className="flex gap-3">
-        {!shot && !error && <button className="rounded-full bg-red-600 px-8 py-3 text-lg font-bold text-white" onClick={capture}>📸 Take photo</button>}
+        {!shot && !error && <button className="rounded-full bg-red-600 px-8 py-3 text-lg font-bold text-white disabled:opacity-40" disabled={!ready} onClick={capture}>{ready ? "📸 Take photo" : "Starting camera…"}</button>}
         {shot && <button className="rounded-full bg-zinc-700 px-6 py-3 text-white" onClick={() => setShot(null)}>Retake</button>}
         {shot && <button className="rounded-full bg-red-600 px-8 py-3 text-lg font-bold text-white" onClick={use}>Use this face</button>}
         <button className="rounded-full px-6 py-3 text-zinc-400 hover:text-white" onClick={() => onDone(null)}>Skip</button>

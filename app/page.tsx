@@ -1,15 +1,16 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { UserProfile } from "@/types";
-import VoiceStep, { type VoiceStepResult } from "@/components/onboarding/VoiceStep";
+import type { SavedUser } from "@/lib/users/store";
+import VoiceStep, { sessionVoiceId, type VoiceStepResult } from "@/components/onboarding/VoiceStep";
 import HoldToTalk from "@/components/HoldToTalk";
-import SelfieStep from "@/components/onboarding/SelfieStep";
+import SelfieStep, { sessionSelfie } from "@/components/onboarding/SelfieStep";
 import { getProfile } from "@/lib/debate/orchestrator";
-import { saveOnboarding } from "@/lib/onboarding/session";
+import { rememberedUserId, restoreSession, saveOnboarding, setRememberedUserId } from "@/lib/onboarding/session";
 
-type Step = "welcome" | "voice" | "selfie" | "thinking" | "confirm";
+type Step = "welcome" | "back" | "voice" | "selfie" | "thinking" | "confirm";
 
 /** Forget the last person's clone / selfie / profile (their clone may already be deleted). */
 function clearSession() {
@@ -20,13 +21,32 @@ function clearSession() {
   }
 }
 
+const post = (url: string, body: unknown) =>
+  fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
 // Onboarding: read the script aloud (voice clone + transcript) → selfie → profile + question → the trial.
+// Returning users ("Remember me") skip straight to their question.
 export default function Home() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("welcome");
   const [profile, setProfile] = useState<UserProfile>({});
   const [question, setQuestion] = useState("");
+  const [remember, setRemember] = useState(false);
+  const [returning, setReturning] = useState<SavedUser | null>(null);
   const profileCall = useRef<ReturnType<typeof getProfile> | null>(null);
+
+  // Remembered on this device? → "Welcome back".
+  useEffect(() => {
+    const id = rememberedUserId();
+    if (!id) return;
+    post("/api/users/get", { id })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then(({ user }: { user: SavedUser }) => {
+        setReturning(user);
+        setStep((s) => (s === "welcome" ? "back" : s));
+      })
+      .catch(() => setRememberedUserId(null)); // deleted or a different database
+  }, []);
 
   function onVoice(r: VoiceStepResult) {
     profileCall.current = getProfile({ transcript: r.transcript }); // runs while they take the selfie
@@ -41,10 +61,35 @@ export default function Home() {
     setStep("confirm");
   }
 
-  function toCourt() {
+  function welcomeBack(u: SavedUser) {
+    clearSession();
+    restoreSession(u);
+    setProfile(u.profile);
+    setQuestion("");
+    setRemember(true);
+    setStep("confirm");
+  }
+
+  async function forgetMe() {
+    if (returning) await post("/api/users/delete", { id: returning.id }).catch(() => {});
+    setRememberedUserId(null);
+    setReturning(null);
+    setStep("welcome");
+  }
+
+  async function toCourt() {
     const q = question.trim();
     if (!q) return;
     saveOnboarding({ profile, question: q });
+    if (remember) {
+      const r = await post("/api/users", {
+        id: returning?.id ?? rememberedUserId() ?? undefined,
+        profile,
+        voiceId: sessionVoiceId() ?? null,
+        selfie: sessionSelfie() ?? null,
+      }).catch(() => null);
+      if (r?.ok) setRememberedUserId((await r.json()).id);
+    }
     router.push("/trial");
   }
 
@@ -71,6 +116,26 @@ export default function Home() {
             </button>
           </div>
         </>
+      )}
+
+      {step === "back" && returning && (
+        <div className="flex flex-col items-center gap-5">
+          {/* eslint-disable-next-line @next/next/no-img-element -- stored data URL */}
+          {returning.selfie && <img src={returning.selfie} alt="" className="h-32 rounded-full" />}
+          <h1 className="text-4xl font-black sm:text-6xl">Welcome back{returning.profile.name ? `, ${returning.profile.name}` : ""}.</h1>
+          <p className="text-zinc-400">The court remembers your voice and your face.</p>
+          <button className="rounded-full bg-red-600 px-10 py-4 text-xl font-bold text-white hover:bg-red-500" onClick={() => welcomeBack(returning)}>
+            Ask a new question
+          </button>
+          <div className="flex gap-6 text-sm text-zinc-500">
+            <button className="underline-offset-4 hover:underline" onClick={() => { setRememberedUserId(null); setReturning(null); setStep("welcome"); }}>
+              Not you? Start fresh
+            </button>
+            <button className="underline-offset-4 hover:text-red-400 hover:underline" onClick={forgetMe}>
+              Forget me (delete my voice &amp; face)
+            </button>
+          </div>
+        </div>
       )}
 
       {step === "voice" && (
@@ -107,6 +172,10 @@ export default function Home() {
             />
           </label>
           <HoldToTalk label="Hold to say your question" spacebar={false} onTranscript={setQuestion} />
+          <label className="flex items-center gap-2 text-sm text-zinc-400">
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+            Remember me on this device (saves your voice, face and profile)
+          </label>
           <button
             className="rounded-full bg-red-600 px-10 py-4 text-xl font-bold text-white hover:bg-red-500 disabled:opacity-40"
             disabled={!question.trim()}
