@@ -10,12 +10,15 @@ export default function TextBox({
   text,
   controls,
   punch,
+  rec = false,
 }: {
   name?: string;
   color: string;
   text?: string;
   controls?: React.ReactNode;
   punch?: { color: string; typeMs: number };
+  /** The user is being recorded (holding to interrupt). */
+  rec?: boolean;
 }) {
   const p = useRef<HTMLParagraphElement>(null);
   const typeMs = punch?.typeMs ?? 0;
@@ -41,6 +44,7 @@ export default function TextBox({
         {name && (
           <div className="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color }}>
             {name}
+            {rec && <span className="rec-dot ml-3">● REC</span>}
           </div>
         )}
         {punch ? (
