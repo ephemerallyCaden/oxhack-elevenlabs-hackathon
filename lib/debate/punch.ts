@@ -144,7 +144,9 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
       /\d(?:am|pm)$/i.test(bare) && /^(?:am|pm)$/,
     ].filter((u): u is RegExp => !!u);
     const scale = /\dk$/i.test(bare) ? /^thousand$/ : /\dm$/i.test(bare) ? /^million$/ : /\d(?:bn|b)$/i.test(bare) ? /^billion$/ : null;
-    const ov = words(tts).slice(-k);
+    const all = words(tts);
+    if (units.some((u) => u.test(all[all.length - k - 1] ?? ''))) return false; // unit already said: the overlap is the punch's
+    const ov = all.slice(-k);
     const j = ov.findIndex((w) => units.some((u) => u.test(w)));
     // Number words before the unit only belong to the setup if its digits say them ("$5m" → million).
     return j >= 0 ? ov.slice(0, j).every((w) => scale?.test(w)) : !!scale?.test(ov[0] ?? '');

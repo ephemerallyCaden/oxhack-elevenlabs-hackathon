@@ -290,6 +290,19 @@ describe('attachPunch', () => {
     }
   });
 
+  it('once the clip has said the number’s unit, a punch starting with a unit-like word is still cut', () => {
+    for (const [text, tts, punch, clip] of [
+      ['The rate hit 7%', '[sad] The rate hit seven percent per year, every year.', 'per year, every year.', '[sad] The rate hit seven percent'],
+      ['The rate hit 7%', '[sad] The rate hit seven percent per year', 'per year, forever.', '[sad] The rate hit seven percent'],
+      ['Prices rose 3x', '[sad] Prices rose three times. Times have changed.', 'Times have changed.', '[sad] Prices rose three times.'],
+      ['I wake at 9am', '[sad] I wake at nine am am I wrong?', 'am I wrong?', '[sad] I wake at nine am'],
+    ]) {
+      const l = line('defense', text, { tts });
+      attachPunch(l, { text: punch, tts: '' }, new Set());
+      expect(l.tts).toBe(clip);
+    }
+  });
+
   it('"I am" before a number is not part of it: the spoken number stays in the clip', () => {
     const l = line('defense', 'I am 30', { tts: '[sad] I am thirty' });
     attachPunch(l, { text: 'Thirty and broke.', tts: '' }, new Set());
