@@ -16,6 +16,7 @@ import { parsePastTrials, pastTrialsRaw, verdictSide } from "@/components/menu/p
 import { getProfile } from "@/lib/debate/orchestrator";
 import KeysPanel from "@/components/menu/KeysPanel";
 import { setMockMode, useOwnKeys } from "@/lib/byok/browser";
+import type { DemoListing } from "@/lib/debate/replay";
 import { authConfigured, authedPost, signInWithGoogle, signOut, useSession } from "@/lib/auth/browser";
 import {
   addToRoster,
@@ -111,6 +112,15 @@ export default function Home() {
       .catch(() => setHouse(null));
   }, []);
   const ownAny = Object.values(ownKeys).some(Boolean);
+  // Stored demo trials (public/demos): watchable with no keys at all.
+  const [demos, setDemos] = useState<DemoListing[]>([]);
+  const [demosOpen, setDemosOpen] = useState(false);
+  useEffect(() => {
+    fetch("/demos/index.json")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d: DemoListing[]) => setDemos(d))
+      .catch(() => setDemos([]));
+  }, []);
   const houseLlm = !!house && (house.groq || house.gemini || house.anthropic);
   const [, bump] = useState(0); // re-read localStorage lists after we change them
   const [error, setError] = useState("");
@@ -327,10 +337,28 @@ export default function Home() {
                   <p className="ct-small">This court runs on your own API keys: add yours, or watch a demo trial. Without keys the court plays its mock script.</p>
                 )}
                 {keysOpen && <KeysPanel onClose={() => setKeysOpen(false)} />}
+                {demosOpen && (
+                  <ul className="flex flex-col items-center gap-2" aria-label="Demo trials">
+                    {demos.map((d) => (
+                      <li key={d.id}>
+                        <a className="ct-link" href={`/trial?demo=${encodeURIComponent(d.id)}`} onClick={() => setMockMode(false)}>
+                          ▶ {d.title}
+                        </a>
+                      </li>
+                    ))}
+                    <li className="ct-small">Recorded from real trials{demos.some((d) => d.voiced) ? "" : " (shown as text, no voices)"}. No keys needed.</li>
+                  </ul>
+                )}
                 <div className="flex flex-wrap items-center justify-center gap-x-7 gap-y-3">
                   <button className="ct-primary" onClick={begin} {...aimProps}>Begin</button>
                   <button className="ct-link" onClick={() => setKeysOpen(true)}>{ownAny ? "Your keys ✓" : "Use your own keys"}</button>
-                  <button className="ct-link" onClick={() => { clearSession(); router.push("/trial"); }}>Skip setup: go straight to court</button>
+                  <button className="ct-link" onClick={() => { setMockMode(false); clearSession(); router.push("/trial"); }}>Skip setup: go straight to court</button>
+                  {demos.length > 0 && (
+                    <button className="ct-link" aria-expanded={demosOpen} onClick={() => setDemosOpen((o) => !o)}>
+                      Watch a demo trial {demosOpen ? "▴" : "▾"}
+                    </button>
+                  )}
+                  <button className="ct-link" onClick={() => { clearSession(); setMockMode(true); router.push("/trial"); }}>Try a mock trial (no keys)</button>
                   {past.length > 0 && (
                     <button className="ct-link" aria-expanded={pastOpen} onClick={() => setPastOpen((o) => !o)}>
                       Watch a past trial {pastOpen ? "▴" : "▾"}

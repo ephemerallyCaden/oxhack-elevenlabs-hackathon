@@ -12,6 +12,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import type { Scene, Speaker } from '@/types';
 import { TrialOrchestrator } from '@/lib/debate/orchestrator';
+import { ReplayTrial, loadDemo, type Trial } from '@/lib/debate/replay';
+import { useMockMode } from '@/lib/byok/browser';
 import { sessionVoiceId } from '@/components/onboarding/VoiceStep';
 import { useSessionHeads } from '@/components/onboarding/sessionHeads';
 import VerdictScreen from '@/components/menu/VerdictScreen';
@@ -89,7 +91,10 @@ function TypedInput({
 }
 
 /** The trial on screen. A new trial page (layout.tsx remounts it per push) stops the one it replaces. */
-let live: TrialOrchestrator | null = null;
+let live: Trial | null = null;
+
+/** ?demo=<id>: replay a stored demo trial (public/demos) instead of running one. Client only. */
+const demoParam = () => (typeof window === 'undefined' ? null : new URLSearchParams(location.search).get('demo'));
 
 const unlockSoon = () => unlockSoonWith(engine.unlock);
 
@@ -97,7 +102,9 @@ const unlockSoon = () => unlockSoonWith(engine.unlock);
 export default function TrialPage() {
   // Onboarding (/) leaves the user's cloned voice + profile in sessionStorage; none → presenter voice.
   // State, not memo: a memo is recomputed on Fast Refresh, which would orphan a running trial.
-  const [orch] = useState(() => new TrialOrchestrator({ voiceId: sessionVoiceId(), profile: sessionProfile() }));
+  const [demo] = useState(demoParam);
+  const [orch] = useState<Trial>(() => (demo ? new ReplayTrial(loadDemo(demo)) : new TrialOrchestrator({ voiceId: sessionVoiceId(), profile: sessionProfile() })));
+  const mock = useMockMode();
   const s = useTrialState(orch);
   // Head cut-outs from onboarding (client-only, so the server render keeps the default heads)
   const heads = useSessionHeads();
@@ -197,8 +204,8 @@ export default function TrialPage() {
     }
     if (autoStarted.current) return;
     autoStarted.current = true;
-    const q = takeSessionQuestion();
-    if (!q) {
+    const q = demo ? '' : takeSessionQuestion(); // a demo plays its own recorded question
+    if (!q && !demo) {
       queueMicrotask(() => setAskOpen(true));
       return;
     }
@@ -206,9 +213,9 @@ export default function TrialPage() {
     void unlockSoon().then((ok) => {
       if (ok) setAudioUnlocked(true);
       else void engine.unlock().then(() => setAudioUnlocked(true), () => {}); // late unlock still gets the music
-      orch.start(q);
+      orch.start(q ?? '');
     });
-  }, [orch]);
+  }, [orch, demo]);
 
   // -- 1. Scene-based BGM: change music when scene changes --
   const verdictMusic = useRef(false);
@@ -526,6 +533,11 @@ export default function TrialPage() {
       {(!introMode || asking) && (
         <header className="absolute left-4 top-4 z-50 max-w-md rounded-lg bg-black/70 px-4 py-2">
           <h1 className="text-sm font-black tracking-tight">Court of Future Selves</h1>
+          {demo ? (
+            <p className="text-[10px] font-bold uppercase tracking-widest text-sky-400">Recorded demo · no keys used</p>
+          ) : mock ? (
+            <p className="text-[10px] font-bold uppercase tracking-widest text-sky-400">Mock trial · scripted lines, no AI or voices</p>
+          ) : null}
           <p className="text-xs text-zinc-400">
             {s.question ? `"${s.question}"` : 'Ask a yes/no question to begin'}
           </p>
