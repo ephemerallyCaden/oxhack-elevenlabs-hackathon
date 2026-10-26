@@ -5,6 +5,7 @@ import type { Line, Side } from '@/types';
 import { TAG_PALETTE } from '@/lib/voice/configs';
 
 const MAX_WORDS = 10;
+const DANGLING = /^(?:and|or|but|the|a|an|to|of|for|with|my|your|our|their|me|it|is|was|are|were|than|that|this|at|in|on|by|from|so|if|because)$/;
 
 /** Which sides already landed a punch on this topic (earlier calls: interrupt answers etc.). */
 export function punchedSides(history: Line[], topicId: string): Set<Side> {
@@ -215,6 +216,9 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   const side: Side = line.speaker === 'prosecution' ? 'yes' : 'no';
   const count = punch.split(/\s+/).length;
   if (used.size > 0 || count > MAX_WORDS) return refuse();
+  // A punch left hanging ("and it cost me", no full stop, ending on a function word) isn't a payoff: keep
+  // it as ordinary words. ("All of it." ends the sentence: fine.)
+  if (!/[.!?…]["”’')»]*$/.test(untagged(punch)) && DANGLING.test(norm(tokensOf(untagged(punch)).at(-1) ?? ''))) return refuse();
   // The punch must be exactly the end of `text` (setupText() cuts it off by length), after a real setup.
   // The whole line is (the start of) the punch: no setup to cut to, so it's a plain line (with the rest of the punch).
   if (!words(cut.rest).length) return refuse();

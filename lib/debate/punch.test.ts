@@ -497,3 +497,12 @@ describe('punch quality (live samples, 2026-10-26)', () => {
     expect(b.punch!.text).toBe('while I was still paying off textbooks.');
   });
 });
+
+describe('punch quality, run 2', () => {
+  const mk = (speaker: Line['speaker'], text: string, tts?: string): Line => ({ id: 'l', speaker, kind: 'argument', text, tts, cites: [], topic_id: 't' });
+  it('refuses a punch that ends dangling ("and it cost me"): it isn’t a payoff', () => {
+    const l = mk('prosecution', 'Everyone said the city would be a launchpad, and it cost me', '[confident] Everyone said the city would be a launchpad, and it cost me');
+    expect(attachPunch(l, { text: 'and it cost me', tts: '' }, new Set())).toBe(false);
+    expect(l.punch).toBeUndefined();
+  });
+});

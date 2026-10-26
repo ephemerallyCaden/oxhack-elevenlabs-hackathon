@@ -20,6 +20,7 @@ import type {
   VerdictResponse,
 } from '@/types';
 import { SIDE_SPEAKER } from '@/types';
+import { TAG_PALETTE } from '@/lib/voice/configs';
 import { claude, hasClaudeKey, MODEL } from './claude';
 import { askGemini, hasGeminiKey } from './gemini';
 import { hasGroqKey } from './groq';
@@ -103,6 +104,10 @@ const SIDE_LABEL = /^((?:\[[^\]\n]{1,40}\]\s*)*)(?:YES|NO)\s*:\s*/;
 // A bare speaker name right before a tag ("prosecution [confident] I am…"): no colon, but never meant to be read.
 const BARE_LABEL = /^((?:\[[^\]\n]{1,40}\]\s*)*)(?:the\s+)?(?:judge|prosecution|defen[cs]e)\s+(?=\[)/i;
 export const unlabel = (s: string) => s.replace(SPEAKER_LABEL, '$1').replace(SIDE_LABEL, '$1').replace(BARE_LABEL, '$1');
+/** Only verified audio tags (any role's palette): an unknown one ("[weary]") may be read out instead of acted. */
+const VERIFIED = new Set(Object.values(TAG_PALETTE).flat());
+const verified = (tts: string) =>
+  tts.replace(/\[([^\]\n]{1,40})\]\s*/g, (tag, name: string) => (VERIFIED.has(name.trim().toLowerCase()) ? tag : '')).trim();
 /** The words a line says, numbers and number-ish units left out (the text writes "£12,000", the voice "twelve
  *  thousand pounds") and hyphens/spaces ignored ("degree‑bound" = "degree bound"). */
 const sig = (s: string) =>
@@ -119,7 +124,7 @@ export function voiced(text: string, tts: string): string {
 export const plain = (s: string) => unlabel(s).replace(/\[[^\]\n]{1,40}\]\s*/g, '').replace(/\s{2,}/g, ' ').trim();
 const judgeLine = (kind: Line['kind'], s: { text: string; tts: string }, topic_id?: string): Line => {
   if (!plain(s.text)) throw new Error(`empty ${kind} line`); // → mock fallback (a bare label or tags is empty too)
-  return { id: uid('line'), speaker: 'judge', kind, text: plain(s.text), tts: voiced(plain(s.text), unlabel(s.tts)), cites: [], topic_id };
+  return { id: uid('line'), speaker: 'judge', kind, text: plain(s.text), tts: verified(voiced(plain(s.text), unlabel(s.tts))), cites: [], topic_id };
 };
 
 // ─── setup (cut-scene): agenda + Judge lines + personas in ONE call ─────────
@@ -276,7 +281,8 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
     (out): TopicResponse => {
       // The code owns the structure: one line per planned turn, speakers from the plan.
       // (Checked after cleaning: a line that was only a speaker label or audio tags is empty too.)
-      if (out.lines.length < req.turns.length || req.turns.some((_, i) => !plain(out.lines[i].text).replace(/—/g, '').trim()))
+      // (A line of fewer than 3 words — the model sometimes sends "2" or ":" — isn't a line either.)
+      if (out.lines.length < req.turns.length || req.turns.some((_, i) => (plain(out.lines[i].text).match(/\p{L}+/gu) ?? []).length < 3))
         throw new Error(`topic: ${out.lines.length} lines for ${req.turns.length} turns`);
       const lines: Line[] = [];
       const byIndex: Line[] = [];
@@ -290,7 +296,7 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
           speaker: SIDE_SPEAKER[turn.side],
           kind: turn.answer ? 'answer' : 'argument',
           text: plain(o.text),
-          tts: voiced(plain(o.text), unlabel(o.tts)),
+          tts: verified(voiced(plain(o.text), unlabel(o.tts))),
           cites: o.cites.filter((c) => valid.has(c)),
           ...base,
         };
@@ -305,8 +311,8 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
           if (line.tts?.trim()) line.tts = cutOff(line.tts);
           const other = turn.side === 'yes' ? 'no' : 'yes';
           lines.push(
-            { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in', text: plain(o.cut_in.text), tts: voiced(plain(o.cut_in.text), unlabel(o.cut_in.tts)), cites: [], ...base },
-            { id: uid('line'), speaker: SIDE_SPEAKER[turn.side], kind: 'resume', text: plain(o.resume.text), tts: voiced(plain(o.resume.text), unlabel(o.resume.tts)), cites: [], ...base },
+            { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in', text: plain(o.cut_in.text), tts: verified(voiced(plain(o.cut_in.text), unlabel(o.cut_in.tts))), cites: [], ...base },
+            { id: uid('line'), speaker: SIDE_SPEAKER[turn.side], kind: 'resume', text: plain(o.resume.text), tts: verified(voiced(plain(o.resume.text), unlabel(o.resume.tts))), cites: [], ...base },
           );
         } else if (line.text.trim().endsWith('—')) {
           // No cut-in for this line: don't leave it hanging mid-sentence. A punch the model wrote anyway is

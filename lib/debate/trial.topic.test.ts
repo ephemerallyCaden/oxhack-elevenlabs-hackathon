@@ -160,3 +160,27 @@ describe('writeTopic: the voice says what the screen shows', () => {
     expect(res.lines[0].tts).toBe('[confident] I am writing this from a sunlit kitchen.');
   });
 });
+
+describe('writeTopic: junk from the model', () => {
+  const base = { question: 'Should I?', topic, cards: [], history: [], turns: [{ side: 'yes' as const, cycle: 1 }, { side: 'no' as const, cycle: 1 }], cutInAllowed: false, urgent: true };
+  it('a line that is just "2" or ":" is not a line: the answer is retried, then mocked', async () => {
+    askGemini.mockImplementation(async (_s: string, _c: string, schema: { parse: (x: unknown) => unknown }) => {
+      const o = out(empty);
+      o.lines[1].text = '2';
+      o.lines[1].tts = '2';
+      return schema.parse(o);
+    });
+    const res = await writeTopic(base);
+    expect(res.lines.every((l) => l.text.split(/\s+/).length >= 3)).toBe(true);
+  });
+
+  it('drops audio tags outside the speaker’s verified palette (they may be read aloud)', async () => {
+    askGemini.mockImplementation(async (_s: string, _c: string, schema: { parse: (x: unknown) => unknown }) => {
+      const o = out(empty);
+      o.lines[1].tts = '[weary] The median earns less.';
+      return schema.parse(o);
+    });
+    const res = await writeTopic(base);
+    expect(res.lines[1].tts).toBe('The median earns less.');
+  });
+});
