@@ -7,6 +7,7 @@
 // State is per server process (globalThis, shared by every API route in it). On Vercel each function
 // instance has its own copy: they still pace themselves and fail over on a real 429, just without
 // seeing each other's calls.
+import { keyFor, perKey, poolId, usingOwnKey } from '@/lib/keys';
 
 export type Priority = 'interactive' | 'background';
 
@@ -157,14 +158,20 @@ export function modelOrder(env: { GEMINI_MODELS?: string; GEMINI_MODEL?: string;
 /** Calls per minute per model: Groq's 8,000 tokens/min fits ~3 topic calls; Gemini allows 5. */
 const paceFor = (model: string) => (model.startsWith('groq:') ? Number(process.env.GROQ_RPM) || 3 : Number(process.env.GEMINI_RPM) || 5);
 
-/** One pool per server process: on globalThis because Next bundles each API route separately. */
-const g = globalThis as unknown as { __geminiPool?: ModelPool };
-export const geminiPool = (g.__geminiPool ??= new ModelPool(
-  modelOrder({
-    GEMINI_MODELS: process.env.GEMINI_MODELS,
-    GEMINI_MODEL: process.env.GEMINI_MODEL,
-    groq: Boolean(process.env.GROQ_API_KEY),
-    gemini: Boolean(process.env.GEMINI_API_KEY),
-  }),
-  paceFor,
-));
+/**
+ * The pool for this request's keys (lib/keys.ts). The house keys share one pool per server process (on
+ * globalThis because Next bundles each API route separately); each visitor's own keys get their own,
+ * so one visitor's traffic never throttles another's quota.
+ */
+const g = globalThis as unknown as { __geminiPool?: ModelPool; __visitorPools?: Map<string, ModelPool> };
+const MAX_VISITOR_POOLS = 64;
+
+export function poolForRequest(): ModelPool {
+  const build = (groq: boolean, gemini: boolean) =>
+    new ModelPool(modelOrder({ GEMINI_MODELS: process.env.GEMINI_MODELS, GEMINI_MODEL: process.env.GEMINI_MODEL, groq, gemini }), paceFor);
+  const id = poolId();
+  if (id === 'house') return (g.__geminiPool ??= build(Boolean(keyFor('groq')), Boolean(keyFor('gemini'))));
+  // A visitor's pool holds only the providers they brought their own key for: a house key stays in the
+  // shared house pool, so its per-minute pacing can't be multiplied by visitors' private pools.
+  return perKey((g.__visitorPools ??= new Map()), id, () => build(usingOwnKey('groq'), usingOwnKey('gemini')), MAX_VISITOR_POOLS);
+}

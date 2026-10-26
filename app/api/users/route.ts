@@ -5,6 +5,7 @@ import { elevenlabs } from "@/lib/voice/client";
 import { authAvailable, authUnavailable, requireUser, unauthorized } from "@/lib/auth/server";
 import { getUser, saveUser } from "@/lib/users/store";
 import { invalidateJury, juryKey } from "@/lib/users/jury";
+import { byok } from '@/lib/keys';
 
 // Faces are only ever PNG/JPEG/WebP data URLs (no SVG: the jury decodes them server-side).
 const IMAGE = /^data:image\/(?:png|jpeg|webp);base64,/;
@@ -30,7 +31,8 @@ function later(work: () => Promise<void>) {
 // profile ("Remember me"). Signed-in only: the row is keyed by their Supabase user id. Renames the
 // session_* voice clone to user_<id> so scripts/delete-clones.mjs (which removes session_* after
 // the demo) keeps it.
-export async function POST(req: Request) {
+async function handle(req: Request) {
+  const el = elevenlabs(); // this request's key (lib/keys.ts)
   if (!authAvailable()) return authUnavailable();
   const user = await requireUser(req);
   if (!user) return unauthorized();
@@ -44,17 +46,17 @@ export async function POST(req: Request) {
     // Voice clone housekeeping (up to 4 ElevenLabs calls) runs after the answer: the browser gives
     // the save 5s, and a slow voice service must not make a saved user look unsaved.
     const housekeeping = async () => {
-      if (!elevenlabs) return;
+      if (!el) return;
       const mine = `user_${saved}`;
       if (voiceId) {
-        const voice = await elevenlabs.voices.get(voiceId).catch(() => null);
+        const voice = await el.voices.get(voiceId).catch(() => null);
         if (voice?.name?.startsWith("session_"))
-          await elevenlabs.voices.update(voiceId, { name: mine }).catch((e) => console.warn(`[users] couldn't rename ${voiceId} to ${mine} (scripts/delete-clones.mjs would remove it):`, e));
+          await el.voices.update(voiceId, { name: mine }).catch((e) => console.warn(`[users] couldn't rename ${voiceId} to ${mine} (scripts/delete-clones.mjs would remove it):`, e));
       }
       // Re-onboarding replaced their clone: delete the old one (only if it is theirs), or clones pile up.
       if (before?.voiceId && before.voiceId !== voiceId) {
-        const old = await elevenlabs.voices.get(before.voiceId).catch(() => null);
-        if (old?.name === mine) await elevenlabs.voices.delete(before.voiceId).catch(() => {});
+        const old = await el.voices.get(before.voiceId).catch(() => null);
+        if (old?.name === mine) await el.voices.delete(before.voiceId).catch(() => {});
       }
     };
     later(housekeeping);
@@ -63,3 +65,6 @@ export async function POST(req: Request) {
     return Response.json({ error: (e as Error).message }, { status: 500 });
   }
 }
+
+// Every call it makes uses this request's keys (a visitor's own, else the house's: lib/keys.ts).
+export const POST = byok(handle);

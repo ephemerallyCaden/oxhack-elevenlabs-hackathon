@@ -1,5 +1,5 @@
 /* Character poses + expression particles. Ported from public/mockups/pose-cycling.html
-   (particles from public/mockup-expressions.html). Root: .pc (Character.tsx), with the
+   (particles from public/mockups/early/expressions.html). Root: .pc (Character.tsx), with the
    expression as .x-<expression> and .talking while the character speaks. */
 
 /* ===== STRUCTURE ===== */
