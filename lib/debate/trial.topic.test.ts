@@ -132,3 +132,31 @@ describe('writeTopic: a topic that must land a punch', () => {
     expect(res.lines.some((l) => l.punch)).toBe(false);
   });
 });
+
+describe('writeTopic: the voice says what the screen shows', () => {
+  const base = { question: 'Should I?', topic, cards: [], history: [], turns: [{ side: 'yes' as const, cycle: 1 }, { side: 'no' as const, cycle: 1 }], cutInAllowed: false, urgent: true };
+  it('a tts that says different words is replaced by the text (keeping its delivery tag)', async () => {
+    askGemini.mockImplementation(async (_s: string, _c: string, schema: { parse: (x: unknown) => unknown }) => {
+      const o = out(empty);
+      o.lines[0].text = 'Every walk feels like a reset button. Dog lovers find their life richer.';
+      o.lines[0].tts = '[excited] Every walk feels like a reset button. Every... heart... beats... faster.';
+      o.lines[1].text = 'NO: The vet bills for one surgery matched my rent for 2 months.';
+      o.lines[1].tts = '[sighs] The vet bills for one surgery matched my rent for two months.';
+      return schema.parse(o);
+    });
+    const res = await writeTopic(base);
+    expect(res.lines[0].tts).toBe('[excited] Every walk feels like a reset button. Dog lovers find their life richer.');
+    expect(res.lines[1].tts).toBe('[sighs] The vet bills for one surgery matched my rent for two months.'); // numbers spelled out: kept
+  });
+
+  it('a speaker name before the tag (no colon) is not read aloud', async () => {
+    askGemini.mockImplementation(async (_s: string, _c: string, schema: { parse: (x: unknown) => unknown }) => {
+      const o = out(empty);
+      o.lines[0].text = 'I am writing this from a sunlit kitchen.';
+      o.lines[0].tts = 'prosecution [confident] I am writing this from a sunlit kitchen.';
+      return schema.parse(o);
+    });
+    const res = await writeTopic(base);
+    expect(res.lines[0].tts).toBe('[confident] I am writing this from a sunlit kitchen.');
+  });
+});

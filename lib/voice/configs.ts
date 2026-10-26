@@ -12,10 +12,10 @@ export const VOICE_SETTINGS: Record<VoiceRole, VoiceSettings> = {
   judge: { stability: 0.8, similarityBoost: 1.0, useSpeakerBoost: true },
 };
 
-/** Surprise punches are delivered hotter: less stable = more expressive (floor 0.3, see DESIGN.md). */
+/** Surprise punches use the speaker's own settings: the lower stability (−0.2) they had made the
+ *  punch sound strained and whispery. The punch shot and its tag carry the emphasis. */
 export function punchVoiceSettings(role: VoiceRole): VoiceSettings {
-  const s = VOICE_SETTINGS[role];
-  return { ...s, stability: Math.max(0.3, (s.stability ?? 0.5) - 0.2) };
+  return { ...VOICE_SETTINGS[role] };
 }
 
 // Audio tags each role may use — all verified acted (not read aloud) on eleven_v4 by transcribing the output.
