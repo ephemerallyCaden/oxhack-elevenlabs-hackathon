@@ -17,7 +17,7 @@ export interface CharacterMood {
 
 /**
  * Precomputed MediaPipe calibration for the demo face (public/assets/face.png).
- * Measured once from mockup-expressions.html (headless run, 2026-10-24):
+ * Measured once from public/mockups/early/expressions.html (headless run, 2026-10-24):
  *   upper lip 87.0%, eyes viewer-left (36.8%, 53.3%) / viewer-right (62.3%, 54.0%).
  * When live onboarding selfies land, detection runs once at onboarding and
  * replaces these per-user.
