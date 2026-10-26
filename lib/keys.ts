@@ -91,6 +91,24 @@ export function poolId(): string {
   return createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 16);
 }
 
+/**
+ * One client per key, reused. Cached under a hash (a raw key is never a map key); past `cap` the least
+ * recently used is dropped, so a busy house client outlives one-off visitors' ones.
+ */
+export function perKey<T>(cache: Map<string, T>, key: string, make: () => T, cap = 32): T {
+  const id = createHash('sha256').update(key).digest('hex');
+  let v = cache.get(id);
+  if (v !== undefined) {
+    cache.delete(id); // re-insert: Map order is the recency order
+    cache.set(id, v);
+    return v;
+  }
+  v = make();
+  cache.set(id, v);
+  if (cache.size > cap) cache.delete(cache.keys().next().value!);
+  return v;
+}
+
 /** Which services have a house key (for the menu: "this site runs on your keys" when none). */
 export function houseServices(): Record<Service, boolean> {
   return Object.fromEntries(SERVICES.map((s) => [s, houseKeysOn() && Boolean(process.env[ENV[s]])])) as Record<Service, boolean>;

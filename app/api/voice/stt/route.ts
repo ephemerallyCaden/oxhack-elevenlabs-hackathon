@@ -1,6 +1,6 @@
 import type { SttResponse } from "@/types";
 import { elevenlabs, STT_MODEL } from "@/lib/voice/client";
-import { byok } from '@/lib/keys';
+import { byok, mockRequested } from '@/lib/keys';
 
 const MOCK_TRANSCRIPT = "Should I quit my quant job in London to become a professional poker player?";
 const KEYTERMS = ["poker", "quant", "Monte Carlo", "bankroll", "objection"];
@@ -11,6 +11,9 @@ async function handle(req: Request) {
   const audio = (await req.formData().catch(() => null))?.get("audio");
   if (!(audio instanceof Blob)) return Response.json({ error: "missing `audio` file field" }, { status: 400 });
 
+  // The menu's mock trial: nothing is transcribed, so the page offers the typing box instead of putting
+  // the canned question in the user's mouth.
+  if (mockRequested()) return Response.json({ transcript: "", fallback: true } satisfies SttResponse);
   if (!el) return Response.json({ transcript: MOCK_TRANSCRIPT, fallback: true } satisfies SttResponse);
 
   // tagAudioEvents off: we want only words (no "(laughs)"), for user input and for the voice lab's tag check.

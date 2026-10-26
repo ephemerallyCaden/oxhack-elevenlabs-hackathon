@@ -9,10 +9,14 @@ import type { TrialOrchestrator, TrialState } from './orchestrator';
 /** What /trial needs from a trial: a live TrialOrchestrator or a ReplayTrial. */
 export type Trial = Pick<TrialOrchestrator, 'subscribe' | 'getState' | 'start' | 'lineEnded' | 'beginInterrupt' | 'endInterrupt' | 'stop'>;
 
-/** One step of a recording: keys replaced (`set`), arrays appended to (`add`), ms since the step before. */
+/**
+ * One step of a recording: keys replaced (`set`), arrays appended to (`add`), keys cleared (`unset`: JSON
+ * drops undefined values, so a cleared key can't live in `set`), ms since the step before.
+ */
 export interface DemoFrame {
   set?: Partial<TrialState>;
   add?: Partial<Record<ArrayKey, unknown[]>>;
+  unset?: (keyof TrialState)[];
   ms: number;
 }
 
@@ -42,16 +46,21 @@ export function diffState(prev: TrialState | undefined, next: TrialState, ms: nu
   for (const k of Object.keys(next) as (keyof TrialState)[]) {
     const a = prev?.[k], b = next[k];
     if (a === b) continue;
+    if (b === undefined) {
+      (frame.unset ??= []).push(k);
+      continue;
+    }
     if (APPENDED.includes(k as ArrayKey) && Array.isArray(a) && Array.isArray(b) && b.length >= a.length && a.every((x, i) => x === b[i])) {
       if (b.length > a.length) (frame.add ??= {})[k as ArrayKey] = b.slice(a.length);
     } else (frame.set ??= {})[k] = b as never;
   }
-  for (const k of Object.keys(prev ?? {}) as (keyof TrialState)[]) if (!(k in next)) (frame.set ??= {})[k] = undefined as never;
+  for (const k of Object.keys(prev ?? {}) as (keyof TrialState)[]) if (!(k in next) && prev?.[k] !== undefined) (frame.unset ??= []).push(k);
   return frame;
 }
 
 export function applyFrame(state: TrialState, f: DemoFrame): TrialState {
   const next = { ...state, ...f.set } as TrialState;
+  for (const k of f.unset ?? []) delete next[k];
   for (const [k, items] of Object.entries(f.add ?? {})) (next as unknown as Record<string, unknown[]>)[k] = [...(state[k as ArrayKey] as unknown[]), ...(items ?? [])];
   return next;
 }

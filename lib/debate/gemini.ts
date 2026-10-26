@@ -7,21 +7,15 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { z } from 'zod';
 import { askGroq } from './groq';
-import { keyFor } from '@/lib/keys';
+import { keyFor, perKey } from '@/lib/keys';
 import { classifyGeminiError, poolForRequest, type Priority } from './ratelimit';
 
 export const hasGeminiKey = () => Boolean(keyFor('gemini'));
 
-const clients = new Map<string, GoogleGenAI>(); // per key (BYOK: lib/keys.ts)
+const clients = new Map<string, GoogleGenAI>(); // per key (lib/keys.ts perKey)
 function geminiClient(): GoogleGenAI {
   const key = keyFor('gemini') ?? '';
-  let c = clients.get(key);
-  if (!c) {
-    c = new GoogleGenAI({ apiKey: key });
-    clients.set(key, c);
-    if (clients.size > 32) clients.delete(clients.keys().next().value!);
-  }
-  return c;
+  return perKey(clients, key, () => new GoogleGenAI({ apiKey: key }));
 }
 
 const CALL_BUDGET_MS = 4000; // left for the call itself

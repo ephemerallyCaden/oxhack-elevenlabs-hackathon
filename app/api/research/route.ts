@@ -3,13 +3,17 @@ import { createResearchAgent } from "@/lib/ingest/research-agent";
 import { withinDeadline } from "@/lib/ingest/research-control";
 import { readBoundedModelJson } from "@/lib/ingest/model-client";
 import type { ResearchResponse } from "@/types";
-import { byok } from '@/lib/keys';
+import { byok, houseKeysOn, mockRequested, usingOwnKey } from '@/lib/keys';
 
 // cacheComponents uses Node.js by default; an explicit runtime export is unsupported.
 export const maxDuration = 60;
 const agent = createResearchAgent();
 
 async function handle(request: Request) {
+  // Research only ever runs on the house keys (lib/ingest reads them from .env): never in mock mode, never
+  // with HOUSE_KEYS=off, and not for a visitor who brought their own keys (it would spend ours for them).
+  const own = usingOwnKey('groq') || usingOwnKey('gemini') || usingOwnKey('anthropic');
+  if (mockRequested() || !houseKeysOn() || own) return Response.json({ cards: [], fallback: true } satisfies ResearchResponse);
   const started = Date.now();
   try {
     const body = await withinDeadline(signal => readBoundedModelJson(new Response(request.body), signal, 16000), 1000, request.signal);
@@ -22,5 +26,5 @@ async function handle(request: Request) {
   }
 }
 
-// Every call it makes uses this request's keys (a visitor's own, else the house's: lib/keys.ts).
+// In the request's key context (lib/keys.ts), to know whether research may run at all.
 export const POST = byok(handle);

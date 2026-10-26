@@ -213,7 +213,8 @@ export default function TrialPage() {
     void unlockSoon().then((ok) => {
       if (ok) setAudioUnlocked(true);
       else void engine.unlock().then(() => setAudioUnlocked(true), () => {}); // late unlock still gets the music
-      orch.start(q ?? '');
+      // A demo that can't be loaded (a stale or mistyped link): back to the menu, not a stuck intro.
+      void Promise.resolve(orch.start(q ?? '')).catch(() => location.replace('/'));
     });
   }, [orch, demo]);
 

@@ -7,7 +7,7 @@
 // State is per server process (globalThis, shared by every API route in it). On Vercel each function
 // instance has its own copy: they still pace themselves and fail over on a real 429, just without
 // seeing each other's calls.
-import { keyFor, poolId } from '@/lib/keys';
+import { keyFor, perKey, poolId, usingOwnKey } from '@/lib/keys';
 
 export type Priority = 'interactive' | 'background';
 
@@ -167,19 +167,11 @@ const g = globalThis as unknown as { __geminiPool?: ModelPool; __visitorPools?: 
 const MAX_VISITOR_POOLS = 64;
 
 export function poolForRequest(): ModelPool {
-  const build = () =>
-    new ModelPool(
-      modelOrder({ GEMINI_MODELS: process.env.GEMINI_MODELS, GEMINI_MODEL: process.env.GEMINI_MODEL, groq: Boolean(keyFor('groq')), gemini: Boolean(keyFor('gemini')) }),
-      paceFor,
-    );
+  const build = (groq: boolean, gemini: boolean) =>
+    new ModelPool(modelOrder({ GEMINI_MODELS: process.env.GEMINI_MODELS, GEMINI_MODEL: process.env.GEMINI_MODEL, groq, gemini }), paceFor);
   const id = poolId();
-  if (id === 'house') return (g.__geminiPool ??= build());
-  const pools = (g.__visitorPools ??= new Map());
-  let pool = pools.get(id);
-  if (!pool) {
-    pool = build();
-    pools.set(id, pool);
-    if (pools.size > MAX_VISITOR_POOLS) pools.delete(pools.keys().next().value!);
-  }
-  return pool;
+  if (id === 'house') return (g.__geminiPool ??= build(Boolean(keyFor('groq')), Boolean(keyFor('gemini'))));
+  // A visitor's pool holds only the providers they brought their own key for: a house key stays in the
+  // shared house pool, so its per-minute pacing can't be multiplied by visitors' private pools.
+  return perKey((g.__visitorPools ??= new Map()), id, () => build(usingOwnKey('groq'), usingOwnKey('gemini')), MAX_VISITOR_POOLS);
 }

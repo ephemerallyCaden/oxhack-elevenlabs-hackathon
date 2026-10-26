@@ -30,6 +30,7 @@ import { mergeProfile, mockJudgeInterrupt, mockProfile, mockSetup, mockTopic, mo
 import * as P from './prompts';
 import { computeSpectrum, MAX_TOPICS, normalise, orderAgenda } from './spectrum';
 import { attachPunch, forcePunch, punchedSides } from './punch';
+import { usingOwnKey } from '@/lib/keys';
 
 /**
  * Which model writes the debate. DEBATE_LLM in .env.local: `mock` (testing, no API calls),
@@ -38,7 +39,9 @@ import { attachPunch, forcePunch, punchedSides } from './punch';
 function debateLlm(): 'claude' | 'gemini' | 'mock' {
   const want = process.env.DEBATE_LLM ?? 'auto';
   if (want === 'mock') return 'mock';
-  if ((want === 'claude' || want === 'auto') && hasClaudeKey()) return 'claude';
+  // A visitor's own debate key wins: their Groq/Gemini key isn't overridden by the house's Anthropic key.
+  const ownPool = usingOwnKey('groq') || usingOwnKey('gemini');
+  if ((want === 'claude' || want === 'auto') && hasClaudeKey() && (usingOwnKey('anthropic') || !ownPool)) return 'claude';
   // 'gemini' = the free-tier model pool: Groq and/or Gemini, whichever keys are set (DEBATE_LLM=groq works too).
   if ((want === 'gemini' || want === 'groq' || want === 'auto') && (hasGroqKey() || hasGeminiKey())) return 'gemini';
   return 'mock';
