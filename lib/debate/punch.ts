@@ -224,7 +224,8 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   if (!words(cut.rest).length) return refuse();
   used.add(side);
   const rest = stopBefore(cut.rest, shown);
-  const tail = tailAfter(rest, shown);
+  const said = tailAfter(rest, shown);
+  const tail = /[.!?…]["”’')»]*$/.test(said) ? said : `${said}.`; // the punch ends the line: end the sentence
   line.text = `${rest} ${tail}`;
   line.punch = { text: tail, tts: punchTts(line.speaker, draft!.tts, punch) };
   // The setup clip is voiced from `tts`: if it also says (part of) the punch, in either form, cut it.

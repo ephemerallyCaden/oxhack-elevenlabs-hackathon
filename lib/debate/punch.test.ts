@@ -506,3 +506,13 @@ describe('punch quality, run 2', () => {
     expect(l.punch).toBeUndefined();
   });
 });
+
+describe('punch quality, run 3', () => {
+  it('a punch without a full stop still ends the line with one', () => {
+    const l: Line = { id: 'l', speaker: 'defense', kind: 'argument', text: 'The surgery wiped out my savings, leaving me', tts: '[scoffs] The surgery wiped out my savings, leaving me', cites: [], topic_id: 't' };
+    expect(attachPunch(l, { text: 'four thousand dollars in debt', tts: '' }, new Set())).toBe(true);
+    expect(l.text).toBe('The surgery wiped out my savings, leaving me four thousand dollars in debt.');
+    expect(l.punch!.text).toBe('four thousand dollars in debt.');
+    expect(setupText(l)).toBe('The surgery wiped out my savings, leaving me');
+  });
+});
