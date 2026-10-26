@@ -15,7 +15,9 @@ export function useRecorder() {
     start(): Promise<boolean> {
       starting.current = (async () => {
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          // No echo cancellation: on macOS it switches on system voice processing, which ducks whatever is
+          // playing; on an interrupt that's the OBJECTION sting. Noise suppression + auto gain don't duck.
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true } });
           chunks.current = [];
           rec.current = new MediaRecorder(stream);
           rec.current.ondataavailable = (e) => chunks.current.push(e.data);
