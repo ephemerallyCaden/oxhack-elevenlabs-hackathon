@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const get = vi.fn();
 const del = vi.fn();
 let client: unknown = { voices: { get: (...a: unknown[]) => get(...a), delete: (...a: unknown[]) => del(...a) } };
-vi.mock('@/lib/voice/client', () => ({ get elevenlabs() { return client; } }));
+vi.mock('@/lib/voice/client', () => ({ elevenlabs: () => client }));
 process.env.ELEVENLABS_VOICE_ID = 'PresenterVoice0001';
 const { POST } = await import('../route');
 

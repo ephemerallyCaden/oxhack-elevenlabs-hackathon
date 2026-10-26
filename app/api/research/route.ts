@@ -3,12 +3,13 @@ import { createResearchAgent } from "@/lib/ingest/research-agent";
 import { withinDeadline } from "@/lib/ingest/research-control";
 import { readBoundedModelJson } from "@/lib/ingest/model-client";
 import type { ResearchResponse } from "@/types";
+import { byok } from '@/lib/keys';
 
 // cacheComponents uses Node.js by default; an explicit runtime export is unsupported.
 export const maxDuration = 60;
 const agent = createResearchAgent();
 
-export async function POST(request: Request) {
+async function handle(request: Request) {
   const started = Date.now();
   try {
     const body = await withinDeadline(signal => readBoundedModelJson(new Response(request.body), signal, 16000), 1000, request.signal);
@@ -20,3 +21,6 @@ export async function POST(request: Request) {
     return Response.json({ error: "Research input is invalid, too large, cancelled or too slow" }, { status: 400 });
   }
 }
+
+// Every call it makes uses this request's keys (a visitor's own, else the house's: lib/keys.ts).
+export const POST = byok(handle);

@@ -1,8 +1,9 @@
 // Server-only Groq client (OpenAI-compatible chat API). Free tier, measured 25 Oct: openai/gpt-oss-120b
 // and gpt-oss-20b answer structured JSON in ~0.4s, 1,000 requests/day and 8,000 tokens/min each.
 // Used through the model pool (ratelimit.ts) as `groq:<model id>`.
+import { keyFor } from '@/lib/keys';
 
-export const hasGroqKey = () => Boolean(process.env.GROQ_API_KEY);
+export const hasGroqKey = () => Boolean(keyFor('groq'));
 
 const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 
@@ -13,7 +14,7 @@ const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 export async function askGroq(model: string, system: string, content: string, jsonSchema: Record<string, unknown>, signal: AbortSignal): Promise<string> {
   const res = await fetch(ENDPOINT, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, 'content-type': 'application/json' },
+    headers: { Authorization: `Bearer ${keyFor('groq')}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       model,
       messages: [

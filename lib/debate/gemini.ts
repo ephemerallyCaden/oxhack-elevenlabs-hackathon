@@ -7,11 +7,22 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { z } from 'zod';
 import { askGroq } from './groq';
-import { classifyGeminiError, geminiPool, type Priority } from './ratelimit';
+import { keyFor } from '@/lib/keys';
+import { classifyGeminiError, poolForRequest, type Priority } from './ratelimit';
 
-export const hasGeminiKey = () => Boolean(process.env.GEMINI_API_KEY);
+export const hasGeminiKey = () => Boolean(keyFor('gemini'));
 
-let client: GoogleGenAI | null = null;
+const clients = new Map<string, GoogleGenAI>(); // per key (BYOK: lib/keys.ts)
+function geminiClient(): GoogleGenAI {
+  const key = keyFor('gemini') ?? '';
+  let c = clients.get(key);
+  if (!c) {
+    c = new GoogleGenAI({ apiKey: key });
+    clients.set(key, c);
+    if (clients.size > 32) clients.delete(clients.keys().next().value!);
+  }
+  return c;
+}
 
 const CALL_BUDGET_MS = 4000; // left for the call itself
 const RETRY_HOLD_MS = 2000; // a model that answered malformed JSON sits out the retry
@@ -61,6 +72,7 @@ export async function askGemini<S extends z.ZodType>(
     return out;
   };
 
+  const geminiPool = poolForRequest();
   let malformed = 0;
   let note = ''; // after a bad answer: what was wrong, appended to the prompt for the retry
   for (let attempt = 0; attempt < geminiPool.models.length + MAX_MALFORMED; attempt++) {
@@ -69,8 +81,7 @@ export async function askGemini<S extends z.ZodType>(
     const prompt = content + note;
     try {
       if (model.startsWith('groq:')) return accept(await askGroq(model.slice(5), system, prompt, json, signal));
-      client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const res = await client.models.generateContent({
+      const res = await geminiClient().models.generateContent({
         model,
         contents: prompt,
         config: {

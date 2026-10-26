@@ -17,11 +17,12 @@ export type TtsResult = TtsResponse & {
 // A user's own clone that fails (e.g. ElevenLabs flags it "requires verification", or it was deleted)
 // falls back to the presenter voice instead of failing the line.
 export async function synthesize(text: string, role: VoiceRole, voiceId?: string, settings?: VoiceSettings): Promise<TtsResult> {
-  if (!elevenlabs) return mockSpeech(text);
+  const el = elevenlabs(); // this request's key (lib/keys.ts)
+  if (!el) return mockSpeech(text);
 
   let res;
   try {
-    res = await elevenlabs.textToSpeech.convertWithTimestamps(voiceIdFor(voiceId), {
+    res = await el.textToSpeech.convertWithTimestamps(voiceIdFor(voiceId), {
       text: withAccent(text, accentFor(voiceId)),
       modelId: TTS_MODEL,
       voiceSettings: settings ?? VOICE_SETTINGS[role],

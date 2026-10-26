@@ -1,4 +1,5 @@
 import { elevenlabs, TTS_MODEL } from "@/lib/voice/client";
+import { byok } from '@/lib/keys';
 
 // POST multipart form with an `audio` file field (the onboarding recording, 45s+)
 // → { voiceId, fallback, error? }. Clones are named session_* so scripts/delete-clones.mjs can remove them.
@@ -17,15 +18,16 @@ function fallback(error: string, status = 200) {
   return Response.json({ voiceId: null, fallback: true, error }, { status });
 }
 
-export async function POST(req: Request) {
+async function handle(req: Request) {
+  const el = elevenlabs(); // this request's key (lib/keys.ts)
   const audio = (await req.formData().catch(() => null))?.get("audio");
   if (!(audio instanceof Blob)) return Response.json({ error: "missing `audio` file field" }, { status: 400 });
-  if (!elevenlabs) return fallback("ElevenLabs isn't configured (no API key).");
+  if (!el) return fallback("ElevenLabs isn't configured (no API key).");
   if (audio.size < 100_000) return fallback("The recording was too short to clone (it needs about 45 seconds).");
 
   let voiceId: string;
   try {
-    const voice = await elevenlabs.voices.ivc.create(
+    const voice = await el.voices.ivc.create(
       {
         name: `session_${new Date().toISOString().replace(/[:.]/g, "-")}`,
         files: [new File([audio], "onboarding.webm", { type: audio.type || "audio/webm" })],
@@ -40,13 +42,16 @@ export async function POST(req: Request) {
 
   // One-word probe: a clone that can't speak would make every trial line fall back later.
   try {
-    const stream = await elevenlabs.textToSpeech.convert(voiceId, { text: "Hi.", modelId: TTS_MODEL }, { timeoutInSeconds: 10, maxRetries: 0 });
+    const stream = await el.textToSpeech.convert(voiceId, { text: "Hi.", modelId: TTS_MODEL }, { timeoutInSeconds: 10, maxRetries: 0 });
     const reader = stream.getReader(); // consume immediately (SDK GC gotcha)
     while (!(await reader.read()).done);
   } catch (e) {
     // The clone is unusable, so it's deleted (it would only take a voice slot), but never silently.
-    await elevenlabs.voices.delete(voiceId).catch(() => {});
+    await el.voices.delete(voiceId).catch(() => {});
     return fallback(`ElevenLabs won't use this voice clone: ${reason(e)}`);
   }
   return Response.json({ voiceId, fallback: false });
 }
+
+// Every call it makes uses this request's keys (a visitor's own, else the house's: lib/keys.ts).
+export const POST = byok(handle);

@@ -7,6 +7,7 @@
 // State is per server process (globalThis, shared by every API route in it). On Vercel each function
 // instance has its own copy: they still pace themselves and fail over on a real 429, just without
 // seeing each other's calls.
+import { keyFor, poolId } from '@/lib/keys';
 
 export type Priority = 'interactive' | 'background';
 
@@ -157,14 +158,28 @@ export function modelOrder(env: { GEMINI_MODELS?: string; GEMINI_MODEL?: string;
 /** Calls per minute per model: Groq's 8,000 tokens/min fits ~3 topic calls; Gemini allows 5. */
 const paceFor = (model: string) => (model.startsWith('groq:') ? Number(process.env.GROQ_RPM) || 3 : Number(process.env.GEMINI_RPM) || 5);
 
-/** One pool per server process: on globalThis because Next bundles each API route separately. */
-const g = globalThis as unknown as { __geminiPool?: ModelPool };
-export const geminiPool = (g.__geminiPool ??= new ModelPool(
-  modelOrder({
-    GEMINI_MODELS: process.env.GEMINI_MODELS,
-    GEMINI_MODEL: process.env.GEMINI_MODEL,
-    groq: Boolean(process.env.GROQ_API_KEY),
-    gemini: Boolean(process.env.GEMINI_API_KEY),
-  }),
-  paceFor,
-));
+/**
+ * The pool for this request's keys (lib/keys.ts). The house keys share one pool per server process (on
+ * globalThis because Next bundles each API route separately); each visitor's own keys get their own,
+ * so one visitor's traffic never throttles another's quota.
+ */
+const g = globalThis as unknown as { __geminiPool?: ModelPool; __visitorPools?: Map<string, ModelPool> };
+const MAX_VISITOR_POOLS = 64;
+
+export function poolForRequest(): ModelPool {
+  const build = () =>
+    new ModelPool(
+      modelOrder({ GEMINI_MODELS: process.env.GEMINI_MODELS, GEMINI_MODEL: process.env.GEMINI_MODEL, groq: Boolean(keyFor('groq')), gemini: Boolean(keyFor('gemini')) }),
+      paceFor,
+    );
+  const id = poolId();
+  if (id === 'house') return (g.__geminiPool ??= build());
+  const pools = (g.__visitorPools ??= new Map());
+  let pool = pools.get(id);
+  if (!pool) {
+    pool = build();
+    pools.set(id, pool);
+    if (pools.size > MAX_VISITOR_POOLS) pools.delete(pools.keys().next().value!);
+  }
+  return pool;
+}

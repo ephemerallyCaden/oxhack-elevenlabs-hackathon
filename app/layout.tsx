@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Bangers, Geist, Geist_Mono, Press_Start_2P } from "next/font/google";
 import "./globals.css";
+import ByokInit from "@/components/ByokInit";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -37,7 +38,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${bangers.variable} ${pixel.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <ByokInit />
+        {children}
+      </body>
     </html>
   );
 }
