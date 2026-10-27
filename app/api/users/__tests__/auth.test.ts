@@ -18,13 +18,13 @@ vi.mock('@/lib/supabase', () => ({
 // ElevenLabs voices by id → name.
 const voices = new Map<string, string>();
 vi.mock('@/lib/voice/client', () => ({
-  elevenlabs: {
+  elevenlabs: () => ({
     voices: {
       get: async (id: string) => (voices.has(id) ? { name: voices.get(id) } : Promise.reject(new Error('404'))),
       update: async (id: string, { name }: { name: string }) => voices.set(id, name),
       delete: async (id: string) => voices.delete(id),
     },
-  },
+  }),
 }));
 
 const { POST: save } = await import('../route');

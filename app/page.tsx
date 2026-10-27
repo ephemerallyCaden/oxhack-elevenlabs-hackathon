@@ -14,6 +14,9 @@ import "@/components/menu/court.css";
 import ProfileChips from "@/components/menu/ProfileChips";
 import { parsePastTrials, pastTrialsRaw, verdictSide } from "@/components/menu/pastTrials";
 import { getProfile } from "@/lib/debate/orchestrator";
+import KeysPanel from "@/components/menu/KeysPanel";
+import { setMockMode, useOwnKeys } from "@/lib/byok/browser";
+import type { DemoListing } from "@/lib/debate/replay";
 import { authConfigured, authedPost, signInWithGoogle, signOut, useSession } from "@/lib/auth/browser";
 import {
   addToRoster,
@@ -98,6 +101,27 @@ export default function Home() {
   const [returning, setReturning] = useState<SavedUser | null>(null);
   const [aim, setAim] = useState(false); // pointer on the main action: both futures turn to you
   const [pastOpen, setPastOpen] = useState(false);
+  const [keysOpen, setKeysOpen] = useState(false);
+  const ownKeys = useOwnKeys();
+  // Which services this site has its own keys for (none on a bring-your-own-keys deployment).
+  const [house, setHouse] = useState<Record<string, boolean> | null>(null);
+  useEffect(() => {
+    fetch("/api/keys", { method: "POST" })
+      .then((r) => r.json())
+      .then((d: { house: Record<string, boolean> }) => setHouse(d.house))
+      .catch(() => setHouse(null));
+  }, []);
+  const ownAny = Object.values(ownKeys).some(Boolean);
+  // Stored demo trials (public/demos): watchable with no keys at all.
+  const [demos, setDemos] = useState<DemoListing[]>([]);
+  const [demosOpen, setDemosOpen] = useState(false);
+  useEffect(() => {
+    fetch("/demos/index.json")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d: DemoListing[]) => setDemos(d))
+      .catch(() => setDemos([]));
+  }, []);
+  const houseLlm = !!house && (house.groq || house.gemini || house.anthropic);
   const [, bump] = useState(0); // re-read localStorage lists after we change them
   const [error, setError] = useState("");
   const [stored, setStored] = useState<RosterEntry[]>([]); // everyone saved (the jury), from the server
@@ -173,6 +197,7 @@ export default function Home() {
   }, [ready, session]);
 
   function begin() {
+    setMockMode(false); // a real trial (a mock trial earlier in this tab must not carry over)
     clearSession();
     setError(""); // a message meant for the last person
     setStep("voice");
@@ -308,9 +333,32 @@ export default function Home() {
                 <h1 className="ct-title-sm">Your future is on trial.</h1>
                 <p className="ct-body">Read one short paragraph out loud, then put your decision before the court.</p>
                 {error && <p role="alert" className="ct-alert">{error}</p>}
+                {house && !houseLlm && !ownAny && (
+                  <p className="ct-small">This court runs on your own API keys: add yours, or watch a demo trial. Without keys the court plays its mock script.</p>
+                )}
+                {keysOpen && <KeysPanel onClose={() => setKeysOpen(false)} />}
+                {demosOpen && (
+                  <ul className="flex flex-col items-center gap-2" aria-label="Demo trials">
+                    {demos.map((d) => (
+                      <li key={d.id}>
+                        <a className="ct-link" href={`/trial?demo=${encodeURIComponent(d.id)}`} onClick={() => setMockMode(false)}>
+                          ▶ {d.title}
+                        </a>
+                      </li>
+                    ))}
+                    <li className="ct-small">Recorded from real trials{demos.some((d) => d.voiced) ? "" : " (shown as text, no voices)"}. No keys needed.</li>
+                  </ul>
+                )}
                 <div className="flex flex-wrap items-center justify-center gap-x-7 gap-y-3">
                   <button className="ct-primary" onClick={begin} {...aimProps}>Begin</button>
-                  <button className="ct-link" onClick={() => { clearSession(); router.push("/trial"); }}>Skip setup: go straight to court</button>
+                  <button className="ct-link" onClick={() => setKeysOpen(true)}>{ownAny ? "Your keys ✓" : "Use your own keys"}</button>
+                  <button className="ct-link" onClick={() => { setMockMode(false); clearSession(); router.push("/trial"); }}>Skip setup: go straight to court</button>
+                  {demos.length > 0 && (
+                    <button className="ct-link" aria-expanded={demosOpen} onClick={() => setDemosOpen((o) => !o)}>
+                      Watch a demo trial {demosOpen ? "▴" : "▾"}
+                    </button>
+                  )}
+                  <button className="ct-link" onClick={() => { clearSession(); setMockMode(true); router.push("/trial"); }}>Try a mock trial (no keys)</button>
                   {past.length > 0 && (
                     <button className="ct-link" aria-expanded={pastOpen} onClick={() => setPastOpen((o) => !o)}>
                       Watch a past trial {pastOpen ? "▴" : "▾"}

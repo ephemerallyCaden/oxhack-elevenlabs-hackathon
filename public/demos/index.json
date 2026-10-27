@@ -1,0 +1,20 @@
+[
+  {
+    "id": "quit-job-startup",
+    "title": "Should I quit my job to start a company?",
+    "question": "Should I quit my job to start a company?",
+    "voiced": false
+  },
+  {
+    "id": "masters-degree",
+    "title": "Should I go back to university for a master's?",
+    "question": "Should I go back to university for a master's?",
+    "voiced": false
+  },
+  {
+    "id": "move-abroad",
+    "title": "Should I move abroad for a year?",
+    "question": "Should I move abroad for a year?",
+    "voiced": false
+  }
+]

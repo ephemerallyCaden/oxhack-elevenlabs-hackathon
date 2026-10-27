@@ -194,7 +194,7 @@ that ignores cancellation. Browser/platform workers belong outside this route.
   keys produce explicit diagnostics. No live Gemini acceptance is claimed.
 
 The Vercel project must point to this Next app, rather than the older static
-`public/index.html` demo. Repository configuration alone does not prove the hosted
+demo (formerly `public/index.html`, now `public/mockups/early/menu-first-draft.html`, so it can't shadow the app). Repository configuration alone does not prove the hosted
 root, alias, environment or function runtime is correct. Hosted acceptance remains
 separate from local build and HTTP checks.
 

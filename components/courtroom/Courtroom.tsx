@@ -226,7 +226,7 @@ export default function Courtroom({
           </div>
         )}
         {status && (
-          <div className="absolute inset-x-0 top-[8%] z-40 text-center font-mono text-lg text-zinc-200 [text-shadow:0_2px_8px_#000]">
+          <div className="absolute inset-x-0 top-[21%] z-40 text-center font-mono text-lg text-zinc-200 [text-shadow:0_2px_8px_#000]">
             {status}
           </div>
         )}

@@ -1,8 +1,12 @@
 import type { JudgeInterruptRequest } from '@/types';
 import { judgeInterrupt } from '@/lib/debate/trial';
+import { byok } from '@/lib/keys';
 
 // request.signal: a client that gave up (timeout, a stopped trial) frees the model slot straight away.
-export async function POST(request: Request) {
+async function handle(request: Request) {
   const body = (await request.json()) as JudgeInterruptRequest;
   return Response.json(await judgeInterrupt(body, request.signal));
 }
+
+// Every call it makes uses this request's keys (a visitor's own, else the house's: lib/keys.ts).
+export const POST = byok(handle);

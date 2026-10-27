@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { mockSpeech, synthesize } from "@/lib/voice/tts";
+import { byok } from '@/lib/keys';
 
 const VoiceRoleSchema = z.enum(["prosecution", "defense", "judge"]);
 
@@ -21,7 +22,7 @@ const Body = z
   .refine((b) => b.speaker ?? b.role, { message: "speaker is required" });
 
 // POST TtsRequest (types.ts) → TtsResponse + alignment
-export async function POST(req: Request) {
+async function handle(req: Request) {
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: parsed.error.issues }, { status: 400 });
 
@@ -34,3 +35,6 @@ export async function POST(req: Request) {
     return Response.json(mockSpeech(text));
   }
 }
+
+// Every call it makes uses this request's keys (a visitor's own, else the house's: lib/keys.ts).
+export const POST = byok(handle);

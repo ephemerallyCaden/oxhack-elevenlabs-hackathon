@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/supabase', () => ({ LOCAL_DIR: '/tmp/unused', supabase: null }));
-vi.mock('@/lib/voice/client', () => ({ elevenlabs: null }));
+vi.mock('@/lib/voice/client', () => ({ elevenlabs: () => null }));
 const routes = { save: (await import('../route')).POST, get: (await import('../get/route')).POST, del: (await import('../delete/route')).POST };
 const req = () => new Request('http://test/api/users', { method: 'POST', headers: { Authorization: 'Bearer anything' }, body: '{}' });
 
