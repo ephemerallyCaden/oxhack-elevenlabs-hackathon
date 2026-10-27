@@ -84,6 +84,18 @@ export async function listFaces(limit = 15): Promise<{ id: string; name?: string
   });
 }
 
+/** Every saved user's voice clone id: /api/voice/clone never sweeps these to free a slot. */
+export async function savedVoiceIds(): Promise<Set<string>> {
+  if (supabase) {
+    const { data, error } = await supabase.from("users").select("voice_id").not("voice_id", "is", null);
+    if (error) throw new Error(`supabase select: ${error.message}`); // not "nobody saved": that would sweep their voices
+    return new Set((data ?? []).map((r: { voice_id: string }) => r.voice_id));
+  }
+  const files = await readdir(DIR).catch(() => [] as string[]);
+  const saved = await Promise.all(files.filter((f) => f.endsWith(".json")).map((f) => readFile(join(DIR, f), "utf8").then((t) => (JSON.parse(t) as SavedUser).voiceId).catch(() => null)));
+  return new Set(saved.filter((v): v is string => !!v));
+}
+
 /** Removes the user and returns what was stored (so the caller can delete the voice clone). */
 export async function deleteUser(id: string): Promise<SavedUser | null> {
   const user = await getUser(id);
