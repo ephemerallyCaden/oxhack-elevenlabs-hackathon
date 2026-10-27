@@ -437,10 +437,10 @@ describe('attachPunch', () => {
   it('gives the punch an intense opening tag from the speaker\'s verified palette', () => {
     const a = line('defense', 'The median takes home');
     attachPunch(a, { text: 'twelve thousand pounds.', tts: 'twelve thousand... pounds.' }, new Set());
-    expect(a.punch?.tts).toBe('[concerned] twelve thousand... pounds.');
+    expect(a.punch?.tts).toBe('[concerned] twelve thousand pounds.'); // said plainly: "..." made it whisper
     const b = line('prosecution', 'More than');
     attachPunch(b, { text: 'every quant.', tts: '[shouting] every... quant.' }, new Set());
-    expect(b.punch?.tts).toBe('[shouting] every... quant.');
+    expect(b.punch?.tts).toBe('[shouting] every quant.');
     const c = line('prosecution', 'More than');
     attachPunch(c, { text: 'every quant.', tts: '[gasps] every quant.' }, new Set()); // not a prosecution tag
     expect(c.punch?.tts).toBe('[passionate] every quant.');
@@ -450,9 +450,10 @@ describe('attachPunch', () => {
 describe('forcePunch (a topic that must land one)', () => {
   const mk = (speaker: Line['speaker'], text: string, tts?: string): Line => ({ id: 'l', speaker, kind: 'argument', text, tts, cites: [], topic_id: 't' });
 
-  it('makes the last sentence’s final words the punch, and trims them from the clip', () => {
+  it('loose: with no turn in the sentence, its final words become the punch, trimmed from the clip', () => {
     const l = mk('defense', 'Debt follows you. By thirty you will still be paying for this degree.', '[sad] Debt follows you. By thirty you will still be paying for this degree.');
-    expect(forcePunch(l)).toBe(true);
+    expect(forcePunch(l)).toBe(false); // no comma or "than/while/but…" to split at
+    expect(forcePunch(l, true)).toBe(true);
     expect(l.text).toBe('Debt follows you. By thirty you will still be paying for this degree.');
     expect(l.punch!.text).toBe('for this degree.');
     expect(setupText(l)).toBe('Debt follows you. By thirty you will still be paying');
@@ -464,5 +465,54 @@ describe('forcePunch (a topic that must land one)', () => {
     expect(forcePunch(mk('defense', 'Too short.'))).toBe(false);
     expect(forcePunch(mk('defense', 'And the median player earns —'))).toBe(false);
     expect(forcePunch(mk('defense', 'You will still be renting a box room at 35.', '[sad] You will still be renting a box room at thirty-five.'))).toBe(false);
+  });
+});
+
+describe('punch quality (live samples, 2026-10-26)', () => {
+  const mk = (speaker: Line['speaker'], text: string, tts?: string): Line => ({ id: 'l', speaker, kind: 'argument', text, tts, cites: [], topic_id: 't' });
+
+  it('a punch written as a new sentence gets a full stop after the setup, not a run-on', () => {
+    const l = mk('prosecution', 'My friend who quit at eighteen now makes twenty-eight thousand', '[confident] My friend who quit at eighteen now makes twenty-eight thousand');
+    expect(attachPunch(l, { text: 'The degree adds twenty-two thousand.', tts: '' }, new Set())).toBe(true);
+    expect(l.text).toBe('My friend who quit at eighteen now makes twenty-eight thousand. The degree adds twenty-two thousand.');
+    expect(setupText(l)).toBe('My friend who quit at eighteen now makes twenty-eight thousand.');
+    // a capitalised name continuing the sentence is left alone
+    const n = mk('prosecution', 'You will earn more than', '[confident] You will earn more than');
+    attachPunch(n, { text: 'Goldman Sachs pays its interns.', tts: '' }, new Set());
+    expect(n.text).toBe('You will earn more than Goldman Sachs pays its interns.');
+  });
+
+  it('the punch is said plainly: no "..." between its words', () => {
+    const l = mk('defense', 'Four years on, I spent Tuesday staring at a tax audit letter', '[sighs] Four years on, I spent Tuesday staring at a tax audit letter');
+    attachPunch(l, { text: 'with zero savings left.', tts: '[concerned] with... zero... savings... left.' }, new Set());
+    expect(l.punch!.tts).toBe('[concerned] with zero savings left.');
+  });
+
+  it('a forced punch splits at the sentence’s turn (comma, "than", "while"…), not just its last 3 words', () => {
+    const a = mk('prosecution', 'Plus, the dog’s companionship reduces loneliness, something you can’t buy.');
+    expect(forcePunch(a)).toBe(true);
+    expect(a.punch!.text).toBe('something you can’t buy.');
+    const b = mk('defense', 'My friends bought their first flats while I was still paying off textbooks.');
+    expect(forcePunch(b)).toBe(true);
+    expect(b.punch!.text).toBe('while I was still paying off textbooks.');
+  });
+});
+
+describe('punch quality, run 2', () => {
+  const mk = (speaker: Line['speaker'], text: string, tts?: string): Line => ({ id: 'l', speaker, kind: 'argument', text, tts, cites: [], topic_id: 't' });
+  it('refuses a punch that ends dangling ("and it cost me"): it isn’t a payoff', () => {
+    const l = mk('prosecution', 'Everyone said the city would be a launchpad, and it cost me', '[confident] Everyone said the city would be a launchpad, and it cost me');
+    expect(attachPunch(l, { text: 'and it cost me', tts: '' }, new Set())).toBe(false);
+    expect(l.punch).toBeUndefined();
+  });
+});
+
+describe('punch quality, run 3', () => {
+  it('a punch without a full stop still ends the line with one', () => {
+    const l: Line = { id: 'l', speaker: 'defense', kind: 'argument', text: 'The surgery wiped out my savings, leaving me', tts: '[scoffs] The surgery wiped out my savings, leaving me', cites: [], topic_id: 't' };
+    expect(attachPunch(l, { text: 'four thousand dollars in debt', tts: '' }, new Set())).toBe(true);
+    expect(l.text).toBe('The surgery wiped out my savings, leaving me four thousand dollars in debt.');
+    expect(l.punch!.text).toBe('four thousand dollars in debt.');
+    expect(setupText(l)).toBe('The surgery wiped out my savings, leaving me');
   });
 });

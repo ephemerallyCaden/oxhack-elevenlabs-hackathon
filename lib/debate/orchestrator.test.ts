@@ -466,7 +466,7 @@ describe('surprise punches', () => {
     }
   });
 
-  it('voices setup and punch as two clips, the punch with the hotter (less stable) settings', async () => {
+  it('voices setup and punch as two clips, the punch with the speaker’s own settings (not strained)', async () => {
     const calls: { text: string; speaker: string; voiceSettings?: { stability: number } }[] = [];
     vi.stubGlobal('fetch', (url: string, init: RequestInit) => {
       if (url !== '/api/voice/tts') return Promise.reject(new Error('offline'));
@@ -482,7 +482,7 @@ describe('surprise punches', () => {
       expect(line.punch!.audioUrl).toBeTruthy();
       expect(line.punch!.audioUrl).not.toBe(line.audioUrl);
       const punchCall = calls.find((c) => c.text === line.punch!.tts)!;
-      expect(punchCall.voiceSettings!.stability).toBe(line.speaker === 'prosecution' ? 0.3 : 0.4);
+      expect(punchCall.voiceSettings!.stability).toBe(line.speaker === 'prosecution' ? 0.4 : 0.6);
       expect(calls.find((c) => c.text === line.punch!.tts && !c.voiceSettings)).toBeUndefined();
     } finally {
       vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')));

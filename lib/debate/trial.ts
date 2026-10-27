@@ -20,6 +20,7 @@ import type {
   VerdictResponse,
 } from '@/types';
 import { SIDE_SPEAKER } from '@/types';
+import { TAG_PALETTE } from '@/lib/voice/configs';
 import { claude, hasClaudeKey, MODEL } from './claude';
 import { askGemini, hasGeminiKey } from './gemini';
 import { hasGroqKey } from './groq';
@@ -29,7 +30,7 @@ import { TIMEOUTS } from './timeouts';
 import { mergeProfile, mockJudgeInterrupt, mockProfile, mockSetup, mockTopic, mockVerdict, onboardingText } from './mock';
 import * as P from './prompts';
 import { computeSpectrum, MAX_TOPICS, normalise, orderAgenda } from './spectrum';
-import { attachPunch, forcePunch, punchedSides } from './punch';
+import { attachPunch, forcePunch, NUMBERISH, punchedSides } from './punch';
 import { usingOwnKey } from '@/lib/keys';
 
 /**
@@ -103,12 +104,30 @@ const Spoken = z.object({ text: z.string(), tts: z.string() });
 const SPEAKER_LABEL = /^((?:\[[^\]\n]{1,40}\]\s*)*)(?:the\s+)?(?:judge|prosecution|defen[cs]e|witness|future\s+you)(?:\s*\([^)]*\))?\s*:\s*/i;
 // Side labels only in capitals ("YES:"), so a sentence opening "No: …" keeps its word.
 const SIDE_LABEL = /^((?:\[[^\]\n]{1,40}\]\s*)*)(?:YES|NO)\s*:\s*/;
-export const unlabel = (s: string) => s.replace(SPEAKER_LABEL, '$1').replace(SIDE_LABEL, '$1');
+// A bare speaker name right before a tag ("prosecution [confident] I am…"): no colon, but never meant to be read.
+const BARE_LABEL = /^((?:\[[^\]\n]{1,40}\]\s*)*)(?:the\s+)?(?:judge|prosecution|defen[cs]e)\s+(?=\[)/i;
+export const unlabel = (s: string) => s.replace(SPEAKER_LABEL, '$1').replace(SIDE_LABEL, '$1').replace(BARE_LABEL, '$1');
+/** Only verified audio tags (any role's palette): an unknown one ("[weary]") may be read out instead of acted. */
+const VERIFIED = new Set(Object.values(TAG_PALETTE).flat());
+const verified = (tts: string) =>
+  tts.replace(/\[([^\]\n]{1,40})\]\s*/g, (tag, name: string) => (VERIFIED.has(name.trim().toLowerCase()) ? tag : '')).trim();
+/** The words a line says, numbers and number-ish units left out (the text writes "£12,000", the voice "twelve
+ *  thousand pounds") and hyphens/spaces ignored ("degree‑bound" = "degree bound"). */
+const sig = (s: string) =>
+  s.replace(/\[[^\]\n]{1,40}\]/g, ' ').toLowerCase().split(/[\s\-‑–—]+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter((w) => w && !/\d/.test(w) && !NUMBERISH.test(w)).join('');
+/** The voice must say what the screen shows: a tts with other words (the model sometimes rewrites it) is
+ *  replaced by the text, keeping its opening delivery tags. */
+export function voiced(text: string, tts: string): string {
+  if (!tts.trim() || sig(text) === sig(tts)) return tts;
+  const tags = tts.match(/^\s*((?:\[[^\]\n]{1,40}\]\s*)+)/)?.[1].trim();
+  return tags ? `${tags} ${text}` : text;
+}
 /** Display text never shows voice cues: models sometimes put audio tags like [confident] in `text` too. */
 export const plain = (s: string) => unlabel(s).replace(/\[[^\]\n]{1,40}\]\s*/g, '').replace(/\s{2,}/g, ' ').trim();
 const judgeLine = (kind: Line['kind'], s: { text: string; tts: string }, topic_id?: string): Line => {
   if (!plain(s.text)) throw new Error(`empty ${kind} line`); // → mock fallback (a bare label or tags is empty too)
-  return { id: uid('line'), speaker: 'judge', kind, text: plain(s.text), tts: unlabel(s.tts), cites: [], topic_id };
+  return { id: uid('line'), speaker: 'judge', kind, text: plain(s.text), tts: verified(voiced(plain(s.text), unlabel(s.tts))), cites: [], topic_id };
 };
 
 // ─── setup (cut-scene): agenda + Judge lines + personas in ONE call ─────────
@@ -265,7 +284,8 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
     (out): TopicResponse => {
       // The code owns the structure: one line per planned turn, speakers from the plan.
       // (Checked after cleaning: a line that was only a speaker label or audio tags is empty too.)
-      if (out.lines.length < req.turns.length || req.turns.some((_, i) => !plain(out.lines[i].text).replace(/—/g, '').trim()))
+      // (A line of fewer than 3 words — the model sometimes sends "2" or ":" — isn't a line either.)
+      if (out.lines.length < req.turns.length || req.turns.some((_, i) => (plain(out.lines[i].text).match(/\p{L}+/gu) ?? []).length < 3))
         throw new Error(`topic: ${out.lines.length} lines for ${req.turns.length} turns`);
       const lines: Line[] = [];
       const byIndex: Line[] = [];
@@ -279,7 +299,7 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
           speaker: SIDE_SPEAKER[turn.side],
           kind: turn.answer ? 'answer' : 'argument',
           text: plain(o.text),
-          tts: unlabel(o.tts),
+          tts: verified(voiced(plain(o.text), unlabel(o.tts))),
           cites: o.cites.filter((c) => valid.has(c)),
           ...base,
         };
@@ -294,13 +314,13 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
           if (line.tts?.trim()) line.tts = cutOff(line.tts);
           const other = turn.side === 'yes' ? 'no' : 'yes';
           lines.push(
-            { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in', text: plain(o.cut_in.text), tts: unlabel(o.cut_in.tts), cites: [], ...base },
-            { id: uid('line'), speaker: SIDE_SPEAKER[turn.side], kind: 'resume', text: plain(o.resume.text), tts: unlabel(o.resume.tts), cites: [], ...base },
+            { id: uid('line'), speaker: SIDE_SPEAKER[other], kind: 'cut_in', text: plain(o.cut_in.text), tts: verified(voiced(plain(o.cut_in.text), unlabel(o.cut_in.tts))), cites: [], ...base },
+            { id: uid('line'), speaker: SIDE_SPEAKER[turn.side], kind: 'resume', text: plain(o.resume.text), tts: verified(voiced(plain(o.resume.text), unlabel(o.resume.tts))), cites: [], ...base },
           );
         } else if (line.text.trim().endsWith('—')) {
           // No cut-in for this line: don't leave it hanging mid-sentence. A punch the model wrote anyway is
           // the end of that sentence: keep it as ordinary words (no punch shot: the line was meant to be cut).
-          const draft = o.punch && plain(o.punch.text) ? { text: plain(o.punch.text), tts: unlabel(o.punch.tts) } : undefined;
+          const draft = o.punch && plain(o.punch.text) ? { text: plain(o.punch.text), tts: voiced(plain(o.punch.text), unlabel(o.punch.tts)) } : undefined;
           line.text = line.text.trim().replace(/\s*—$/, draft ? '' : '.');
           if (line.tts) line.tts = line.tts.trim().replace(/\s*—$/, draft ? '' : '.');
           if (draft) attachPunch(line, draft, new Set(['yes', 'no'])); // refused → appended
@@ -308,7 +328,7 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
           if (!/[.!?…]["”’')»]*$/.test(line.text.trim())) line.text = `${line.text.trim()}.`;
           if (line.tts && !/[.!?…]["”’')»]*$/.test(line.tts.trim())) line.tts = `${line.tts.trim()}.`;
         } else {
-          attachPunch(line, o.punch && { text: plain(o.punch.text), tts: unlabel(o.punch.tts) }, punched);
+          attachPunch(line, o.punch && { text: plain(o.punch.text), tts: voiced(plain(o.punch.text), unlabel(o.punch.tts)) }, punched);
         }
       });
       // The witness's point being answered (line_index -1) is recorded once; earlier points already were.
@@ -327,7 +347,8 @@ export async function writeTopic(req: TopicRequest, signal?: AbortSignal): Promi
       // the strongest line's final words become the punch.
       if (req.punchRequired && !punched.size && !lines.some((l) => l.punch)) {
         const strength = (l: Line) => Math.max(0, ...ledger.filter((e) => e.line_id === l.id).map((e) => e.strength));
-        [...byIndex].sort((a, b) => strength(b) - strength(a)).some((l) => forcePunch(l));
+        const ranked = [...byIndex].sort((a, b) => strength(b) - strength(a));
+        if (!ranked.some((l) => forcePunch(l))) ranked.some((l) => forcePunch(l, true));
       }
       return {
         lines,

@@ -5,6 +5,7 @@ import type { Line, Side } from '@/types';
 import { TAG_PALETTE } from '@/lib/voice/configs';
 
 const MAX_WORDS = 10;
+const DANGLING = /^(?:and|or|but|the|a|an|to|of|for|with|my|your|our|their|me|it|is|was|are|were|than|that|this|at|in|on|by|from|so|if|because)$/;
 
 /** Which sides already landed a punch on this topic (earlier calls: interrupt answers etc.). */
 export function punchedSides(history: Line[], topicId: string): Set<Side> {
@@ -27,7 +28,7 @@ const OPEN_QUOTE = /^[“"‘'(«]+/;
 // How a number is spoken: number words (also "twenty-five", "third", "nineties"), and the units that follow one.
 const UNIT = 'one|two|three|four|five|six|seven|eight|nine';
 const TENS = 'twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety';
-const NUMBERISH = new RegExp(
+export const NUMBERISH = new RegExp(
   `^(?:zero|${UNIT}|ten|eleven|twelve|\\p{L}+teen|(?:${TENS})(?:${UNIT})?|hundred|thousand|million|billion|trillion` +
     `|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|\\p{L}+teenth|\\p{L}+tieth` +
     `|(?:${TENS})(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth)|hundredth|thousandth|millionth` +
@@ -69,6 +70,11 @@ const capitalise = (tail: string) => tail.replace(/^([^\p{L}\p{N}]*)(\p{Ll})(?!\
 /** The tail as it follows `setup`: after a sentence end (or alone) it starts a new sentence. */
 const tailAfter = (setup: string, tail: string) => (!untagged(setup) || endsSentence(setup) ? capitalise(tail) : tail);
 const joinSentence = (setup: string, tail: string) => (setup.trim() ? `${setup.trim()} ${tailAfter(setup, tail)}` : capitalise(tail));
+// A punch the model wrote as its own sentence ("…twenty-eight thousand" + "The degree adds…") needs a full stop
+// before it, not a run-on. Only for common sentence openers: a capitalised name can continue the setup.
+const OPENER = /^["“‘(]*(?:The|A|An|It|It's|It’s|This|That|That's|That’s|These|Those|We|You|He|She|They|My|Your|Our|Their|And|But|So|Now|Then|Every|Everyone|Nobody|No|Not|Nothing|Just|Only|There|I'm|I’m|I've|I’ve|Still|Yet)\b/;
+const stopBefore = (setup: string, tail: string) =>
+  OPENER.test(tail) && !/[.!?…:;,—–-]["”’')»]*$/.test(untagged(setup)) ? `${setup.trimEnd()}.` : setup;
 /** `text` without its last `n` words, plus any opening quote the first dropped word carried. */
 function dropWords(text: string, n: number): { rest: string; lead: string; first: string } {
   const tokens = tokensOf(text);
@@ -100,7 +106,8 @@ export function setupText(line: Line): string {
 /** Intense, deliberate delivery: make sure the punch opens with one of the speaker's verified tags. */
 const PUNCH_TAG = { prosecution: 'passionate', defense: 'concerned' } as const;
 function punchTts(speaker: 'prosecution' | 'defense', tts: string, text: string): string {
-  const spoken = tts.trim() || text;
+  // Said plainly: "..." between the words made the voice whisper and drag ("with... zero... savings...").
+  const spoken = (tts.trim() || text).replace(/(\S)\s*(?:\.{3}|…)\s*(?=\S)/g, '$1 ').replace(/\s{2,}/g, ' ');
   return /^\s*\[[^\]]+\]/.test(spoken) && TAG_PALETTE[speaker].some((t) => spoken.includes(`[${t}]`))
     ? spoken
     : `[${PUNCH_TAG[speaker]}] ${spoken.replace(/^\s*\[[^\]]+\]\s*/, '')}`;
@@ -199,7 +206,7 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
     return prev === setup[setup.length - 1];
   };
   const refuse = () => {
-    if (!already) line.text = joinSentence(cut.rest, shown);
+    if (!already) line.text = joinSentence(stopBefore(cut.rest, shown), shown);
     // The voice line must say the whole sentence too (it may hold only the setup, as the prompt asks).
     if (line.tts?.trim() && !endsWithWords(line.tts, spoken) && !endsWithWords(line.tts, punch))
       line.tts = joinSentence(clipOverlap(line.tts, spoken) ? before(line.tts, spoken).rest : line.tts, spoken);
@@ -209,12 +216,17 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
   const side: Side = line.speaker === 'prosecution' ? 'yes' : 'no';
   const count = punch.split(/\s+/).length;
   if (used.size > 0 || count > MAX_WORDS) return refuse();
+  // A punch left hanging ("and it cost me", no full stop, ending on a function word) isn't a payoff: keep
+  // it as ordinary words. ("All of it." ends the sentence: fine.)
+  if (!/[.!?…]["”’')»]*$/.test(untagged(punch)) && DANGLING.test(norm(tokensOf(untagged(punch)).at(-1) ?? ''))) return refuse();
   // The punch must be exactly the end of `text` (setupText() cuts it off by length), after a real setup.
   // The whole line is (the start of) the punch: no setup to cut to, so it's a plain line (with the rest of the punch).
   if (!words(cut.rest).length) return refuse();
   used.add(side);
-  const tail = tailAfter(cut.rest, shown);
-  line.text = `${cut.rest} ${tail}`;
+  const rest = stopBefore(cut.rest, shown);
+  const said = tailAfter(rest, shown);
+  const tail = /[.!?…]["”’')»]*$/.test(said) ? said : `${said}.`; // the punch ends the line: end the sentence
+  line.text = `${rest} ${tail}`;
   line.punch = { text: tail, tts: punchTts(line.speaker, draft!.tts, punch) };
   // The setup clip is voiced from `tts`: if it also says (part of) the punch, in either form, cut it.
   if (line.tts?.trim()) {
@@ -236,18 +248,30 @@ export function attachPunch(line: Line, draft: { text: string; tts: string } | u
 }
 
 /**
- * Make the end of `line`'s last sentence its punch (3-6 words), for a topic that must land one and
- * whose model draft had none. Skips lines it can't split cleanly: the Judge, cut-off lines, short
+ * Make the end of `line`'s last sentence its punch, for a topic that must land one and whose model
+ * draft had none. Skips lines it can't split cleanly: the Judge, cut-off lines, short
  * sentences, numbers (the clip spells them differently) and clips that don't end with the same words.
  */
-export function forcePunch(line: Line): boolean {
+export function forcePunch(line: Line, loose = false): boolean {
   const text = line.text.trim();
   if (line.punch || (line.speaker !== 'prosecution' && line.speaker !== 'defense') || text.endsWith('—')) return false;
   const sentence = text.replace(/^[\s\S]*[.!?…]["”’')»]*\s+(?=\S)/, '');
   const toks = tokensOf(sentence);
-  const n = Math.min(6, Math.max(3, Math.round(toks.length / 3)));
-  if (toks.length - n < 3) return false;
-  const tail = toks.slice(-n).join(' ');
+  // Split where the sentence turns: after a comma/colon/dash, or before "than", "while", "but"… (the last
+  // such place that leaves a 2-7 word punch after a 3+ word setup). `loose`: else just its last few words.
+  const PIVOT = /^(?:than|while|until|because|unless|instead|except|but|yet|so|before|after|without)$/i;
+  let j = -1;
+  for (let i = 3; i < toks.length - 1; i++) {
+    const n = toks.length - i;
+    if (n < 2 || n > 7) continue;
+    if (/[,;:—–]["”’')»]*$/.test(toks[i - 1]) || PIVOT.test(norm(toks[i]))) j = i;
+  }
+  if (j < 0 && loose) {
+    const n = Math.min(6, Math.max(3, Math.round(toks.length / 3)));
+    if (toks.length - n >= 3) j = toks.length - n;
+  }
+  if (j < 0) return false;
+  const tail = toks.slice(j).join(' ');
   if (/\d/.test(tail) || /^[,;:—]/.test(tail)) return false;
   if (line.tts?.trim() && !endsWithWords(line.tts, tail)) return false;
   return attachPunch(line, { text: tail, tts: '' }, new Set());
